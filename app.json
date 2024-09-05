@@ -1,0 +1,101 @@
+{
+    "name": "File-To-Link",
+    "description": "A Hydrogram-based Telegram bot for downloading and streaming Telegram files via the web.",
+    "keywords": [
+      "telegram",
+      "stream",
+      "web",
+      "hydrogram",
+      "aiohttp",
+      "python",
+      "plugin",
+      "modular",
+      "media",
+      "bot"
+    ],
+    "repository": "https://github.com/fyaz05/FileToLink",
+    "success_url": "/",
+    "logo": "https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/Thunder.jpg",
+    "env": {
+      "ENV": {
+        "description": "Set this to 'True' to prevent the bot from crashing.",
+        "value": "True"
+      },
+      "APP_NAME": {
+        "description": "Input the app name you entered above."
+      },
+      "API_ID": {
+        "description": "Obtain this value from https://my.telegram.org."
+      },
+      "API_HASH": {
+        "description": "Obtain this value from https://my.telegram.org."
+      },
+      "BOT_TOKEN": {
+        "description": "Obtain this token from @BotFather."
+      },
+      "BIN_CHANNEL": {
+        "description": "The BIN Channel ID. Refer to the README for more information."
+      },
+      "DATABASE_URL": {
+        "description": "MongoDB URI for storing user IDs upon first interaction. Useful for broadcasting and upcoming database features. Search YouTube for tutorials if needed."
+      },
+      "OWNER_ID": {
+        "description": "Your Telegram User ID, e.g., 1234509."
+      },
+      "BANNED_CHANNELS": {
+        "description": "IDs of channels where the bot is inactive. Separate multiple IDs with spaces.",
+        "required": false
+      },
+      "OWNER_USERNAME": {
+        "description": "Your Telegram username, excluding the @ symbol, e.g., Thunder."
+      },
+      "SLEEP_THRESHOLD": {
+        "description": "Flood wait sleep timer. Refer to the README for more information.",
+        "required": false
+      },
+      "WORKERS": {
+        "description": "The number of workers to assign. Refer to the README for more information.",
+        "required": false
+      },
+      "PORT": {
+        "description": "Port for your web app. Refer to the README for more information.",
+        "value": "8080",
+        "required": false
+      },
+      "NO_PORT": {
+        "description": "Set to 'True' if you prefer not to display the port. Refer to the README for more information.",
+        "value": "False",
+        "required": false
+      },
+      "HAS_SSL": {
+        "description": "Default value is 'True'.",
+        "value": "True",
+        "required": false
+      },
+      "BIND_ADRESS": {
+        "description": "Refer to the README. Leave empty for Heroku.",
+        "required": false
+      },
+      "FQDN": {
+        "description": "Refer to the README. Leave empty for Heroku.",
+        "required": false
+      },
+      "name": {
+        "description": "Session name for the bot, e.g., Thunder.",
+        "value": "File-To-Link",
+        "required": false
+      }
+    },
+    "buildpacks": [
+      {
+        "url": "heroku/python"
+      }
+    ],
+    "formation": {
+      "web": {
+        "quantity": 1,
+        "size": "Standard-2X"
+      }
+    }
+  }
+  

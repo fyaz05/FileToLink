@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/live.png">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>%s</title>
+    <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/Thunder.jpg" type="image/x-icon">
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/reqStyles.css">
+<body>
+    <div class="container">
+        <header>
+            <h1 id="file-name">%s</h1>
+        </header>
+        <div class="player-container">
+            <div class="video-wrapper">
+                <video class="plyr" controls poster="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/videobg.jpg" alt="Video Player Poster Image">
+                    <source src="%s" type="video/mp4" alt="Video Source">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+        </div>
+        <p class="unsupported-message">⚠️ If the video isn't playing, it might not be supported in the browser. Try in a video player.</p>
+        <div class="controls">
+            <div class="dropdown">
+                <button class="btn">
+                    <i class="fas fa-play-circle"></i> Stream
+                </button>
+                <div class="dropdown-content">
+                    <a href="#" onclick="playOnline('vlc')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile" class="player-logo"> VLC Mobile
+                    </a>
+                    <a href="#" onclick="playOnline('mxp')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player Pro" class="player-logo"> MX Player Pro
+                    </a>
+                    <a href="#" onclick="playOnline('mx')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player" class="player-logo"> MX Player
+                    </a>
+                    <a href="#" onclick="playOnline('np')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer" class="player-logo"> nPlayer
+                    </a>
+                    <a href="#" onclick="playOnline('sp')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player" class="player-logo"> S Player
+                    </a>
+                    <a href="#" onclick="playOnline('km')">
+                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" class="player-logo"> KM Player
+                    </a>
+                </div>
+            </div>
+            <button class="btn download" onclick="download()">
+                <i class="fas fa-cloud-download-alt"></i> Download
+            </button>
+            <button class="btn copy-link" onclick="copyLink()">
+                <i class="fas fa-link"></i> Copy Link
+            </button>
+        </div>
+    </div>
+    <footer>
+        <!-- Replace the below link with your link -->
+        <a href="https://telegram.me/BalaPriyan" target="_blank">
+            <i class="fab fa-telegram-plane"></i> Join our Telegram channel
+        </a>
+    </footer>
+
+    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const videoElement = document.querySelector('.plyr');
+            new Plyr(videoElement);
+        });
+
+        const currentUrl = window.location.href;
+        const finalUrl = currentUrl.replace("/watch/", "/dl/");
+
+        function playOnline(player) {
+            const playerUrls = {
+                vlc: `vlc://${finalUrl}`,
+                mxp: `intent:${finalUrl}#Intent;package=com.mxtech.videoplayer.pro;end`,
+                mx: `intent:${finalUrl}#Intent;package=com.mxtech.videoplayer.ad;end`,
+                np: `nplayer-${finalUrl}`,
+                sp: `intent:${finalUrl}#Intent;action=com.young.simple.player.playback_online;package=com.young.simple.player;end`,
+                km: `intent:${finalUrl}#Intent;package=com.kmplayer;end`
+            };
+            window.location.href = playerUrls[player] || finalUrl;
+        }
+
+        function download() {
+            window.location.href = finalUrl;
+        }
+
+        function copyLink() {
+            navigator.clipboard.writeText(finalUrl)
+                .then(() => {
+                    const feedback = document.createElement('div');
+                    feedback.className = 'feedback';
+                    feedback.textContent = "📋 Link copied to clipboard!";
+                    feedback.setAttribute("role", "alert");
+                    document.body.appendChild(feedback);
+                    setTimeout(() => feedback.remove(), 3000);
+                })
+                .catch(err => console.error('Could not copy text: ', err));
+        }
+    </script>
+</body>
+</html>

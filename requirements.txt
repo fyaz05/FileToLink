@@ -1,0 +1,11 @@
+aiofiles
+aiohttp
+apscheduler
+dnspython
+git+https://github.com/hydrogram/hydrogram.git@dev
+motor
+psutil
+pyromod
+python-dotenv
+requests
+tgcrypto
