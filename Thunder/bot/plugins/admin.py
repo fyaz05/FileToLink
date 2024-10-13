@@ -7,9 +7,9 @@ import datetime
 import shutil
 import psutil
 import string
-from hydrogram import Client, filters
-from hydrogram.enums import ParseMode
-from hydrogram.types import Message
+from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
+from pyrogram.types import Message
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.vars import Var
 from Thunder import StartTime, __version__

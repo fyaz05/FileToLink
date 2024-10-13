@@ -1,7 +1,7 @@
 import logging
 import time
-from hydrogram import Client, filters
-from hydrogram.types import Message
+from pyrogram import Client, filters
+from pyrogram.types import Message
 from Thunder.bot import StreamBot
 from Thunder.vars import Var
 from Thunder.utils import human_readable, database

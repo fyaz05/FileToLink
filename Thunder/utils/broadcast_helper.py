@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import traceback
-from hydrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
+from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
 
 # Configure logging
 logging.basicConfig(

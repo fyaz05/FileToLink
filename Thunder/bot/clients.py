@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from ..vars import Var
-from hydrogram import Client
+from pyrogram import Client
 from Thunder.utils.config_parser import TokenParser
 from . import multi_clients, work_loads, StreamBot
 

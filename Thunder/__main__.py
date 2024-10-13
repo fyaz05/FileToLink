@@ -5,7 +5,7 @@ import asyncio
 import logging
 import importlib
 from pathlib import Path
-from hydrogram import idle
+from pyrogram import idle
 from .bot import StreamBot
 from .vars import Var
 from aiohttp import web
@@ -21,7 +21,7 @@ logging.basicConfig(
 
 # Set specific loggers to ERROR
 logging.getLogger("aiohttp").setLevel(logging.ERROR)
-logging.getLogger("hydrogram").setLevel(logging.ERROR)
+logging.getLogger("pyrogram").setLevel(logging.ERROR)
 
 # Plugin path
 ppath = "Thunder/bot/plugins/*.py"

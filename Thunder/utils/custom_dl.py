@@ -2,10 +2,10 @@ import asyncio
 import logging
 from typing import Dict, Union
 
-from hydrogram import Client, raw
-from hydrogram.session import Session, Auth
-from hydrogram.errors import AuthBytesInvalid, RPCError
-from hydrogram.file_id import FileId, FileType, ThumbnailSource
+from pyrogram import Client, raw
+from pyrogram.session import Session, Auth
+from pyrogram.errors import AuthBytesInvalid, RPCError
+from pyrogram.file_id import FileId, FileType, ThumbnailSource
 
 from Thunder.vars import Var
 from Thunder.bot import work_loads

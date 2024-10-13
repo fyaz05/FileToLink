@@ -4,9 +4,9 @@ from Thunder.utils.database import Database
 from Thunder.utils.human_readable import humanbytes
 from Thunder.vars import Var
 from urllib.parse import quote_plus
-from hydrogram import filters, Client
-from hydrogram.errors import FloodWait
-from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram import filters, Client
+from pyrogram.errors import FloodWait
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Thunder.utils.file_properties import get_name, get_hash, get_media_file_size
 
 # Initialize databases

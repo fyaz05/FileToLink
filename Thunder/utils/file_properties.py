@@ -1,8 +1,8 @@
-from hydrogram import Client
+from pyrogram import Client
 from typing import Any, Optional
-from hydrogram.types import Message
-from hydrogram.file_id import FileId
-from hydrogram.raw.types.messages import Messages
+from pyrogram.types import Message
+from pyrogram.file_id import FileId
+from pyrogram.raw.types.messages import Messages
 from Thunder.server.exceptions import FileNotFound
 import logging
 
