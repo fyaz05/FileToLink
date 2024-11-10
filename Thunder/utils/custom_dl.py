@@ -1,3 +1,5 @@
+# Thunder/utils/custom_dl.py
+
 import math
 import asyncio
 import logging
@@ -13,11 +15,8 @@ from Thunder.bot import work_loads
 from Thunder.server.exceptions import FileNotFound
 from .file_properties import get_file_ids
 
-# Import asyncio.TimeoutError
-from asyncio import TimeoutError
-
-LOGGER = logging.getLogger(__name__)
-
+# Use logger for consistent logging
+logger = logging.getLogger(__name__)
 
 class ByteStreamer:
     """
@@ -62,7 +61,7 @@ class ByteStreamer:
             file_id = await self.generate_file_properties(message_id)
             async with self.cache_lock:
                 self.cached_file_ids[message_id] = file_id
-            LOGGER.debug(f"Cached file properties for message with ID {message_id}")
+            logger.debug(f"Cached file properties for message with ID {message_id}")
         return file_id
 
     async def generate_file_properties(self, message_id: int) -> FileId:
@@ -80,9 +79,9 @@ class ByteStreamer:
         """
         file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, message_id)
         if not file_id:
-            LOGGER.warning(f"Message with ID {message_id} not found")
+            logger.warning(f"Message with ID {message_id} not found")
             raise FileNotFound(f"File with message ID {message_id} not found.")
-        LOGGER.debug(f"Generated file ID for message with ID {message_id}")
+        logger.debug(f"Generated file ID for message with ID {message_id}")
         async with self.cache_lock:
             self.cached_file_ids[message_id] = file_id
         return file_id
@@ -118,7 +117,7 @@ class ByteStreamer:
                     is_media=True,
                 )
                 await media_session.start()
-                LOGGER.debug(f"Created new media session for DC {file_id.dc_id}")
+                logger.debug(f"Created new media session for DC {file_id.dc_id}")
 
                 for attempt in range(6):
                     try:
@@ -130,21 +129,19 @@ class ByteStreamer:
                                 id=exported_auth.id, bytes=exported_auth.bytes
                             )
                         )
-                        LOGGER.info(f"Authorization imported successfully for DC {file_id.dc_id}")
+                        logger.info(f"Authorization imported successfully for DC {file_id.dc_id}")
                         break
                     except AuthBytesInvalid:
-                        LOGGER.warning(
-                            f"Attempt {attempt + 1}: Invalid auth bytes for DC {file_id.dc_id}"
-                        )
+                        logger.warning(f"Attempt {attempt + 1}: Invalid auth bytes for DC {file_id.dc_id}")
                         if attempt == 5:
                             await media_session.stop()
-                            raise
-                        await asyncio.sleep(1)
+                            raise AuthBytesInvalid(f"Failed after 6 attempts for DC {file_id.dc_id}")
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     except FloodWait as e:
-                        LOGGER.warning(f"FloodWait: Sleeping for {e.value} seconds.")
+                        logger.warning(f"FloodWait: Sleeping for {e.value} seconds.")
                         await asyncio.sleep(e.value + 1)
                     except RPCError as e:
-                        LOGGER.error(f"RPCError during auth attempt: {e}")
+                        logger.error(f"RPCError during auth attempt for DC {file_id.dc_id}: {e}")
                         await asyncio.sleep(1)
             else:
                 media_session = Session(
@@ -155,11 +152,11 @@ class ByteStreamer:
                     is_media=True,
                 )
                 await media_session.start()
-                LOGGER.debug(f"Using existing auth key for DC {file_id.dc_id}")
+                logger.debug(f"Using existing auth key for DC {file_id.dc_id}")
 
             client.media_sessions[file_id.dc_id] = media_session
         else:
-            LOGGER.debug(f"Using cached media session for DC {file_id.dc_id}")
+            logger.debug(f"Using cached media session for DC {file_id.dc_id}")
 
         return media_session
 
@@ -243,7 +240,7 @@ class ByteStreamer:
         """
         client = self.client
         work_loads[index] += 1
-        LOGGER.debug(f"Starting to yield file with client index {index}.")
+        logger.debug(f"Starting to yield file with client index {index}.")
 
         media_session = await self.generate_media_session(file_id)
         current_part = 1
@@ -258,12 +255,12 @@ class ByteStreamer:
                         )
                     )
                     if not isinstance(response, raw.types.upload.File):
-                        LOGGER.warning("Unexpected response type while fetching file.")
+                        logger.warning("Unexpected response type while fetching file.")
                         break
 
                     chunk = response.bytes
                     if not chunk:
-                        LOGGER.debug("Received empty chunk, ending stream.")
+                        logger.debug("Received empty chunk, ending stream.")
                         break
 
                     if part_count == 1:
@@ -282,13 +279,13 @@ class ByteStreamer:
                         break
 
                 except FloodWait as e:
-                    LOGGER.warning(f"FloodWait: Sleeping for {e.value} seconds.")
+                    logger.warning(f"FloodWait: Sleeping for {e.value} seconds.")
                     await asyncio.sleep(e.value + 1)
-                except (RPCError, TimeoutError) as e:
-                    LOGGER.warning(f"Error while fetching file part: {e}")
+                except (RPCError, asyncio.TimeoutError) as e:
+                    logger.warning(f"Error while fetching file part: {e}")
                     raise
         finally:
-            LOGGER.debug(f"Finished yielding file, processed {current_part - 1} parts.")
+            logger.debug(f"Finished yielding file, processed {current_part - 1} parts.")
             work_loads[index] -= 1
 
     async def clean_cache(self) -> None:
@@ -299,4 +296,4 @@ class ByteStreamer:
             await asyncio.sleep(self.clean_timer)
             async with self.cache_lock:
                 self.cached_file_ids.clear()
-            LOGGER.debug("Cache cleaned.")
+            logger.debug("Cache cleaned.")

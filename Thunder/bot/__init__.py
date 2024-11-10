@@ -1,10 +1,13 @@
+# Thunder/bot/__init__.py
+
 from pyrogram import Client
 import pyromod.listen
-from ..vars import Var
+from Thunder.vars import Var
 from os import getcwd
 
+# Initialize the main bot client
 StreamBot = Client(
-    name='Web Streamer',
+    name="Web Streamer",
     api_id=Var.API_ID,
     api_hash=Var.API_HASH,
     bot_token=Var.BOT_TOKEN,
@@ -12,5 +15,8 @@ StreamBot = Client(
     workers=Var.WORKERS
 )
 
+# Dictionary to hold multiple client instances if needed
 multi_clients = {}
+
+# Dictionary to manage workloads and distribution across clients
 work_loads = {}

@@ -1,42 +1,54 @@
+# Thunder/utils/broadcast_helper.py
+
 import asyncio
-import logging
 import traceback
+from typing import Tuple
+
 from pyrogram.errors import FloodWait, InputUserDeactivated, UserIsBlocked, PeerIdInvalid
+from pyrogram.types import Message
+from Thunder.utils.logger import logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 
-async def send_msg(user_id, message):
-    """Attempt to forward a message to a specified user and handle exceptions."""
+async def send_msg(user_id: int, message: Message) -> Tuple[int, str]:
+    """
+    Attempt to forward a message to a specified user and handle exceptions.
+
+    Args:
+        user_id (int): The user ID to send the message to.
+        message (Message): The message to forward.
+
+    Returns:
+        Tuple[int, str]: A tuple containing the status code and error message (if any).
+                          - 200: Success
+                          - 400: Client-side error (e.g., user deactivated, blocked)
+                          - 500: Server-side error or unexpected exception
+    """
     try:
         await message.forward(chat_id=user_id)
-        logging.info(f"Message successfully sent to {user_id}")
+        logger.info(f"Message successfully sent to {user_id}")
         return 200, None  # Success code
 
     except FloodWait as e:
-        logging.warning(f"FloodWait error: sleeping for {e.x} seconds")
-        await asyncio.sleep(e.x)
+        logger.warning(f"FloodWait error: sleeping for {e.value} seconds.")
+        await asyncio.sleep(e.value + 1)
         return await send_msg(user_id, message)  # Retry after wait
 
     except InputUserDeactivated:
         error_msg = f"{user_id} : deactivated"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return 400, error_msg
 
     except UserIsBlocked:
         error_msg = f"{user_id} : blocked the bot"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return 400, error_msg
 
     except PeerIdInvalid:
-        error_msg = f"{user_id} : user id invalid"
-        logging.error(error_msg)
+        error_msg = f"{user_id} : user ID invalid"
+        logger.error(error_msg)
         return 400, error_msg
 
-    except Exception:
+    except Exception as e:
         error_msg = f"{user_id} : {traceback.format_exc()}"
-        logging.error(f"Unexpected error: {error_msg}")
+        logger.error(f"Unexpected error: {error_msg}", exc_info=True)
         return 500, error_msg
