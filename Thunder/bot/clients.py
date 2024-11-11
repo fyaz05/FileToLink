@@ -5,7 +5,7 @@ from pyrogram import Client
 from Thunder.vars import Var
 from Thunder.utils.config_parser import TokenParser
 from Thunder.bot import multi_clients, work_loads, StreamBot
-from Thunder.utils.logger import logger  # Custom logger
+from Thunder.utils.logger import logger
 
 async def initialize_clients():
     """Initializes multiple Pyrogram client instances based on tokens found in the environment."""

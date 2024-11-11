@@ -4,7 +4,7 @@ from pyrogram import Client
 from pyrogram.types import Message
 from pyrogram.file_id import FileId
 from Thunder.server.exceptions import FileNotFound
-from Thunder.utils.logger import logger  # Import the centralized logger
+from Thunder.utils.logger import logger
 from typing import Any, Optional
 
 

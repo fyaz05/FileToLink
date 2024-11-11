@@ -2,7 +2,7 @@
 
 import urllib.parse
 import aiofiles
-import aiohttp  # Re-added aiohttp for HTTP requests
+import aiohttp
 from Thunder.vars import Var
 from Thunder.bot import StreamBot
 from Thunder.utils.human_readable import humanbytes

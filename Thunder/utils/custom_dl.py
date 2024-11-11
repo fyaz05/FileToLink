@@ -2,21 +2,16 @@
 
 import math
 import asyncio
-import logging
 from typing import Dict, Union
-
 from pyrogram import Client, utils, raw
 from pyrogram.session import Session, Auth
 from pyrogram.errors import AuthBytesInvalid, RPCError, FloodWait
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
-
 from Thunder.vars import Var
 from Thunder.bot import work_loads
 from Thunder.server.exceptions import FileNotFound
 from .file_properties import get_file_ids
-
-# Use logger for consistent logging
-logger = logging.getLogger(__name__)
+from Thunder.utils.logger import logger
 
 class ByteStreamer:
     """
@@ -41,6 +36,7 @@ class ByteStreamer:
         self.cached_file_ids: Dict[int, FileId] = {}
         self.cache_lock = asyncio.Lock()
         asyncio.create_task(self.clean_cache())
+        logger.info("ByteStreamer initialized with client.")
 
     async def get_file_properties(self, message_id: int) -> FileId:
         """
@@ -55,13 +51,17 @@ class ByteStreamer:
         Raises:
             FileNotFound: If the file is not found in the channel.
         """
+        logger.debug(f"Fetching file properties for message ID {message_id}.")
         async with self.cache_lock:
             file_id = self.cached_file_ids.get(message_id)
+        
         if not file_id:
+            logger.debug(f"File ID for message {message_id} not found in cache, generating...")
             file_id = await self.generate_file_properties(message_id)
             async with self.cache_lock:
                 self.cached_file_ids[message_id] = file_id
-            logger.debug(f"Cached file properties for message with ID {message_id}")
+            logger.info(f"Cached new file properties for message ID {message_id}.")
+        
         return file_id
 
     async def generate_file_properties(self, message_id: int) -> FileId:
@@ -77,13 +77,17 @@ class ByteStreamer:
         Raises:
             FileNotFound: If the file is not found.
         """
+        logger.debug(f"Generating file properties for message ID {message_id}.")
         file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, message_id)
+        
         if not file_id:
-            logger.warning(f"Message with ID {message_id} not found")
+            logger.warning(f"Message ID {message_id} not found in the channel.")
             raise FileNotFound(f"File with message ID {message_id} not found.")
-        logger.debug(f"Generated file ID for message with ID {message_id}")
+        
         async with self.cache_lock:
             self.cached_file_ids[message_id] = file_id
+        logger.info(f"Generated and cached file properties for message ID {message_id}.")
+        
         return file_id
 
     async def generate_media_session(self, file_id: FileId) -> Session:
@@ -99,6 +103,7 @@ class ByteStreamer:
         Raises:
             AuthBytesInvalid: If authentication fails after retries.
         """
+        logger.debug(f"Generating media session for DC {file_id.dc_id}.")
         client = self.client
         media_session = client.media_sessions.get(file_id.dc_id)
 
@@ -107,6 +112,7 @@ class ByteStreamer:
             test_mode = await client.storage.test_mode()
 
             if file_id.dc_id != client_dc_id:
+                logger.info(f"Creating new media session for DC {file_id.dc_id}.")
                 auth = Auth(client, file_id.dc_id, test_mode)
                 auth_key = await auth.create()
                 media_session = Session(
@@ -117,7 +123,6 @@ class ByteStreamer:
                     is_media=True,
                 )
                 await media_session.start()
-                logger.debug(f"Created new media session for DC {file_id.dc_id}")
 
                 for attempt in range(6):
                     try:
@@ -129,21 +134,23 @@ class ByteStreamer:
                                 id=exported_auth.id, bytes=exported_auth.bytes
                             )
                         )
-                        logger.info(f"Authorization imported successfully for DC {file_id.dc_id}")
+                        logger.info(f"Authorization imported for DC {file_id.dc_id} on attempt {attempt + 1}.")
                         break
                     except AuthBytesInvalid:
-                        logger.warning(f"Attempt {attempt + 1}: Invalid auth bytes for DC {file_id.dc_id}")
+                        logger.warning(f"AuthBytesInvalid on attempt {attempt + 1} for DC {file_id.dc_id}.")
                         if attempt == 5:
                             await media_session.stop()
+                            logger.error(f"Failed after 6 attempts for DC {file_id.dc_id}.")
                             raise AuthBytesInvalid(f"Failed after 6 attempts for DC {file_id.dc_id}")
                         await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     except FloodWait as e:
-                        logger.warning(f"FloodWait: Sleeping for {e.value} seconds.")
+                        logger.warning(f"FloodWait encountered: sleeping for {e.value} seconds.")
                         await asyncio.sleep(e.value + 1)
                     except RPCError as e:
-                        logger.error(f"RPCError during auth attempt for DC {file_id.dc_id}: {e}")
+                        logger.error(f"RPCError during auth for DC {file_id.dc_id}: {e}")
                         await asyncio.sleep(1)
             else:
+                logger.info(f"Using existing auth key for DC {file_id.dc_id}.")
                 media_session = Session(
                     client,
                     file_id.dc_id,
@@ -152,11 +159,10 @@ class ByteStreamer:
                     is_media=True,
                 )
                 await media_session.start()
-                logger.debug(f"Using existing auth key for DC {file_id.dc_id}")
 
             client.media_sessions[file_id.dc_id] = media_session
         else:
-            logger.debug(f"Using cached media session for DC {file_id.dc_id}")
+            logger.debug(f"Using cached media session for DC {file_id.dc_id}.")
 
         return media_session
 
@@ -175,6 +181,7 @@ class ByteStreamer:
         Returns:
             Union[InputPhotoFileLocation, InputDocumentFileLocation, InputPeerPhotoFileLocation]: The location object.
         """
+        logger.debug(f"Determining location for file type {file_id.file_type}.")
         file_type = file_id.file_type
 
         if file_type == FileType.CHAT_PHOTO:
@@ -190,7 +197,6 @@ class ByteStreamer:
                         channel_id=utils.get_channel_id(file_id.chat_id),
                         access_hash=file_id.chat_access_hash,
                     )
-
             location = raw.types.InputPeerPhotoFileLocation(
                 peer=peer,
                 volume_id=file_id.volume_id,
@@ -211,6 +217,7 @@ class ByteStreamer:
                 file_reference=file_id.file_reference,
                 thumb_size=file_id.thumbnail_size,
             )
+        logger.debug(f"Location determined for file ID {file_id.media_id}.")
         return location
 
     async def yield_file(
@@ -279,10 +286,10 @@ class ByteStreamer:
                         break
 
                 except FloodWait as e:
-                    logger.warning(f"FloodWait: Sleeping for {e.value} seconds.")
+                    logger.warning(f"FloodWait encountered: sleeping for {e.value} seconds.")
                     await asyncio.sleep(e.value + 1)
                 except (RPCError, asyncio.TimeoutError) as e:
-                    logger.warning(f"Error while fetching file part: {e}")
+                    logger.error(f"Error while fetching file part: {e}")
                     raise
         finally:
             logger.debug(f"Finished yielding file, processed {current_part - 1} parts.")

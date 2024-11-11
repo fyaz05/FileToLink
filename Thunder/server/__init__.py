@@ -3,7 +3,7 @@
 from aiohttp import web
 from aiohttp.web_exceptions import HTTPNotFound
 from Thunder.server.stream_routes import routes
-from Thunder.utils.logger import logger  # Use the custom logger
+from Thunder.utils.logger import logger
 
 
 @web.middleware
