@@ -2,7 +2,7 @@
 
 import time
 import asyncio
-from urllib.parse import quote_plus
+from urllib.parse import quote
 from typing import Optional, Tuple, Dict, Union, List
 
 from pyrogram import Client, filters, enums
@@ -167,7 +167,7 @@ async def generate_media_links(log_msg: Message) -> Tuple[str, str, str, str]:
         else:
             media_name = str(media_name)
         media_size = humanbytes(get_media_file_size(log_msg))
-        file_name_encoded = quote_plus(media_name)
+        file_name_encoded = quote(media_name)
         hash_value = get_hash(log_msg)
         stream_link = f"{base_url}/watch/{file_id}/{file_name_encoded}?hash={hash_value}"
         online_link = f"{base_url}/{file_id}/{file_name_encoded}?hash={hash_value}"

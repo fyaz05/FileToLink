@@ -8,7 +8,7 @@ import secrets
 import time
 from functools import wraps
 from typing import Any, Tuple
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 from aiohttp import web
 from aiohttp.client_exceptions import (
@@ -31,10 +31,12 @@ from Thunder.vars import Var
 
 # Precompile regex patterns for efficiency
 SECURE_HASH_LENGTH = 6
+# Allow any characters in the hash part and digits for the ID part
 PATH_PATTERN_WITH_HASH = re.compile(
-    rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)$"
+    rf"^(.{{{SECURE_HASH_LENGTH}}})(\d+)$"
 )
-PATH_PATTERN_WITH_ID = re.compile(r"(\d+)(?:/\S+)?")
+# Allow any sequence of characters following the ID part
+PATH_PATTERN_WITH_ID = re.compile(r"(\d+)(?:/[\S\s]+)?")
 
 # Define the routes for the web application
 routes = web.RouteTableDef()
@@ -179,7 +181,7 @@ async def root_route_handler(_):
     return web.json_response(response_data)
 
 
-@routes.get(r"/watch/{path:\S+}", allow_head=True)
+@routes.get(r"/watch/{path:[\S\s]+}", allow_head=True)
 @exception_handler
 async def stream_handler_watch(request: web.Request):
     """
@@ -212,7 +214,7 @@ async def stream_handler_watch(request: web.Request):
     return web.Response(text=page_content, content_type='text/html')
 
 
-@routes.get(r"/{path:\S+}", allow_head=True)
+@routes.get(r"/{path:[\S\s]+}", allow_head=True)
 @exception_handler
 async def stream_handler(request: web.Request):
     """
@@ -374,14 +376,22 @@ async def media_streamer(
         file_id.file_name
         or f"{secrets.token_hex(2)}{mimetypes.guess_extension(mime_type) or '.unknown'}"
     )
-    file_name_encoded = quote_plus(file_name)
+    # Escape quotes in filename
+    file_name_escaped = file_name.replace('"', '\\"')
+    # Encode filename for 'filename*'
+    file_name_encoded = quote(file_name)
+    # Set a fallback filename (ASCII-only, replacing spaces with underscores)
+    fallback_filename = re.sub(r'[^\w.\-]', '_', file_name)
 
     # Set the appropriate headers and status code
     headers = {
         "Content-Type": mime_type,
         "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
         "Content-Length": str(req_length),
-        "Content-Disposition": f'inline; filename="{file_name_encoded}"',
+        "Content-Disposition": (
+            f'inline; filename="{fallback_filename}"; '
+            f"filename*=UTF-8''{file_name_encoded}"
+        ),
         "Accept-Ranges": "bytes",
     }
     status = 206 if range_header else 200
