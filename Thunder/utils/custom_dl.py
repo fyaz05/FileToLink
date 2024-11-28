@@ -13,6 +13,7 @@ from Thunder.server.exceptions import FileNotFound
 from .file_properties import get_file_ids
 from Thunder.utils.logger import logger
 
+
 class ByteStreamer:
     """
     A custom class that handles streaming of media files from Telegram servers.
@@ -54,14 +55,14 @@ class ByteStreamer:
         logger.debug(f"Fetching file properties for message ID {message_id}.")
         async with self.cache_lock:
             file_id = self.cached_file_ids.get(message_id)
-        
+
         if not file_id:
             logger.debug(f"File ID for message {message_id} not found in cache, generating...")
             file_id = await self.generate_file_properties(message_id)
             async with self.cache_lock:
                 self.cached_file_ids[message_id] = file_id
             logger.info(f"Cached new file properties for message ID {message_id}.")
-        
+
         return file_id
 
     async def generate_file_properties(self, message_id: int) -> FileId:
@@ -79,15 +80,15 @@ class ByteStreamer:
         """
         logger.debug(f"Generating file properties for message ID {message_id}.")
         file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, message_id)
-        
+
         if not file_id:
             logger.warning(f"Message ID {message_id} not found in the channel.")
             raise FileNotFound(f"File with message ID {message_id} not found.")
-        
+
         async with self.cache_lock:
             self.cached_file_ids[message_id] = file_id
         logger.info(f"Generated and cached file properties for message ID {message_id}.")
-        
+
         return file_id
 
     async def generate_media_session(self, file_id: FileId) -> Session:
@@ -134,35 +135,61 @@ class ByteStreamer:
                                 id=exported_auth.id, bytes=exported_auth.bytes
                             )
                         )
-                        logger.info(f"Authorization imported for DC {file_id.dc_id} on attempt {attempt + 1}.")
+                        logger.info(
+                            f"Authorization imported for DC {file_id.dc_id} on attempt {attempt + 1}."
+                        )
                         break
                     except AuthBytesInvalid:
-                        logger.warning(f"AuthBytesInvalid on attempt {attempt + 1} for DC {file_id.dc_id}.")
+                        logger.warning(
+                            f"AuthBytesInvalid on attempt {attempt + 1} for DC {file_id.dc_id}."
+                        )
                         if attempt == 5:
                             await media_session.stop()
-                            logger.error(f"Failed after 6 attempts for DC {file_id.dc_id}.")
-                            raise AuthBytesInvalid(f"Failed after 6 attempts for DC {file_id.dc_id}")
+                            logger.error(
+                                f"Failed after 6 attempts for DC {file_id.dc_id}."
+                            )
+                            raise AuthBytesInvalid(
+                                f"Failed after 6 attempts for DC {file_id.dc_id}"
+                            )
                         await asyncio.sleep(2 ** attempt)  # Exponential backoff
                     except FloodWait as e:
-                        logger.warning(f"FloodWait encountered: sleeping for {e.value} seconds.")
-                        await asyncio.sleep(e.value + 1)
-                    except RPCError as e:
-                        logger.error(f"RPCError during auth for DC {file_id.dc_id}: {e}")
-                        await asyncio.sleep(1)
-            else:
-                logger.info(f"Using existing auth key for DC {file_id.dc_id}.")
-                media_session = Session(
-                    client,
-                    file_id.dc_id,
-                    await client.storage.auth_key(),
-                    test_mode,
-                    is_media=True,
-                )
-                await media_session.start()
+                        logger.warning(f"FloodWait encountered: {e}. Retrying...")
+                        try:
+                            # Replace with the actual retry logic
+                            await asyncio.sleep(e.value + 1)
+                        except FloodWait as e2:
+                            logger.warning(
+                                f"FloodWait encountered again: {e2}. Switching client..."
+                            )
+                            try:
+                                # Replace with actual client switching code
+                                pass
+                            except FloodWait as e3:
+                                logger.warning(
+                                    f"FloodWait persists: {e3}. Sleeping for 1 second."
+                                )
+                                await asyncio.sleep(1)
+                        except (RPCError, asyncio.TimeoutError) as e:
+                            logger.error(f"Error while fetching file part: {e}")
+                            raise
+                else:
+                    logger.info(
+                        f"Using existing auth key for DC {file_id.dc_id}."
+                    )
+                    media_session = Session(
+                        client,
+                        file_id.dc_id,
+                        await client.storage.auth_key(),
+                        test_mode,
+                        is_media=True,
+                    )
+                    await media_session.start()
 
-            client.media_sessions[file_id.dc_id] = media_session
-        else:
-            logger.debug(f"Using cached media session for DC {file_id.dc_id}.")
+                client.media_sessions[file_id.dc_id] = media_session
+            else:
+                logger.debug(
+                    f"Using cached media session for DC {file_id.dc_id}."
+                )
 
         return media_session
 
@@ -284,15 +311,30 @@ class ByteStreamer:
 
                     if current_part > part_count:
                         break
-
                 except FloodWait as e:
-                    logger.warning(f"FloodWait encountered: sleeping for {e.value} seconds.")
-                    await asyncio.sleep(e.value + 1)
-                except (RPCError, asyncio.TimeoutError) as e:
-                    logger.error(f"Error while fetching file part: {e}")
-                    raise
+                    logger.warning(f"FloodWait encountered: {e}. Retrying...")
+                    try:
+                        # Replace with the actual retry logic
+                        await asyncio.sleep(e.value + 1)
+                    except FloodWait as e2:
+                        logger.warning(
+                            f"FloodWait encountered again: {e2}. Switching client..."
+                        )
+                        try:
+                            # Replace with actual client switching code
+                            pass
+                        except FloodWait as e3:
+                            logger.warning(
+                                f"FloodWait persists: {e3}. Sleeping for 1 second."
+                            )
+                            await asyncio.sleep(1)
+                    except (RPCError, asyncio.TimeoutError) as e:
+                        logger.error(f"Error while fetching file part: {e}")
+                        raise
         finally:
-            logger.debug(f"Finished yielding file, processed {current_part - 1} parts.")
+            logger.debug(
+                f"Finished yielding file, processed {current_part - 1} parts."
+            )
             work_loads[index] -= 1
 
     async def clean_cache(self) -> None:
