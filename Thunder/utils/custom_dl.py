@@ -13,7 +13,6 @@ from Thunder.server.exceptions import FileNotFound
 from .file_properties import get_file_ids
 from Thunder.utils.logger import logger
 
-
 class ByteStreamer:
     """
     A custom class that handles streaming of media files from Telegram servers.
@@ -55,14 +54,14 @@ class ByteStreamer:
         logger.debug(f"Fetching file properties for message ID {message_id}.")
         async with self.cache_lock:
             file_id = self.cached_file_ids.get(message_id)
-
+        
         if not file_id:
             logger.debug(f"File ID for message {message_id} not found in cache, generating...")
             file_id = await self.generate_file_properties(message_id)
             async with self.cache_lock:
                 self.cached_file_ids[message_id] = file_id
             logger.info(f"Cached new file properties for message ID {message_id}.")
-
+        
         return file_id
 
     async def generate_file_properties(self, message_id: int) -> FileId:
@@ -80,117 +79,70 @@ class ByteStreamer:
         """
         logger.debug(f"Generating file properties for message ID {message_id}.")
         file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, message_id)
-
+        
         if not file_id:
             logger.warning(f"Message ID {message_id} not found in the channel.")
             raise FileNotFound(f"File with message ID {message_id} not found.")
-
+        
         async with self.cache_lock:
             self.cached_file_ids[message_id] = file_id
         logger.info(f"Generated and cached file properties for message ID {message_id}.")
-
+        
         return file_id
 
-    async def generate_media_session(self, file_id: FileId) -> Session:
+    async def generate_media_session(self, client: Client, file_id: FileId) -> Session:
         """
-        Generate the media session for the DC that contains the media file.
-
-        Args:
-            file_id (FileId): The file properties object.
-
-        Returns:
-            Session: The media session object.
-
-        Raises:
-            AuthBytesInvalid: If authentication fails after retries.
+        Generates the media session for the DC that contains the media file.
+        This is required for getting the bytes from Telegram servers.
         """
-        logger.debug(f"Generating media session for DC {file_id.dc_id}.")
-        client = self.client
-        media_session = client.media_sessions.get(file_id.dc_id)
+        media_session = client.media_sessions.get(file_id.dc_id, None)
 
         if media_session is None:
-            client_dc_id = await client.storage.dc_id()
-            test_mode = await client.storage.test_mode()
-
-            if file_id.dc_id != client_dc_id:
-                logger.info(f"Creating new media session for DC {file_id.dc_id}.")
-                auth = Auth(client, file_id.dc_id, test_mode)
-                auth_key = await auth.create()
+            if file_id.dc_id != await client.storage.dc_id():
                 media_session = Session(
                     client,
                     file_id.dc_id,
-                    auth_key,
-                    test_mode,
+                    await Auth(
+                        client, file_id.dc_id, await client.storage.test_mode()
+                    ).create(),
+                    await client.storage.test_mode(),
                     is_media=True,
                 )
                 await media_session.start()
 
-                for attempt in range(6):
+                for _ in range(6):
+                    exported_auth = await client.invoke(
+                        raw.functions.auth.ExportAuthorization(dc_id=file_id.dc_id)
+                    )
+
                     try:
-                        exported_auth = await client.invoke(
-                            raw.functions.auth.ExportAuthorization(dc_id=file_id.dc_id)
-                        )
                         await media_session.send(
                             raw.functions.auth.ImportAuthorization(
                                 id=exported_auth.id, bytes=exported_auth.bytes
                             )
                         )
-                        logger.info(
-                            f"Authorization imported for DC {file_id.dc_id} on attempt {attempt + 1}."
-                        )
                         break
                     except AuthBytesInvalid:
-                        logger.warning(
-                            f"AuthBytesInvalid on attempt {attempt + 1} for DC {file_id.dc_id}."
+                        logger.debug(
+                            f"Invalid authorization bytes for DC {file_id.dc_id}"
                         )
-                        if attempt == 5:
-                            await media_session.stop()
-                            logger.error(
-                                f"Failed after 6 attempts for DC {file_id.dc_id}."
-                            )
-                            raise AuthBytesInvalid(
-                                f"Failed after 6 attempts for DC {file_id.dc_id}"
-                            )
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    except FloodWait as e:
-                        logger.warning(f"FloodWait encountered: {e}. Retrying...")
-                        try:
-                            # Replace with the actual retry logic
-                            await asyncio.sleep(e.value + 1)
-                        except FloodWait as e2:
-                            logger.warning(
-                                f"FloodWait encountered again: {e2}. Switching client..."
-                            )
-                            try:
-                                # Replace with actual client switching code
-                                pass
-                            except FloodWait as e3:
-                                logger.warning(
-                                    f"FloodWait persists: {e3}. Sleeping for 1 second."
-                                )
-                                await asyncio.sleep(1)
-                        except (RPCError, asyncio.TimeoutError) as e:
-                            logger.error(f"Error while fetching file part: {e}")
-                            raise
+                        continue
                 else:
-                    logger.info(
-                        f"Using existing auth key for DC {file_id.dc_id}."
-                    )
-                    media_session = Session(
-                        client,
-                        file_id.dc_id,
-                        await client.storage.auth_key(),
-                        test_mode,
-                        is_media=True,
-                    )
-                    await media_session.start()
-
-                client.media_sessions[file_id.dc_id] = media_session
+                    await media_session.stop()
+                    raise AuthBytesInvalid
             else:
-                logger.debug(
-                    f"Using cached media session for DC {file_id.dc_id}."
+                media_session = Session(
+                    client,
+                    file_id.dc_id,
+                    await client.storage.auth_key(),
+                    await client.storage.test_mode(),
+                    is_media=True,
                 )
-
+                await media_session.start()
+            logger.debug(f"Created media session for DC {file_id.dc_id}")
+            client.media_sessions[file_id.dc_id] = media_session
+        else:
+            logger.debug(f"Using cached media session for DC {file_id.dc_id}")
         return media_session
 
     @staticmethod
@@ -276,28 +228,22 @@ class ByteStreamer:
         work_loads[index] += 1
         logger.debug(f"Starting to yield file with client index {index}.")
 
-        media_session = await self.generate_media_session(file_id)
+        media_session = await self.generate_media_session(client, file_id)
         current_part = 1
         location = await self.get_location(file_id)
 
         try:
-            while current_part <= part_count:
-                try:
-                    response = await media_session.send(
-                        raw.functions.upload.GetFile(
-                            location=location, offset=offset, limit=chunk_size
-                        )
-                    )
-                    if not isinstance(response, raw.types.upload.File):
-                        logger.warning("Unexpected response type while fetching file.")
-                        break
-
-                    chunk = response.bytes
+            r = await media_session.send(
+                raw.functions.upload.GetFile(
+                    location=location, offset=offset, limit=chunk_size
+                ),
+            )
+            if isinstance(r, raw.types.upload.File):
+                while True:
+                    chunk = r.bytes
                     if not chunk:
-                        logger.debug("Received empty chunk, ending stream.")
                         break
-
-                    if part_count == 1:
+                    elif part_count == 1:
                         yield chunk[first_part_cut:last_part_cut]
                     elif current_part == 1:
                         yield chunk[first_part_cut:]
@@ -311,30 +257,17 @@ class ByteStreamer:
 
                     if current_part > part_count:
                         break
-                except FloodWait as e:
-                    logger.warning(f"FloodWait encountered: {e}. Retrying...")
-                    try:
-                        # Replace with the actual retry logic
-                        await asyncio.sleep(e.value + 1)
-                    except FloodWait as e2:
-                        logger.warning(
-                            f"FloodWait encountered again: {e2}. Switching client..."
-                        )
-                        try:
-                            # Replace with actual client switching code
-                            pass
-                        except FloodWait as e3:
-                            logger.warning(
-                                f"FloodWait persists: {e3}. Sleeping for 1 second."
-                            )
-                            await asyncio.sleep(1)
-                    except (RPCError, asyncio.TimeoutError) as e:
-                        logger.error(f"Error while fetching file part: {e}")
-                        raise
+
+                    r = await media_session.send(
+                        raw.functions.upload.GetFile(
+                            location=location, offset=offset, limit=chunk_size
+                        ),
+                    )
+        except (TimeoutError, AttributeError):
+            logger.error(f"Error while yielding file: TimeoutError or AttributeError encountered.")
+            pass
         finally:
-            logger.debug(
-                f"Finished yielding file, processed {current_part - 1} parts."
-            )
+            logger.debug(f"Finished yielding file with {current_part} parts.")
             work_loads[index] -= 1
 
     async def clean_cache(self) -> None:
