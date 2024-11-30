@@ -1,8 +1,9 @@
 aiofiles
 aiohttp
 apscheduler
+cachetools
 dnspython
-git+https://github.com/hydrogram/hydrogram.git@dev
+git+https://github.com/KurimuzonAkuma/pyrogram.git@dev
 motor
 psutil
 pyromod

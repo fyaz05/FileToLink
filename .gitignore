@@ -116,6 +116,6 @@ dmypy.json
 
 #session files
 *.session
-WebStreamer/template/new.html
-WebStreamer/template/beta.html
-WebStreamer/template/style.css
+Thunder/template/new.html
+Thunder/template/beta.html
+Thunder/template/style.css

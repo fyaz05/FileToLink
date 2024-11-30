@@ -1,3 +1,9 @@
+# Thunder/__init__.py
+
 import time
+
+# Record the start time of the module
 StartTime = time.time()
-__version__ = 1.0
+
+# Define the version
+__version__ = "1.5.0"

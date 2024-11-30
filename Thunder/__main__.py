@@ -1,94 +1,87 @@
+# Thunder/__main__.py
+
 import os
 import sys
 import glob
 import asyncio
-import logging
-import importlib
+import importlib.util
 from pathlib import Path
-from hydrogram import idle
-from .bot import StreamBot
-from .vars import Var
+from pyrogram import idle
 from aiohttp import web
-from .server import web_server
-from .utils.keepalive import ping_server
+from Thunder.bot import StreamBot
+from Thunder.vars import Var
+from Thunder.server import web_server
+from Thunder.utils.keepalive import ping_server
 from Thunder.bot.clients import initialize_clients
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-
-# Set specific loggers to ERROR
-logging.getLogger("aiohttp").setLevel(logging.ERROR)
-logging.getLogger("hydrogram").setLevel(logging.ERROR)
+from Thunder.utils.logger import logger
 
 # Plugin path
-ppath = "Thunder/bot/plugins/*.py"
-files = glob.glob(ppath)
+PLUGIN_PATH = "Thunder/bot/plugins/*.py"
+plugins = glob.glob(PLUGIN_PATH)
 
 async def start_services():
-    # Initialize bot
+    """Initializes and starts all essential services for the bot."""
+
+    logger.info("\n================= Starting Telegram Bot Initialization =================")
     try:
-        logging.info('Starting Telegram Bot...')
-        await StreamBot.start()  # Ensure this is awaited
+        await StreamBot.start()
         bot_info = await StreamBot.get_me()
         StreamBot.username = bot_info.username
-        logging.info('Telegram Bot Initialized as: @%s', StreamBot.username)
+        logger.info("----------------- Telegram Bot Initialized Successfully -----------------")
+        logger.info("Bot Username: @%s", StreamBot.username)
     except Exception as e:
-        logging.error('Failed to initialize bot: %s', e)
+        logger.error("Failed to initialize the Telegram Bot: %s", e)
         return
 
-    # Initialize clients
+    logger.info("\n================= Starting Client Initialization =================")
     try:
-        logging.info('Initializing Clients...')
         await initialize_clients()
-        logging.info('Clients Initialized.')
+        logger.info("------------------ Clients Initialized Successfully ------------------")
     except Exception as e:
-        logging.error('Failed to initialize clients: %s', e)
+        logger.error("Failed to initialize clients: %s", e)
         return
 
-    # Import plugins
-    logging.info('Importing Plugins...')
-    for name in files:
+    logger.info("\n================= Importing Plugins =================")
+    for file_path in plugins:
         try:
-            with open(name) as a:
-                patt = Path(a.name)
-                plugin_name = patt.stem
-                plugins_dir = Path(f"Thunder/bot/plugins/{plugin_name}.py")
-                import_path = f".plugins.{plugin_name}"
-                spec = importlib.util.spec_from_file_location(import_path, plugins_dir)
-                load = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(load)
-                sys.modules[f"Thunder.bot.plugins.{plugin_name}"] = load
-                logging.info("Imported => %s", plugin_name)
+            plugin_path = Path(file_path)
+            plugin_name = plugin_path.stem
+            import_path = f"Thunder.bot.plugins.{plugin_name}"
+            spec = importlib.util.spec_from_file_location(import_path, plugin_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            sys.modules[import_path] = module
+            logger.info("Successfully imported plugin: %s", plugin_name)
         except Exception as e:
-            logging.error('Failed to import plugin %s: %s', name, e)
+            logger.error("Failed to import plugin %s: %s", plugin_name, e)
+    logger.info("------------------ Plugin Importing Completed ------------------")
 
-    # Start keep-alive service if on Heroku
     if Var.ON_HEROKU:
-        logging.info('Starting Keep Alive Service...')
+        logger.info("\n================= Starting Keep-Alive Service =================")
         asyncio.create_task(ping_server())
+        logger.info("----------------- Keep-Alive Service Started -----------------")
 
-    # Initialize web server
-    logging.info('Initializing Web Server...')
+    logger.info("\n================= Initializing Web Server =================")
     try:
-        app = web.AppRunner(await web_server())
-        await app.setup()
-        bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADRESS
-        await web.TCPSite(app, bind_address, Var.PORT).start()
-        logging.info('Web Server Initialized on %s:%s.', bind_address, Var.PORT)
+        app_runner = web.AppRunner(await web_server())
+        await app_runner.setup()
+        bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADDRESS
+        site = web.TCPSite(app_runner, bind_address, Var.PORT)
+        await site.start()
+        logger.info("------------------ Web Server Initialized Successfully ------------------")
+        logger.info("Server Address: %s:%s", bind_address, Var.PORT)
     except Exception as e:
-        logging.error('Failed to start web server: %s', e)
+        logger.error("Failed to start the web server: %s", e)
         return
 
-    # Start the idle loop
-    logging.info("\nService Started")
-    logging.info("Bot User: %s", bot_info.first_name)
-    logging.info("Server running on: %s:%s", bind_address, Var.PORT)
-    logging.info("Owner: %s", Var.OWNER_USERNAME)
+    logger.info("\n================= Service Started =================")
+    logger.info("Bot User: %s", bot_info.first_name)
+    logger.info("Server Running On: %s:%s", bind_address, Var.PORT)
+    logger.info("Owner: %s", Var.OWNER_USERNAME)
     if Var.ON_HEROKU:
-        logging.info("App running on: %s", Var.FQDN)
+        logger.info("App URL: %s", Var.FQDN)
+    logger.info("====================================================")
+
     await idle()
 
 if __name__ == '__main__':
@@ -96,4 +89,8 @@ if __name__ == '__main__':
     try:
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
-        logging.info('Service Stopped')
+        logger.info("\n================= Service Stopped by User =================")
+    except Exception as e:
+        logger.error("An unexpected error occurred: %s", e)
+    finally:
+        loop.close()

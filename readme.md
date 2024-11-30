@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <b>Telegram Advanced File to Link Bot</b><br/>
-  Convert files to links for seamless streaming and downloading with advanced features using Hydrogram.
+  <b>Telegram Fastest File to Link Bot with multiple useful features.</b><br/>
+  Convert files to links for seamless streaming and downloading with advanced features using Pyrogram.
 </p>
 
 <p align="center">
@@ -54,7 +54,7 @@
 ### ⚙️ Features
 
 - **Streamlined Code**: Improved efficiency by removing unnecessary features.
-- **High Speed**: Utilizes Hydrogram for faster operations.
+- **High Speed**: Utilizes Pyrogram for faster operations.
 - **Easy Deployment**: Configured for straightforward deployment.
 - **Enhanced Functionality**: Improved user interface and added features:
   - 😄 **User-Friendly Interface**
