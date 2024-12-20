@@ -11,6 +11,7 @@ import random
 import string
 import html
 from typing import Tuple, List, Dict
+from urllib.parse import quote_plus  # Added import for quote_plus
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -20,6 +21,7 @@ from pyrogram.types import (
     Message,
     User
 )
+from pyrogram.errors import FloodWait  # Added import for FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.vars import Var
@@ -190,7 +192,7 @@ async def generate_media_links(log_msg: Message) -> Tuple[str, str, str, str]:
         else:
             media_name = str(media_name)
         media_size = humanbytes(get_media_file_size(log_msg))
-        file_name_encoded = quote_plus(media_name)
+        file_name_encoded = quote_plus(media_name)  # Ensure proper encoding
         hash_value = get_hash(log_msg)
         stream_link = f"{base_url}/watch/{file_id}/{file_name_encoded}?hash={hash_value}"
         online_link = f"{base_url}/{file_id}/{file_name_encoded}?hash={hash_value}"
@@ -356,7 +358,7 @@ async def broadcast_message(client: Client, message: Message):
         )
 
         # Fetch all user IDs from the database
-        all_users_cursor = db.get_all_users()
+        all_users_cursor = await db.get_all_users()  # Awaited the coroutine
         all_users: List[Dict[str, int]] = []
         async for user in all_users_cursor:
             all_users.append(user)
@@ -412,7 +414,8 @@ async def broadcast_message(client: Client, message: Message):
                         break  # Exit the retry loop on success
 
                     except FloodWait as e:
-                        await handle_flood_wait(e)
+                        logger.warning(f"FloodWait error: sleeping for {e.value} seconds.")
+                        await asyncio.sleep(e.value + 1)
                         continue  # Retry after waiting
                     except Exception as e:
                         logger.warning(f"Problem sending to {user_id}: {e}")
@@ -470,7 +473,7 @@ async def show_status(client: Client, message: Message):
         # Generate a detailed workload distribution among connected bots
         workloads_text = "📊 **Workloads per Bot:**\n\n"
         workloads = {
-            f"🤖 Bot {c + 0}": load
+            f"🤖 Bot {c + 1}": load  # Changed from Bot {c + 0} to Bot {c + 1} for readability
             for c, (bot, load) in enumerate(
                 sorted(work_loads.items(), key=lambda x: x[1], reverse=True)
             )
