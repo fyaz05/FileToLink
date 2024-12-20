@@ -461,7 +461,45 @@ async def private_receive_handler(client: Client, message: Message) -> None:
         client (Client): The Pyrogram client instance.
         message (Message): The incoming media message.
     """
+    # Log new user if applicable
+    if message.from_user:
+        await log_new_user(
+            bot=client,
+            user_id=message.from_user.id,
+            first_name=message.from_user.first_name
+        )
+
+    # Process the media message
     await process_media_message(client, message, message)
+
+
+async def log_new_user(bot: Client, user_id: int, first_name: str):
+    """
+    Log a new user and send a notification to the BIN_CHANNEL if the user is new.
+
+    Args:
+        bot (Client): The Pyrogram client instance.
+        user_id (int): The Telegram user ID.
+        first_name (str): The first name of the user.
+    """
+    try:
+        if not await db.is_user_exist(user_id):
+            await db.add_user(user_id)
+            try:
+                if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
+                    await bot.send_message(
+                        Var.BIN_CHANNEL,
+                        f"👋 **New User Alert!**\n\n"
+                        f"✨ **Name:** [{first_name}](tg://user?id={user_id})\n"
+                        f"🆔 **User ID:** `{user_id}`\n\n"
+                        "has started the bot!"
+                    )
+                logger.info(f"New user added: {user_id} - {first_name}")
+            except Exception as e:
+                logger.error(f"Failed to send new user alert to BIN_CHANNEL: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error logging new user {user_id}: {e}", exc_info=True)
+
 
 
 async def process_media_message(
