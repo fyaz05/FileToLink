@@ -27,7 +27,7 @@ async def start_services():
         await StreamBot.start()
         bot_info = await StreamBot.get_me()
         StreamBot.username = bot_info.username
-        logger.info("----------------- Telegram Bot Initialized Successfully -----------------")
+        logger.info("\n----------------- Telegram Bot Initialized Successfully -----------------")
         logger.info("Bot Username: @%s", StreamBot.username)
     except Exception as e:
         logger.error("Failed to initialize the Telegram Bot: %s", e)
@@ -36,7 +36,7 @@ async def start_services():
     logger.info("\n================= Starting Client Initialization =================")
     try:
         await initialize_clients()
-        logger.info("------------------ Clients Initialized Successfully ------------------")
+        logger.info("\n----------------- Clients Initialized Successfully -----------------")
     except Exception as e:
         logger.error("Failed to initialize clients: %s", e)
         return
@@ -54,12 +54,12 @@ async def start_services():
             logger.info("Successfully imported plugin: %s", plugin_name)
         except Exception as e:
             logger.error("Failed to import plugin %s: %s", plugin_name, e)
-    logger.info("------------------ Plugin Importing Completed ------------------")
+    logger.info("\n----------------- Plugin Importing Completed -----------------")
 
     if Var.ON_HEROKU:
         logger.info("\n================= Starting Keep-Alive Service =================")
         asyncio.create_task(ping_server())
-        logger.info("----------------- Keep-Alive Service Started -----------------")
+        logger.info("\n----------------- Keep-Alive Service Started -----------------")
 
     logger.info("\n================= Initializing Web Server =================")
     try:
@@ -68,7 +68,7 @@ async def start_services():
         bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
-        logger.info("------------------ Web Server Initialized Successfully ------------------")
+        logger.info("\n----------------- Web Server Initialized Successfully -----------------")
         logger.info("Server Address: %s:%s", bind_address, Var.PORT)
     except Exception as e:
         logger.error("Failed to start the web server: %s", e)
@@ -80,7 +80,7 @@ async def start_services():
     logger.info("Owner: %s", Var.OWNER_USERNAME)
     if Var.ON_HEROKU:
         logger.info("App URL: %s", Var.FQDN)
-    logger.info("====================================================")
+    logger.info("\n====================================================")
 
     await idle()
 

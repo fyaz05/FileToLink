@@ -13,17 +13,17 @@ async def initialize_clients():
     logger.info("\n================= Starting Primary Client Initialization =================")
     multi_clients[0] = StreamBot
     work_loads[0] = 0
-    logger.info("------------------ Primary Client Initialized Successfully ------------------")
+    logger.info("\n------------------ Primary Client Initialized Successfully ------------------")
 
     # Parse tokens from the environment
     logger.info("\n================= Parsing Additional Client Tokens =================")
     all_tokens = TokenParser().parse_from_env()
     if not all_tokens:
-        logger.info("No additional clients found. Default client will be used.")
-        logger.info("---------------------------------------------------------------------")
+        logger.info("\nNo additional clients found. Default client will be used.")
+        logger.info("\n---------------------------------------------------------------------")
         return
 
-    logger.info("------------------ Found %d additional tokens ------------------", len(all_tokens))
+    logger.info("\n------------------ Found %d additional tokens ------------------", len(all_tokens))
 
     async def start_client(client_id, token):
         """Starts an individual Pyrogram client."""
@@ -58,12 +58,12 @@ async def initialize_clients():
     
     if len(multi_clients) > 1:
         Var.MULTI_CLIENT = True
-        logger.info("------------------ Multi-Client Mode Enabled ------------------")
-        logger.info("Total Clients Initialized: %d (Including the primary client)", len(multi_clients))
-        logger.info("---------------------------------------------------------------------")
+        logger.info("\n================= Multi-Client Mode Enabled =================")
+        logger.info("\nTotal Clients Initialized: %d (Including the primary client)", len(multi_clients))
+        logger.info("\n---------------------------------------------------------------------")
     else:
-        logger.info("No additional clients were initialized. Default client will be used.")
-        logger.info("---------------------------------------------------------------------")
+        logger.info("\nNo additional clients were initialized. Default client will be used.")
+        logger.info("\n---------------------------------------------------------------------")
 
     logger.info("\n================= Client Initialization Completed =================")
 
