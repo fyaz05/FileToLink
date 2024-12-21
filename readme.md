@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <b>Telegram Fastest File to Link Bot with multiple useful features.</b><br/>
-  Convert files to links for seamless streaming and downloading with advanced features using Pyrogram.
+  <b>Telegram’s Fastest File-to-Link Bot with Multiple Advanced Features</b><br/>
+  Seamlessly convert files to links for streaming and downloading, powered by Pyrogram.
 </p>
 
 <p align="center">
@@ -32,14 +32,14 @@
       <a href="#how-to-make-your-own">How to Make Your Own</a>
       <ul>
         <li><a href="#deploy-on-heroku">Deploy on Heroku</a></li>
-        <li><a href="#host-it-on-vps-or-locally">Run It on a VPS / Locally</a></li>
+        <li><a href="#run-it-on-a-vps--locally">Run It on a VPS / Locally</a></li>
       </ul>
     </li>
     <li>
       <a href="#setting-up-things">Setting Up Things</a>
       <ul>
-        <li><a href="#mandatory-vars">Mandatory Vars</a></li>
-        <li><a href="#optional-vars">Optional Vars</a></li>
+        <li><a href="#mandatory-vars">Mandatory Variables</a></li>
+        <li><a href="#optional-vars">Optional Variables</a></li>
       </ul>
     </li>
     <li><a href="#how-to-use-the-bot">How to Use the Bot</a></li>
@@ -53,17 +53,17 @@
 
 ### ⚙️ Features
 
-- **Streamlined Code**: Improved efficiency by removing unnecessary features.
-- **High Speed**: Utilizes Pyrogram for faster operations.
-- **Easy Deployment**: Configured for straightforward deployment.
-- **Enhanced Functionality**: Improved user interface and added features:
+- **Streamlined Code**: Improved efficiency by eliminating redundant processes.
+- **High Speed**: Powered by Pyrogram for optimized performance.
+- **Easy Deployment**: Pre-configured for hassle-free setup.
+- **Enhanced Functionality**:
   - 😄 **User-Friendly Interface**
   - 🔗 **Instant Stream Links**
   - 👥 **Group Support**
-  - 📂 **File Retrieval**
-  - 📢 **Channel Updates**
-  - 📑 **Log Channel**
-  - 🚨 **Admin Broadcasts**
+  - 📂 **Batch Processing with Custom Commands**: Reply to the first file of a batch with `/link <batch_number>` (e.g., `/link 23`).
+  - 📢 **Channel Support**
+  - 📑 **Log Channel for Tracking Activities**
+  - 🚨 **Admin Broadcast Capabilities**
 
 ### 💻 Bot Commands
 
@@ -71,16 +71,16 @@
   <summary><strong>View All Commands</strong> <sup><kbd>(Click to expand)</kbd></sup></summary>
 
 ```
-start - Start the bot
-link - Generate a stream link
-help - Bot usage details
-about - Get bot info
-dc - Check data center
-ping - Check bot latency
-stats - (Admin) Bot usage statistics
-status - (Admin) Bot operational status
-broadcast - (Admin) Send a message to all users
-users - (Admin) View total users
+/start - Start the bot
+/link - Generate a stream link
+/help - Bot usage details
+/about - Get bot information
+/dc - Check data center details
+/ping - Check bot latency
+/stats - (Admin) View bot usage statistics
+/status - (Admin) Check bot operational status
+/broadcast - (Admin) Send messages to all users
+/users - (Admin) View the total number of users
 ```
 
 </details>
