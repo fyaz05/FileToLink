@@ -192,7 +192,7 @@ async def generate_media_links(log_msg: Message) -> Tuple[str, str, str, str]:
         else:
             media_name = str(media_name)
         media_size = humanbytes(get_media_file_size(log_msg))
-        file_name_encoded = quote_plus(media_name)  # Ensure proper encoding
+        file_name_encoded = quote_plus(media_name)
         hash_value = get_hash(log_msg)
         stream_link = f"{base_url}/watch/{file_id}/{file_name_encoded}?hash={hash_value}"
         online_link = f"{base_url}/{file_id}/{file_name_encoded}?hash={hash_value}"
@@ -358,7 +358,7 @@ async def broadcast_message(client: Client, message: Message):
         )
 
         # Fetch all user IDs from the database
-        all_users_cursor = await db.get_all_users()  # Awaited the coroutine
+        all_users_cursor = await db.get_all_users()
         all_users: List[Dict[str, int]] = []
         async for user in all_users_cursor:
             all_users.append(user)
@@ -473,7 +473,7 @@ async def show_status(client: Client, message: Message):
         # Generate a detailed workload distribution among connected bots
         workloads_text = "📊 **Workloads per Bot:**\n\n"
         workloads = {
-            f"🤖 Bot {c + 0}": load  # Changed from Bot {c + 0} to Bot {c + 1} for readability
+            f"🤖 Bot {c + 0}": load
             for c, (bot, load) in enumerate(
                 sorted(work_loads.items(), key=lambda x: x[1], reverse=True)
             )
