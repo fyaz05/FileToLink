@@ -11,7 +11,7 @@ import random
 import string
 import html
 from typing import Tuple, List, Dict
-from urllib.parse import quote_plus  # Added import for quote_plus
+from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -21,7 +21,7 @@ from pyrogram.types import (
     Message,
     User
 )
-from pyrogram.errors import FloodWait  # Added import for FloodWait
+from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.vars import Var
@@ -473,7 +473,7 @@ async def show_status(client: Client, message: Message):
         # Generate a detailed workload distribution among connected bots
         workloads_text = "📊 **Workloads per Bot:**\n\n"
         workloads = {
-            f"🤖 Bot {c + 1}": load  # Changed from Bot {c + 0} to Bot {c + 1} for readability
+            f"🤖 Bot {c + 0}": load  # Changed from Bot {c + 0} to Bot {c + 1} for readability
             for c, (bot, load) in enumerate(
                 sorted(work_loads.items(), key=lambda x: x[1], reverse=True)
             )

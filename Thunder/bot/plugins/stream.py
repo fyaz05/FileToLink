@@ -133,15 +133,21 @@ async def forward_media(media_message: Message) -> Message:
         Exception: If forwarding fails after handling FloodWait.
     """
     try:
-        return await media_message.forward(chat_id=Var.BIN_CHANNEL)
-    except FloodWait as e:
-        await handle_flood_wait(e)
-        return await forward_media(media_message)
-    except Exception as e:
-        error_text = f"Error forwarding media message: {e}"
+        return await media_message.copy(chat_id=Var.BIN_CHANNEL)
+    except Exception as copy_error:
+        error_text = f"Error copying media message: {copy_error}"
         logger.error(error_text, exc_info=True)
-        await notify_owner(media_message._client, error_text)
-        raise
+        
+    try:
+        return await media_message.forward(chat_id=Var.BIN_CHANNEL)
+    except FloodWait as flood_error:
+        await handle_flood_wait(flood_error)
+        return await forward_media(media_message)  # Retry forwarding
+    except Exception as forward_error:
+            final_error_text = f"Error forwarding media message: {forward_error}"
+            logger.error(final_error_text, exc_info=True)
+            await notify_owner(media_message._client, final_error_text)
+            raise
 
 
 async def generate_media_links(log_msg: Message) -> Tuple[str, str, str, str]:
