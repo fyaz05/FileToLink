@@ -11,6 +11,7 @@ import random
 import string
 import html
 from typing import Tuple, List, Dict
+from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -20,6 +21,7 @@ from pyrogram.types import (
     Message,
     User
 )
+from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.vars import Var
@@ -356,7 +358,7 @@ async def broadcast_message(client: Client, message: Message):
         )
 
         # Fetch all user IDs from the database
-        all_users_cursor = db.get_all_users()
+        all_users_cursor = await db.get_all_users()
         all_users: List[Dict[str, int]] = []
         async for user in all_users_cursor:
             all_users.append(user)
@@ -412,7 +414,8 @@ async def broadcast_message(client: Client, message: Message):
                         break  # Exit the retry loop on success
 
                     except FloodWait as e:
-                        await handle_flood_wait(e)
+                        logger.warning(f"FloodWait error: sleeping for {e.value} seconds.")
+                        await asyncio.sleep(e.value + 1)
                         continue  # Retry after waiting
                     except Exception as e:
                         logger.warning(f"Problem sending to {user_id}: {e}")
