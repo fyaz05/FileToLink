@@ -38,7 +38,7 @@ class Var:
     SLEEP_THRESHOLD: int = int(os.getenv('SLEEP_THRESHOLD', '60'))
 
     # Number of workers
-    WORKERS: int = int(os.getenv('WORKERS', '8'))
+    WORKERS: int = int(os.getenv('WORKERS', '100'))
 
     # Channel ID where files are stored
     BIN_CHANNEL: int = int(os.getenv('BIN_CHANNEL', ''))
@@ -48,6 +48,7 @@ class Var:
     BIND_ADDRESS: str = os.getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0')
     PING_INTERVAL: int = int(os.getenv('PING_INTERVAL', '1200'))  # 20 minutes
     NO_PORT: bool = str2bool(os.getenv('NO_PORT', 'True'))
+    CACHE_SIZE: int = int(os.getenv('CACHE_SIZE', '100'))
 
     # Owner details
     OWNER_ID: Set[int] = set(int(x) for x in os.getenv('OWNER_ID', '').split() if x.isdigit())
