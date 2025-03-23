@@ -6,19 +6,14 @@ import mimetypes
 import re
 import secrets
 import time
-from functools import wraps
-from typing import Any, Tuple
-from urllib.parse import quote
-
+import json
+from concurrent.futures import ThreadPoolExecutor
 from aiohttp import web
-from aiohttp.client_exceptions import (
-    ClientConnectionError,
-    ClientPayloadError,
-    ServerDisconnectedError,
-)
-from aiohttp.http_exceptions import BadStatusLine
-from aiohttp.web_exceptions import HTTPNotFound
+from aiohttp.client_exceptions import ClientConnectionError
 from cachetools import LRUCache
+from functools import wraps
+from urllib.parse import unquote, quote
+from contextlib import asynccontextmanager
 
 from Thunder import StartTime, __version__
 from Thunder.bot import multi_clients, StreamBot, work_loads
@@ -29,430 +24,252 @@ from Thunder.utils.render_template import render_page
 from Thunder.utils.time_format import get_readable_time
 from Thunder.vars import Var
 
-# Precompile regex patterns for efficiency
-SECURE_HASH_LENGTH = 6
-# Allow any characters in the hash part and digits for the ID part
-PATH_PATTERN_WITH_HASH = re.compile(
-    rf"^(.{{{SECURE_HASH_LENGTH}}})(\d+)$"
-)
-# Allow any sequence of characters following the ID part
-PATH_PATTERN_WITH_ID = re.compile(r"(\d+)(?:/[\S\s]+)?")
-
-# Define the routes for the web application
 routes = web.RouteTableDef()
 
-# Cache for ByteStreamer instances with a lock for thread safety
-# The cache size is configurable via Var.CACHE_SIZE, defaulting to 100
-class_cache: LRUCache = LRUCache(maxsize=int(getattr(Var, 'CACHE_SIZE', 100)))
-class_cache_lock = asyncio.Lock()
+# Configuration constants.
+SECURE_HASH_LENGTH = 6
+CHUNK_SIZE = 1 * 1024 * 1024
+MAX_CLIENTS = 50
+THREADPOOL_MAX_WORKERS = 10
 
+# Updated regex: Correctly capture start and end values with named groups.
+PATTERN_HASH_FIRST = re.compile(rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
+PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
+RANGE_REGEX = re.compile(r"bytes=(?P<start>\d*)-(?P<end>\d*)")
+
+# Global LRU cache for ByteStreamer instances.
+class_cache = LRUCache(maxsize=Var.CACHE_SIZE)
+cache_lock = asyncio.Lock()
+
+# Executor for wrapping synchronous generator calls.
+executor = ThreadPoolExecutor(max_workers=THREADPOOL_MAX_WORKERS)
+
+def json_error(status, message):
+    return json.dumps({"error": message})
 
 def exception_handler(func):
-    """
-    Decorator to handle exceptions consistently across route handlers.
-
-    Catches specific exceptions and raises appropriate HTTP errors.
-    Avoids logging for standard HTTP exceptions like HTTPNotFound.
-    """
     @wraps(func)
     async def wrapper(request):
         try:
             return await func(request)
-        except InvalidHash:
-            logger.warning(
-                f"Invalid hash for path: {request.match_info.get('path', '')}"
+        except InvalidHash as e:
+            raise web.HTTPForbidden(
+                text=json_error(403, "Invalid security credentials"),
+                content_type="application/json"
             )
-            raise web.HTTPForbidden(text="Invalid secure hash.")
         except FileNotFound as e:
-            logger.warning(
-                f"File not found for path: {request.match_info.get('path', '')}"
+            raise web.HTTPNotFound(
+                text=json_error(404, str(e)),
+                content_type="application/json"
             )
-            raise web.HTTPNotFound(text=str(e))
-        except (
-            AttributeError,
-            BadStatusLine,
-            ConnectionResetError,
-            ClientConnectionError,
-            ClientPayloadError,
-            ServerDisconnectedError,
-            asyncio.CancelledError,
-        ):
-            # Do not log expected client disconnections
-            logger.info("Client disconnected before completion.")
-            # Clean up resources and exit the coroutine without sending a response
-            return
+        except (ClientConnectionError, asyncio.CancelledError):
+            return web.Response(status=499)
         except web.HTTPException:
-            # Do not log standard HTTP exceptions like HTTPNotFound
             raise
         except Exception as e:
-            logger.exception(f"Unhandled exception occurred: {e}", exc_info=True)
-            raise web.HTTPInternalServerError(text="An unexpected error occurred.")
+            logger.exception("Unhandled exception")
+            raise web.HTTPInternalServerError(
+                text=json_error(500, "Internal server error"),
+                content_type="application/json"
+            )
     return wrapper
 
-
-def parse_path(request: web.Request, path_param: str) -> Tuple[int, str]:
-    """
-    Parses the path parameter to extract the message ID and secure hash.
-
-    Args:
-        request (web.Request): The incoming web request.
-        path_param (str): The path parameter from the URL.
-
-    Returns:
-        Tuple[int, str]: A tuple containing the message ID and secure hash.
-
-    Raises:
-        web.HTTPNotFound: If the path parameter is invalid or does not match the expected format.
-        web.HTTPForbidden: If the secure hash length is invalid.
-    """
-    logger.debug(f"Parsing path: {path_param}")
-
-    # Try matching the path with a secure hash prefix
-    match = PATH_PATTERN_WITH_HASH.match(path_param)
+def parse_media_request(path: str, query: dict) -> tuple[int, str]:
+    clean_path = unquote(path).strip('/')
+    match = PATTERN_HASH_FIRST.match(clean_path)
     if match:
-        secure_hash = match.group(1)
-        message_id = int(match.group(2))
-        logger.debug(f"Extracted secure_hash: {secure_hash}, message_id: {message_id}")
-    else:
-        # Fallback: extract message_id and get secure_hash from query parameters
-        id_match = PATH_PATTERN_WITH_ID.match(path_param)
-        if id_match:
-            message_id = int(id_match.group(1))
-            secure_hash = request.rel_url.query.get("hash")
-            if not secure_hash:
-                # Secure hash is missing; raise 404 without logging an error
-                raise web.HTTPNotFound(text="Invalid link. Secure hash is missing.")
-            logger.debug(
-                f"Extracted message_id: {message_id}, secure_hash from query: {secure_hash}"
-            )
-        else:
-            # Path parameter is invalid; raise 404 without logging an error
-            raise web.HTTPNotFound(text="Invalid link. Please check your URL.")
+        return int(match.group(2)), match.group(1)
+    match = PATTERN_ID_FIRST.match(clean_path)
+    if match:
+        message_id = int(match.group(1))
+        secure_hash = query.get("hash", "")
+        if len(secure_hash) != SECURE_HASH_LENGTH:
+            raise InvalidHash("Security token length mismatch")
+        return message_id, secure_hash
+    raise InvalidHash("Invalid URL structure")
 
-    # Validate the secure hash length
-    if len(secure_hash) != SECURE_HASH_LENGTH:
-        logger.warning(f"Invalid secure hash length for path: {path_param}")
-        raise web.HTTPForbidden(text="Invalid secure hash length.")
+def optimal_client_selection():
+    if not work_loads:
+        raise web.HTTPInternalServerError(
+            text=json_error(500, "No available clients"),
+            content_type="application/json"
+        )
+    client_id, _ = min(work_loads.items(), key=lambda item: item[1])
+    return client_id, multi_clients[client_id]
 
-    return message_id, secure_hash
+async def get_cached_streamer(client) -> ByteStreamer:
+    streamer = class_cache.get(client)
+    if streamer is None:
+        async with cache_lock:
+            streamer = class_cache.get(client)
+            if streamer is None:
+                streamer = ByteStreamer(client)
+                class_cache[client] = streamer
+    return streamer
 
+def sanitize_filename(filename: str) -> str:
+    return re.sub(r'[\n\r";]', '', filename)
 
-def select_client() -> Tuple[int, Any]:
-    """
-    Selects the client with the minimal workload.
-
-    Returns:
-        Tuple[int, Any]: A tuple containing the client's index and the client object.
-    """
-    # Find the client with the least workload
-    min_load_index = min(work_loads.items(), key=lambda x: x[1])[0]
-    client = multi_clients[min_load_index]
-    logger.debug(f"Selected client {min_load_index} with minimal load.")
-    return min_load_index, client
-
+@asynccontextmanager
+async def track_workload(client_id):
+    work_loads[client_id] += 1
+    try:
+        yield
+    finally:
+        work_loads[client_id] -= 1
 
 @routes.get("/status", allow_head=True)
-async def root_route_handler(_):
-    """
-    Handles the '/status' endpoint to provide server status information.
-
-    Returns:
-        web.Response: JSON response containing server status details.
-    """
-    current_time = time.time()
-    uptime = get_readable_time(current_time - StartTime)
-    connected_bots = len(multi_clients)
-
-    # Sort loads by bot index for consistent ordering
-    loads = {
-        f"bot{index}": load
-        for index, load in sorted(work_loads.items(), key=lambda x: x[0])
-    }
-
-    response_data = {
-        "server_status": "running",
-        "uptime": uptime,
-        "telegram_bot": f"@{StreamBot.username}",
-        "connected_bots": connected_bots,
-        "loads": loads,
-        "version": __version__,
-    }
-
-    return web.json_response(response_data)
-
-
-@routes.get(r"/watch/{path:[\S\s]+}", allow_head=True)
-@exception_handler
-async def stream_handler_watch(request: web.Request):
-    """
-    Handles the '/watch/{path}' endpoint to render the media player page.
-
-    Args:
-        request (web.Request): The incoming web request.
-
-    Returns:
-        web.Response: The HTTP response with the rendered HTML page.
-    """
-    path = request.match_info["path"]
-    logger.debug(f"Handling watch request from {request.remote} for path: {path}")
-    message_id, secure_hash = parse_path(request, path)
-
-    try:
-        page_content = await render_page(message_id, secure_hash)
-    except InvalidHash:
-        logger.warning(f"Invalid secure hash for message ID {message_id}")
-        raise web.HTTPForbidden(text="Invalid secure hash.")
-    except FileNotFound as e:
-        logger.warning(f"File not found for message ID {message_id}: {e}")
-        raise web.HTTPNotFound(text="Requested file not found.")
-    except Exception as e:
-        logger.error(
-            f"Error rendering page for message ID {message_id}: {e}", exc_info=True
-        )
-        raise web.HTTPInternalServerError(text="Failed to render media page.")
-
-    return web.Response(text=page_content, content_type='text/html')
-
-
-@routes.get(r"/{path:[\S\s]+}", allow_head=True)
-@exception_handler
-async def stream_handler(request: web.Request):
-    """
-    Handles the '/{path}' endpoint to stream media content.
-
-    Args:
-        request (web.Request): The incoming web request.
-
-    Returns:
-        web.Response: The HTTP response with the media stream.
-    """
-    path = request.match_info["path"]
-    logger.debug(f"Handling media stream request from {request.remote} for path: {path}")
-    message_id, secure_hash = parse_path(request, path)
-
-    # Delegate to the media_streamer function to handle streaming
-    return await media_streamer(request, message_id, secure_hash)
-
-
-async def media_streamer(
-    request: web.Request, message_id: int, secure_hash: str
-) -> web.Response:
-    """
-    Streams media files to the client, handling range requests for efficient streaming.
-
-    Args:
-        request (web.Request): The incoming web request.
-        message_id (int): The Telegram message ID of the media file.
-        secure_hash (str): The secure hash to validate the request.
-
-    Returns:
-        web.Response: The HTTP response with the media stream.
-
-    Raises:
-        web.HTTPException: If any errors occur during processing.
-    """
-    range_header = request.headers.get("Range")
-    logger.debug(f"Range header received: {range_header}")
-
-    # Select the client with the minimal workload
-    index, faster_client = select_client()
-    if Var.MULTI_CLIENT:
-        logger.info(
-            f"Client {index} ({faster_client}) is now serving a request from {request.remote}"
-        )
-
-    # Use an immutable identifier as cache key
-    client_id = id(faster_client)
-
-    # Thread-safe access to the class cache
-    async with class_cache_lock:
-        tg_connect = class_cache.get(client_id)
-        if tg_connect:
-            logger.debug(f"Cache hit for client {index}")
-        else:
-            try:
-                tg_connect = ByteStreamer(faster_client)
-                class_cache[client_id] = tg_connect
-                logger.debug(f"Created new ByteStreamer for client {index}")
-            except Exception as e:
-                logger.error(
-                    f"Failed to create ByteStreamer for client {index}: {e}",
-                    exc_info=True
-                )
-                raise web.HTTPInternalServerError(text="Failed to initialize media stream.")
-
-    # Retrieve file properties
-    try:
-        file_id = await tg_connect.get_file_properties(message_id)
-        logger.debug(f"Retrieved file properties for message ID {message_id}: {file_id}")
-    except InvalidHash:
-        logger.warning(f"Invalid secure hash for message with ID {message_id}")
-        raise web.HTTPForbidden(text="Invalid secure hash.")
-    except FileNotFound as e:
-        logger.warning(f"File not found for message ID {message_id}: {e}")
-        raise web.HTTPNotFound(text="Requested file not found.")
-    except Exception as e:
-        logger.error(
-            f"Error retrieving file properties for message ID {message_id}: {e}",
-            exc_info=True
-        )
-        raise web.HTTPInternalServerError(text="Failed to retrieve file properties.")
-
-    # Validate the secure hash
-    if file_id.unique_id[:SECURE_HASH_LENGTH] != secure_hash:
-        logger.warning(f"Invalid secure hash for message with ID {message_id}")
-        raise web.HTTPForbidden(text="Invalid secure hash.")
-
-    file_size = file_id.file_size
-    logger.debug(f"File size: {file_size}")
-
-    if file_size == 0:
-        logger.warning("File size is zero; cannot process range request.")
-        raise web.HTTPNotFound(text="File is empty.")
-
-    # Handle Range header for partial content requests
-    if range_header:
-        # Improved Range header parsing
-        # Match bytes=start-end, bytes=start-, or bytes=-suffix-length
-        range_match = re.match(r"bytes=(\d*)-(\d*)", range_header)
-        if range_match:
-            from_str, until_str = range_match.groups()
-            if from_str and until_str:
-                from_bytes = int(from_str)
-                until_bytes = int(until_str)
-            elif from_str and not until_str:
-                from_bytes = int(from_str)
-                until_bytes = file_size - 1
-            elif not from_str and until_str:
-                # Suffix range: last 'until_bytes' bytes
-                suffix_length = int(until_str)
-                from_bytes = max(file_size - suffix_length, 0)
-                until_bytes = file_size - 1
-            else:
-                # Invalid Range: no start and no end
-                logger.warning(f"Invalid Range header format: {range_header}")
-                raise web.HTTPBadRequest(text="Invalid Range header.")
-            logger.debug(f"Handling range from {from_bytes} to {until_bytes}")
-        else:
-            logger.warning(f"Invalid Range header format: {range_header}")
-            raise web.HTTPBadRequest(text="Invalid Range header.")
+async def status_endpoint(request):
+    # Calculate uptime
+    uptime_seconds = time.time() - StartTime
+    uptime_formatted = get_readable_time(uptime_seconds)
+    
+    # Sort workloads by value in ascending order
+    sorted_workloads = dict(sorted(
+        {f"client_{k}": v for k, v in work_loads.items()}.items(),
+        key=lambda item: item[1]
+    ))
+    
+    # Determine system load status
+    total_load = sum(work_loads.values())
+    if total_load < MAX_CLIENTS * 0.5:
+        status_level = "optimal"
+    elif total_load < MAX_CLIENTS * 0.8:
+        status_level = "high"
     else:
-        from_bytes = 0
-        until_bytes = file_size - 1
+        status_level = "critical"
+    
+    # Create structured response data
+    status_data = {
+        "server": {
+            "status": "operational",
+            "status_level": status_level,
+            "version": __version__,
+            "uptime": uptime_formatted,
+            "uptime_seconds": int(uptime_seconds),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        },
+        "telegram_bot": {
+            "username": f"@{StreamBot.username}",
+            "active_clients": len(multi_clients)
+        },
+        "resources": {
+            "total_workload": total_load,
+            "max_clients": MAX_CLIENTS,
+            "workload_distribution": sorted_workloads,
+            "cache": {
+                "current": len(class_cache),
+                "maximum": Var.CACHE_SIZE,
+                "utilization_percent": round((len(class_cache) / Var.CACHE_SIZE) * 100, 2)
+            }
+        },
+        "system": {
+            "chunk_size": f"{CHUNK_SIZE / (1024 * 1024):.1f} MB",
+            "thread_pool_workers": THREADPOOL_MAX_WORKERS
+        }
+    }
+    
+    # Return JSON response with pretty formatting
+    return web.json_response(
+        status_data,
+        dumps=lambda obj: json.dumps(obj, indent=2, sort_keys=False)
+    )
 
-    # Validate range values
-    if (
-        from_bytes >= file_size
-        or until_bytes >= file_size
-        or from_bytes < 0
-        or until_bytes < from_bytes
-    ):
-        logger.warning(
-            f"Requested Range Not Satisfiable: from_bytes={from_bytes}, "
-            f"until_bytes={until_bytes}, file_size={file_size}"
-        )
+@routes.get(r"/watch/{path:.+}", allow_head=True)
+@exception_handler
+async def media_preview(request: web.Request):
+    path = request.match_info["path"]
+    message_id, secure_hash = parse_media_request(path, request.query)
+    rendered_page = await render_page(message_id, secure_hash)
+    return web.Response(
+        text=rendered_page,
+        content_type='text/html',
+        headers={"Cache-Control": "no-cache, must-revalidate"}
+    )
+
+@routes.get(r"/{path:.+}", allow_head=True)
+@exception_handler
+async def media_delivery(request: web.Request):
+    client_id, client = optimal_client_selection()
+    async with track_workload(client_id):
+        path = request.match_info["path"]
+        message_id, secure_hash = parse_media_request(path, request.query)
+        return await handle_media_stream(request, message_id, secure_hash, client_id, client)
+
+async def handle_media_stream(request, message_id, secure_hash, client_id, client):
+    streamer = await get_cached_streamer(client)
+    file_meta = await streamer.get_file_properties(message_id)
+    if file_meta.unique_id[:SECURE_HASH_LENGTH] != secure_hash:
+        raise InvalidHash("Security token mismatch")
+    file_size = file_meta.file_size
+    range_header = request.headers.get("Range", "")
+    if range_header:
+        range_match = RANGE_REGEX.fullmatch(range_header)
+        if not range_match:
+            raise web.HTTPBadRequest(
+                text=json_error(400, "Malformed range header"),
+                content_type="application/json"
+            )
+        start = int(range_match.group("start")) if range_match.group("start") else 0
+        end = int(range_match.group("end")) if range_match.group("end") else file_size - 1
+    else:
+        try:
+            if hasattr(request, "http_range") and request.http_range:
+                start = request.http_range.start or 0
+                end = (request.http_range.stop or file_size) - 1
+            else:
+                start, end = 0, file_size - 1
+        except Exception:
+            start, end = 0, file_size - 1
+    if start < 0 or end >= file_size or start > end:
         raise web.HTTPRequestRangeNotSatisfiable(
             headers={"Content-Range": f"bytes */{file_size}"}
         )
-
-    # Optimize chunk size for streaming
-    chunk_size = 1 * 1024 * 1024  # 1 MB
-
-    # Calculate offsets and cuts for the requested range
-    offset = from_bytes - (from_bytes % chunk_size)
-    first_part_cut = from_bytes - offset
-    last_part_cut = (until_bytes % chunk_size) + 1
-    req_length = until_bytes - from_bytes + 1
-    part_count = ((until_bytes - offset) // chunk_size) + 1
-
-    logger.debug(
-        f"Streaming parameters - offset: {offset}, first_part_cut: {first_part_cut}, "
-        f"last_part_cut: {last_part_cut}, part_count: {part_count}, chunk_size: {chunk_size}"
-    )
-
-    # Determine MIME type and file name
-    mime_type = file_id.mime_type or "application/octet-stream"
-    file_name = (
-        file_id.file_name
-        or f"{secrets.token_hex(2)}{mimetypes.guess_extension(mime_type) or '.unknown'}"
-    )
-    # Escape quotes in filename
-    file_name_escaped = file_name.replace('"', '\\"')
-    # Encode filename for 'filename*'
-    file_name_encoded = quote(file_name)
-    # Set a fallback filename (ASCII-only, replacing spaces with underscores)
-    fallback_filename = re.sub(r'[^\w.\-]', '_', file_name)
-
-    # Set the appropriate headers and status code
+    offset = start - (start % CHUNK_SIZE)
+    first_chunk_cut = start - offset
+    last_chunk_cut = (end % CHUNK_SIZE) + 1
+    total_chunks = ((end - offset) // CHUNK_SIZE) + 1
+    mime_type = file_meta.mime_type or mimetypes.guess_type(file_meta.file_name)[0] or "application/octet-stream"
+    disposition = "inline" if mime_type.startswith(("video/", "audio/")) else "attachment"
+    original_filename = unquote(file_meta.file_name) if file_meta.file_name else f"file_{secrets.token_hex(4)}"
+    safe_filename = sanitize_filename(original_filename)
+    encoded_filename = quote(safe_filename)
     headers = {
         "Content-Type": mime_type,
-        "Content-Range": f"bytes {from_bytes}-{until_bytes}/{file_size}",
-        "Content-Length": str(req_length),
-        "Content-Disposition": (
-            f'inline; filename="{fallback_filename}"; '
-            f"filename*=UTF-8''{file_name_encoded}"
-        ),
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Content-Length": str(end - start + 1),
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded_filename}",
         "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Connection": "keep-alive"
     }
-    status = 206 if range_header else 200
-
-    # Get the file stream generator
-    try:
-        body = tg_connect.yield_file(
-            file_id, index, offset, first_part_cut, last_part_cut, part_count, chunk_size
+    if hasattr(streamer, 'async_yield_file'):
+        stream_generator = streamer.async_yield_file(
+            file_meta, client_id, offset, first_chunk_cut, last_chunk_cut, total_chunks, CHUNK_SIZE
         )
-    except Exception as e:
-        logger.error(
-            f"Error initiating file stream for message ID {message_id}: {e}",
-            exc_info=True
-        )
-        raise web.HTTPInternalServerError(text="Failed to initiate file stream.")
-
-    # Determine the type of generator and wrap if necessary
-    if inspect.isasyncgen(body):
-        # It's an async generator, use it directly
-        logger.debug("Using async generator for streaming.")
-    elif inspect.isgenerator(body):
-        # It's a synchronous generator, wrap it into an async generator
-        logger.debug("Wrapping sync generator into async generator.")
-        body = async_generator_from_sync(body)
     else:
-        # If it's neither, raise an error
-        logger.error("tg_connect.yield_file must return a generator.")
-        raise TypeError("tg_connect.yield_file must return a generator.")
-
-    # Return the streaming response with the appropriate body
+        stream_generator = streamer.yield_file(
+            file_meta, client_id, offset, first_chunk_cut, last_chunk_cut, total_chunks, CHUNK_SIZE
+        )
+    if inspect.isgenerator(stream_generator):
+        stream_generator = async_gen_wrapper(stream_generator)
     return web.Response(
-        status=status,
-        body=body,
-        headers=headers,
+        status=206 if range_header else 200,
+        body=stream_generator,
+        headers=headers
     )
 
-
-async def async_generator_from_sync(sync_gen):
-    """
-    Wraps a synchronous generator to make it asynchronous.
-
-    Args:
-        sync_gen (generator): The synchronous generator to wrap.
-
-    Yields:
-        bytes: The next chunk of data from the generator.
-
-    Raises:
-        Exception: Propagates any exception raised by the synchronous generator.
-    """
+async def async_gen_wrapper(sync_gen):
     loop = asyncio.get_running_loop()
-    iterator = iter(sync_gen)
-    while True:
+    try:
+        while True:
+            try:
+                yield await loop.run_in_executor(executor, next, sync_gen)
+            except StopIteration:
+                break
+    except Exception as e:
+        logger.error(f"Error in async generator wrapper: {e}")
         try:
-            # Run the next() call in a separate thread to avoid blocking the event loop
-            chunk = await loop.run_in_executor(None, next, iterator)
-            yield chunk
-        except StopIteration:
-            # Generator is exhausted
-            break
-        except Exception as e:
-            # Log any unexpected exceptions and re-raise to avoid silent failures
-            logger.exception(f"Error in async generator: {e}", exc_info=True)
-            raise
+            sync_gen.close()
+        except Exception:
+            pass

@@ -6,8 +6,11 @@ import glob
 import asyncio
 import importlib.util
 from pathlib import Path
+from datetime import datetime
+
 from pyrogram import idle
 from aiohttp import web
+from Thunder import __version__
 from Thunder.bot import StreamBot
 from Thunder.vars import Var
 from Thunder.server import web_server
@@ -15,82 +18,150 @@ from Thunder.utils.keepalive import ping_server
 from Thunder.bot.clients import initialize_clients
 from Thunder.utils.logger import logger
 
-# Plugin path
+
+# Constants
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
-plugins = glob.glob(PLUGIN_PATH)
+VERSION = __version__
 
-async def start_services():
-    """Initializes and starts all essential services for the bot."""
 
-    logger.info("\n================= Starting Telegram Bot Initialization =================")
-    try:
-        await StreamBot.start()
-        bot_info = await StreamBot.get_me()
-        StreamBot.username = bot_info.username
-        logger.info("----------------- Telegram Bot Initialized Successfully -----------------")
-        logger.info("Bot Username: @%s", StreamBot.username)
-    except Exception as e:
-        logger.error("Failed to initialize the Telegram Bot: %s", e)
-        return
+def print_banner():
+    """Print a visually appealing banner at startup."""
+    banner = f"""
+╔═══════════════════════════════════════════════════════════════════╗
+║                                                                   ║
+║   ████████╗██╗  ██╗██╗   ██╗███╗   ██╗██████╗ ███████╗██████╗     ║
+║   ╚══██╔══╝██║  ██║██║   ██║████╗  ██║██╔══██╗██╔════╝██╔══██╗    ║
+║      ██║   ███████║██║   ██║██╔██╗ ██║██║  ██║█████╗  ██████╔╝    ║
+║      ██║   ██╔══██║██║   ██║██║╚██╗██║██║  ██║██╔══╝  ██╔══██╗    ║
+║      ██║   ██║  ██║╚██████╔╝██║ ╚████║██████╔╝███████╗██║  ██║    ║
+║      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝ ╚══════╝╚═╝  ╚═╝    ║
+║                                                                   ║
+║                  File Streaming Bot v{VERSION}                        ║
+╚═══════════════════════════════════════════════════════════════════╝
+    """
+    logger.info(banner)
 
-    logger.info("\n================= Starting Client Initialization =================")
-    try:
-        await initialize_clients()
-        logger.info("------------------ Clients Initialized Successfully ------------------")
-    except Exception as e:
-        logger.error("Failed to initialize clients: %s", e)
-        return
 
-    logger.info("\n================= Importing Plugins =================")
+async def import_plugins():
+    """Import all plugins from the plugins directory."""
+    logger.info("╔══════════════════ IMPORTING PLUGINS ═══════════════════╗")
+    plugins = glob.glob(PLUGIN_PATH)
+    
+    if not plugins:
+        logger.warning("No plugins found to import!")
+        return 0
+    
+    success_count = 0
+    failed_plugins = []
+    
     for file_path in plugins:
         try:
             plugin_path = Path(file_path)
             plugin_name = plugin_path.stem
             import_path = f"Thunder.bot.plugins.{plugin_name}"
+            
             spec = importlib.util.spec_from_file_location(import_path, plugin_path)
+            if spec is None or spec.loader is None:
+                logger.error(f"Invalid plugin specification for {plugin_name}")
+                failed_plugins.append(plugin_name)
+                continue
+                
             module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
             sys.modules[import_path] = module
-            logger.info("Successfully imported plugin: %s", plugin_name)
+            spec.loader.exec_module(module)
+            
+            success_count += 1
+            logger.info(f"▶ Successfully imported: {plugin_name}")
         except Exception as e:
-            logger.error("Failed to import plugin %s: %s", plugin_name, e)
-    logger.info("------------------ Plugin Importing Completed ------------------")
+            plugin_name = Path(file_path).stem
+            logger.error(f"✖ Failed to import plugin {plugin_name}: {e}")
+            failed_plugins.append(plugin_name)
+    
+    logger.info(f"▶ Total: {len(plugins)} | Success: {success_count} | Failed: {len(failed_plugins)}")
+    
+    if failed_plugins:
+        logger.warning(f"▶ Failed plugins: {', '.join(failed_plugins)}")
+        
+    logger.info("╚════════════════════════════════════════════════════════╝")
+    return success_count
 
+
+async def start_services():
+    """Initialize and start all essential services for the bot."""
+    start_time = datetime.now()
+    
+    print_banner()
+    
+    logger.info("╔══════════════ INITIALIZING BOT SERVICES ═══════════════╗")
+    
+    # Initialize Telegram Bot
+    logger.info("▶ Starting Telegram Bot initialization...")
+    try:
+        await StreamBot.start()
+        bot_info = await StreamBot.get_me()
+        StreamBot.username = bot_info.username
+        logger.info(f"✓ Bot initialized successfully as @{StreamBot.username}")
+    except Exception as e:
+        logger.error(f"✖ Failed to initialize Telegram Bot: {e}")
+        return
+    
+    # Initialize Clients
+    logger.info("▶ Starting Client initialization...")
+    try:
+        await initialize_clients()
+        logger.info("✓ Clients initialized successfully")
+    except Exception as e:
+        logger.error(f"✖ Failed to initialize clients: {e}")
+        return
+    
+    # Import Plugins
+    await import_plugins()
+    
+    # Start keep-alive service for Heroku
     if Var.ON_HEROKU:
-        logger.info("\n================= Starting Keep-Alive Service =================")
+        logger.info("▶ Starting Keep-Alive Service...")
         asyncio.create_task(ping_server())
-        logger.info("----------------- Keep-Alive Service Started -----------------")
-
-    logger.info("\n================= Initializing Web Server =================")
+        logger.info("✓ Keep-Alive Service started")
+    
+    # Initialize Web Server
+    logger.info("▶ Starting Web Server initialization...")
     try:
         app_runner = web.AppRunner(await web_server())
         await app_runner.setup()
         bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
-        logger.info("------------------ Web Server Initialized Successfully ------------------")
-        logger.info("Server Address: %s:%s", bind_address, Var.PORT)
+        logger.info(f"✓ Web Server started at {bind_address}:{Var.PORT}")
     except Exception as e:
-        logger.error("Failed to start the web server: %s", e)
+        logger.error(f"✖ Failed to start Web Server: {e}")
         return
-
-    logger.info("\n================= Service Started =================")
-    logger.info("Bot User: %s", bot_info.first_name)
-    logger.info("Server Running On: %s:%s", bind_address, Var.PORT)
-    logger.info("Owner: %s", Var.OWNER_USERNAME)
+    
+    # Print completion message
+    elapsed_time = (datetime.now() - start_time).total_seconds()
+    logger.info("╠════════════════════════════════════════════════════════╣")
+    logger.info(f"▶ Bot Name: {bot_info.first_name}")
+    logger.info(f"▶ Username: @{bot_info.username}")
+    logger.info(f"▶ Server: {bind_address}:{Var.PORT}")
+    logger.info(f"▶ Owner: {Var.OWNER_USERNAME}")
     if Var.ON_HEROKU:
-        logger.info("App URL: %s", Var.FQDN)
-    logger.info("====================================================")
-
+        logger.info(f"▶ App URL: {Var.FQDN}")
+    logger.info(f"▶ Startup Time: {elapsed_time:.2f} seconds")
+    logger.info("╚════════════════════════════════════════════════════════╝")
+    logger.info("▶ Bot is now running! Press CTRL+C to stop.")
+    
+    # Keep the bot running
     await idle()
+
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
-        logger.info("\n================= Service Stopped by User =================")
+        logger.info("╔═══════════════════════════════════════════════════════╗")
+        logger.info("║              Bot stopped by user (CTRL+C)             ║")
+        logger.info("╚═══════════════════════════════════════════════════════╝")
     except Exception as e:
-        logger.error("An unexpected error occurred: %s", e)
+        logger.error(f"An unexpected error occurred: {e}")
     finally:
         loop.close()

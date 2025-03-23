@@ -1,9 +1,10 @@
 aiofiles
 aiohttp
+aiocache
 apscheduler
 cachetools
 dnspython
-git+https://github.com/KurimuzonAkuma/pyrogram.git@dev
+https://github.com/KurimuzonAkuma/pyrogram/archive/refs/tags/v2.1.36.zip
 motor
 psutil
 pyromod

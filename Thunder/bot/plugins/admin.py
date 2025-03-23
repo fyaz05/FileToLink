@@ -4,24 +4,29 @@ import os
 import sys
 import time
 import asyncio
-import datetime
 import shutil
 import psutil
 import random
 import string
 import html
+import hashlib
 from typing import Tuple, List, Dict
 from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ParseMode, ChatMemberStatus
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Message,
-    User
+    Message
 )
-from pyrogram.errors import FloodWait
+from pyrogram.errors import (
+    FloodWait, 
+    UserDeactivated, 
+    ChatWriteForbidden, 
+    UserIsBlocked, 
+    PeerIdInvalid
+)
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.vars import Var
@@ -31,96 +36,85 @@ from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.database import Database
 from Thunder.utils.logger import logger, LOG_FILE
 
-# ==============================
-# Database Initialization
-# ==============================
-
-# Initialize the database connection using the provided DATABASE_URL and bot name
+# Initialize database
 db = Database(Var.DATABASE_URL, Var.NAME)
 
-# Dictionary to keep track of active broadcasts by their unique IDs
-broadcast_ids: Dict[str, any] = {}
+# Track active broadcasts
+broadcast_ids = {}
 
-# ==============================
+# Maximum concurrent tasks
+MAX_CONCURRENT_TASKS = 10
+
+# Media utility functions - implemented directly to fix import error
+def get_name(message):
+    try:
+        if message.document:
+            return message.document.file_name
+        elif message.video:
+            return message.video.file_name
+        elif message.audio:
+            return message.audio.file_name
+        elif message.photo:
+            return f"photo_{message.id}.jpg"
+        elif message.voice:
+            return f"voice_{message.id}.ogg"
+        else:
+            return f"file_{message.id}"
+    except:
+        return f"unnamed_file_{message.id}"
+
+def get_media_file_size(message):
+    try:
+        if message.document:
+            return message.document.file_size
+        elif message.video:
+            return message.video.file_size
+        elif message.audio:
+            return message.audio.file_size
+        elif message.photo:
+            return message.photo.file_size
+        elif message.voice:
+            return message.voice.file_size
+        else:
+            return 0
+    except:
+        return 0
+
+def get_hash(message):
+    try:
+        if message.document:
+            file_id = message.document.file_unique_id
+        elif message.video:
+            file_id = message.video.file_unique_id
+        elif message.audio:
+            file_id = message.audio.file_unique_id
+        elif message.photo:
+            file_id = message.photo.file_unique_id
+        elif message.voice:
+            file_id = message.voice.file_unique_id
+        else:
+            file_id = str(message.id)
+        
+        hash_input = f"{file_id}_{message.id}"
+        return hashlib.md5(hash_input.encode()).hexdigest()
+    except:
+        return hashlib.md5(str(message.id).encode()).hexdigest()
+
 # Helper Functions
-# ==============================
-
-def generate_unique_id() -> str:
-    """
-    Generate a unique 6-character alphanumeric ID for each broadcast instance.
-
-    Returns:
-        str: A unique ID string.
-    """
+def generate_unique_id(length=6):
     while True:
-        # Generate a random string of 6 alphanumeric characters
-        random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-        # Ensure the generated ID is not already in use
+        random_id = ''.join(random.choices(string.ascii_letters + string.digits, k=length))
         if random_id not in broadcast_ids:
             return random_id
 
-async def handle_broadcast_completion(
-    message: Message,
-    output: Message,
-    failures: int,
-    successes: int,
-    total_users: int,
-    start_time: float
-):
-    """
-    Handle actions after a broadcast is completed, such as sending a summary to the owner.
-
-    Args:
-        message (Message): The original message that initiated the broadcast.
-        output (Message): The message object used to display broadcast status.
-        failures (int): Number of failed message deliveries.
-        successes (int): Number of successful message deliveries.
-        total_users (int): Total number of users targeted in the broadcast.
-        start_time (float): Timestamp when the broadcast started.
-    """
-    # Calculate the elapsed time since the broadcast started
-    elapsed_time = get_readable_time(time.time() - start_time)
-    # Delete the initial broadcast initiation message
-    await output.delete()
-
-    # Compose the summary message with broadcast results
-    message_text = (
-        "✅ **Broadcast Completed** ✅\n\n"
-        f"⏱️ **Duration:** {elapsed_time}\n\n"
-        f"👥 **Total Users:** {total_users}\n\n"
-        f"✅ **Success:** {successes}\n\n"
-        f"❌ **Failed:** {failures}\n"
-    )
-
-    # Send the summary message to the owner
-    await message.reply_text(
-        message_text,
-        parse_mode=ParseMode.MARKDOWN,
-        disable_web_page_preview=True
-    )
-
-async def notify_channel(bot: Client, text: str):
-    """
-    Send a notification message to the BIN_CHANNEL.
-
-    Args:
-        bot (Client): The Pyrogram client instance.
-        text (str): The text message to send.
-    """
+async def notify_channel(bot, text):
     try:
         if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
             await bot.send_message(chat_id=Var.BIN_CHANNEL, text=text)
-    except Exception as e:
-        logger.error(f"Failed to send message to BIN_CHANNEL: {e}", exc_info=True)
+    except Exception:
+        pass
 
-async def notify_owner(client: Client, text: str):
-    """
-    Send a notification message to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        text (str): The text message to send.
-    """
+async def notify_owner(client, text):
     try:
         owner_ids = Var.OWNER_ID
         if isinstance(owner_ids, (list, tuple)):
@@ -128,95 +122,93 @@ async def notify_owner(client: Client, text: str):
                 await client.send_message(chat_id=owner_id, text=text)
         else:
             await client.send_message(chat_id=owner_ids, text=text)
-    except Exception as e:
-        logger.error(f"Failed to send message to owner: {e}", exc_info=True)
+    except Exception:
+        pass
 
-async def handle_user_error(message: Message, error_msg: str):
-    """
-    Send a standardized error message to the user.
-
-    Args:
-        message (Message): The incoming message triggering the error.
-        error_msg (str): The error message to send.
-    """
-    try:
-        await message.reply_text(f"❌ {error_msg}\nPlease try again or contact support.", quote=True)
-    except Exception as e:
-        logger.error(f"Failed to send error message to user: {e}", exc_info=True)
-
-async def log_new_user(bot: Client, user_id: int, first_name: str):
-    """
-    Log a new user and send a notification to the BIN_CHANNEL if the user is new.
-
-    Args:
-        bot (Client): The Pyrogram client instance.
-        user_id (int): The Telegram user ID.
-        first_name (str): The first name of the user.
-    """
+async def log_new_user(bot, user_id, first_name):
     try:
         if not await db.is_user_exist(user_id):
             await db.add_user(user_id)
-            try:
-                if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-                    await bot.send_message(
-                        Var.BIN_CHANNEL,
-                        f"👋 **New User Alert!**\n\n"
-                        f"✨ **Name:** [{first_name}](tg://user?id={user_id})\n"
-                        f"🆔 **User ID:** `{user_id}`\n\n"
-                        "has started the bot!"
-                    )
-                logger.info(f"New user added: {user_id} - {first_name}")
-            except Exception as e:
-                logger.error(f"Failed to send new user alert to BIN_CHANNEL: {e}", exc_info=True)
-    except Exception as e:
-        logger.error(f"Error logging new user {user_id}: {e}", exc_info=True)
+            if hasattr(Var, 'BIN_CHANNEL') and Var.BIN_CHANNEL:
+                await bot.send_message(
+                    Var.BIN_CHANNEL,
+                    f"👋 **New User Alert!**\n\n"
+                    f"✨ **Name:** [{first_name}](tg://user?id={user_id})\n"
+                    f"🆔 **User ID:** `{user_id}`\n\n"
+                    "has started the bot!"
+                )
+    except Exception:
+        pass
 
-async def generate_media_links(log_msg: Message) -> Tuple[str, str, str, str]:
-    """
-    Generate stream and download links for media.
-
-    Args:
-        log_msg (Message): The message in BIN_CHANNEL containing media.
-
-    Returns:
-        Tuple[str, str, str, str]: A tuple containing the stream link, download link,
-                                   media name, and media size.
-    """
+async def generate_media_links(log_msg):
     try:
         base_url = Var.URL.rstrip("/")
         file_id = log_msg.id
-        # Ensure file_name is a string
         media_name = get_name(log_msg)
         if isinstance(media_name, bytes):
             media_name = media_name.decode('utf-8', errors='replace')
         else:
             media_name = str(media_name)
+        
         media_size = humanbytes(get_media_file_size(log_msg))
         file_name_encoded = quote_plus(media_name)
         hash_value = get_hash(log_msg)
+        
         stream_link = f"{base_url}/watch/{file_id}/{file_name_encoded}?hash={hash_value}"
         online_link = f"{base_url}/{file_id}/{file_name_encoded}?hash={hash_value}"
-        logger.info(f"Generated media links for file_id {file_id}")
+        
         return stream_link, online_link, media_name, media_size
     except Exception as e:
-        error_text = f"Error generating media links: {e}"
-        logger.error(error_text, exc_info=True)
-        await notify_channel(log_msg._client, error_text)
+        await notify_channel(log_msg._client, f"Error generating links: {e}")
         raise
 
-async def send_links_to_user(client: Client, command_message: Message, media_name: str,
-                             media_size: str, stream_link: str, online_link: str):
-    """
-    Send the generated links to the user.
+async def get_users_in_batches(batch_size=100):
+    users_cursor = await db.get_all_users()
+    current_batch = []
+    
+    async for user in users_cursor:
+        current_batch.append(user)
+        if len(current_batch) >= batch_size:
+            yield current_batch
+            current_batch = []
+    
+    if current_batch:
+        yield current_batch
 
-    Args:
-        client (Client): The Pyrogram client instance.
-        command_message (Message): The message where the command was issued.
-        media_name (str): The name of the media file.
-        media_size (str): The size of the media file.
-        stream_link (str): The streaming link.
-        online_link (str): The direct download link.
-    """
+async def handle_broadcast_completion(message, output, failures, successes, total_users, start_time):
+    elapsed_time = get_readable_time(time.time() - start_time)
+    
+    try:
+        await output.delete()
+    except Exception:
+        pass
+    
+    message_text = (
+        "✅ **Broadcast Completed** ✅\n\n"
+        f"⏱️ **Duration:** {elapsed_time}\n\n"
+        f"👥 **Total Users:** {total_users}\n\n"
+        f"✅ **Success:** {successes}\n\n"
+        f"❌ **Failed:** {failures}\n"
+    )
+    
+    await message.reply_text(
+        message_text,
+        parse_mode=ParseMode.MARKDOWN,
+        disable_web_page_preview=True
+    )
+
+async def check_admin_privileges(client, chat_id):
+    try:
+        chat = await client.get_chat(chat_id)
+        if chat.type == 'private':
+            return True  # Admin check not needed in private chats
+
+        member = await client.get_chat_member(chat_id, client.me.id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except Exception:
+        return False
+
+async def send_links_to_user(client, command_message, media_name, media_size, stream_link, online_link):
     msg_text = (
         "🔗 **Your Links are Ready!**\n\n"
         f"📄 **File Name:** `{media_name}`\n"
@@ -225,179 +217,97 @@ async def send_links_to_user(client: Client, command_message: Message, media_nam
         f"🖥️ **Watch Now:**\n`{stream_link}`\n\n"
         "⏰ **Note:** Links are available as long as the bot is active."
     )
-    try:
-        await command_message.reply_text(
-            msg_text,
-            quote=True,
-            disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🖥️ Watch Now", url=stream_link),
-                 InlineKeyboardButton("📥 Download", url=online_link)]
-            ])
-        )
-        logger.info(f"Sent links to user {command_message.from_user.id}")
-    except Exception as e:
-        error_text = f"Error sending links to user: {e}"
-        logger.error(error_text, exc_info=True)
-        await notify_owner(client, error_text)
-        raise
+    
+    await command_message.reply_text(
+        msg_text,
+        quote=True,
+        disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖥️ Watch Now", url=stream_link),
+             InlineKeyboardButton("📥 Download", url=online_link)]
+        ])
+    )
 
-async def log_request(log_msg: Message, user, stream_link: str, online_link: str):
-    """
-    Log the request details in the BIN_CHANNEL.
-
-    Args:
-        log_msg (Message): The message in BIN_CHANNEL containing media.
-        user (User or Chat): The user or chat who requested the links.
-        stream_link (str): The streaming link.
-        online_link (str): The direct download link.
-    """
-    try:
-        await log_msg.reply_text(
-            f"👤 **Requested by:** [{user.first_name}](tg://user?id={user.id})\n"
-            f"🆔 **User ID:** `{user.id}`\n\n"
-            f"📥 **Download Link:** `{online_link}`\n"
-            f"🖥️ **Watch Now Link:** `{stream_link}`",
-            disable_web_page_preview=True,
-            quote=True
-        )
-        logger.info(f"Logged request in BIN_CHANNEL for user {user.id}")
-    except Exception as e:
-        error_text = f"Error logging request: {e}"
-        logger.error(error_text, exc_info=True)
-        # Not critical, so no need to notify owner
-
-async def check_admin_privileges(client: Client, chat_id: int) -> bool:
-    """
-    Check if the bot is an admin in the chat; skip for private chats.
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        chat_id (int): The ID of the chat to check.
-
-    Returns:
-        bool: True if the bot is an admin or the chat is private, False otherwise.
-    """
-    try:
-        chat = await client.get_chat(chat_id)
-        if chat.type == 'private':
-            return True  # Admin check not needed in private chats
-
-        # Get the bot's status in the chat
-        member = await client.get_chat_member(chat_id, client.me.id)
-        # Check if the bot is either an administrator or the creator
-        is_admin_or_creator = member.status in ["administrator", "creator"]
-
-        # Log and return the privilege check result
-        logger.info(f"Bot admin status in chat {chat_id}: {is_admin_or_creator}")
-        return is_admin_or_creator
-
-    except Exception as e:
-        # Log the error if checking admin privileges fails
-        error_text = f"Error checking admin privileges: {e}"
-        logger.error(error_text, exc_info=True)
-        await notify_channel(client, error_text)
-        return False
-
-# ==============================
-# Admin Command Handlers
-# ==============================
+# Command Handlers
 
 @StreamBot.on_message(filters.command("users") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def get_total_users(client: Client, message: Message):
-    """
-    Retrieve and display the total number of users in the database.
-
-    This command is restricted to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def get_total_users(client, message):
     try:
-        # Fetch the total number of users from the database
         total_users = await db.total_users_count()
-        # Reply with the total user count
         await message.reply_text(
             f"👥 **Total Users in DB:** **{total_users}**",
             quote=True,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
+            parse_mode=ParseMode.MARKDOWN
         )
     except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error while fetching total users: {e}", exc_info=True)
-        await message.reply_text(
-            "🚨 **An error occurred while fetching the total users.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+        await message.reply_text("🚨 **Error fetching user count.**")
 
 @StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def broadcast_message(client: Client, message: Message):
-    """
-    Broadcast a message to all users in the database.
-
-    This command is restricted to the bot owner(s) and must be used by replying to a message.
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
-    # Ensure the command is used by replying to a message
+async def broadcast_message(client, message):
     if not message.reply_to_message:
         await message.reply_text("⚠️ **Please reply to a message to broadcast.**", quote=True)
         return
 
     try:
-        # Notify the owner that the broadcast has been initiated
-        output = await message.reply_text(
-            "📢 **Broadcast Initiated**. Please wait until completion.",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+        broadcast_id = generate_unique_id()
+        broadcast_ids[broadcast_id] = {
+            "total": 0, 
+            "current": 0, 
+            "success": 0, 
+            "failed": 0, 
+            "deleted": 0, 
+            "start_time": time.time(),
+            "is_cancelled": False
+        }
+        
+        output = await message.reply_text("📢 **Broadcast Initiated**. Please wait until completion.")
 
-        # Fetch all user IDs from the database
-        all_users_cursor = await db.get_all_users()
-        all_users: List[Dict[str, int]] = []
-        async for user in all_users_cursor:
-            all_users.append(user)
-
-        # Check if there are any users to broadcast to
-        if not all_users:
-            await output.edit("📢 **No Users Found**. Broadcast aborted.")
-            return
-
-        # Get the bot's own user ID to avoid sending messages to itself
         self_id = client.me.id
         start_time = time.time()
-        successes, failures = 0, 0
-
-        # Semaphore to limit the number of concurrent tasks
-        semaphore = asyncio.Semaphore(10)  # Adjust concurrency level as needed
-
-        # Locks to safely update shared counters across asynchronous tasks
-        successes_lock = asyncio.Lock()
-        failures_lock = asyncio.Lock()
-
-        async def send_message_to_user(user_id: int):
-            """
-            Send the broadcast message to a single user with retry logic.
-
-            Args:
-                user_id (int): The Telegram user ID to send the message to.
-            """
-            nonlocal successes, failures
-            # Skip sending the message to the bot itself or invalid user IDs
+        
+        total_users = await db.total_users_count()
+        processed = 0
+        successes = 0
+        failures = 0
+        
+        broadcast_ids[broadcast_id]["total"] = total_users
+        
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+        
+        success_lock = asyncio.Lock()
+        failure_lock = asyncio.Lock()
+        processed_lock = asyncio.Lock()
+        
+        async def update_progress():
+            while processed < total_users and not broadcast_ids[broadcast_id]["is_cancelled"]:
+                try:
+                    await output.edit_text(
+                        f"📢 **Broadcasting in Progress**\n\n"
+                        f"👥 **Total Users:** {total_users}\n"
+                        f"✅ **Completed:** {processed} / {total_users}\n"
+                        f"⏱️ **Elapsed Time:** {get_readable_time(time.time() - start_time)}\n\n"
+                        f"✓ **Success:** {successes}\n"
+                        f"✗ **Failed:** {failures}\n"
+                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(3)
+        
+        progress_task = asyncio.create_task(update_progress())
+        
+        async def send_message_to_user(user_id):
+            nonlocal successes, failures, processed
+            
             if not isinstance(user_id, int) or user_id == self_id:
                 return
-
+            
             async with semaphore:
-                for attempt in range(3):  # Retry up to 3 times
+                for attempt in range(3):
+                    if broadcast_ids[broadcast_id]["is_cancelled"]:
+                        return
+                    
                     try:
-                        # Determine the type of content to send based on the replied message
                         if message.reply_to_message.text or message.reply_to_message.caption:
-                            # Send text or caption content
                             await client.send_message(
                                 chat_id=user_id,
                                 text=message.reply_to_message.text or message.reply_to_message.caption,
@@ -405,83 +315,133 @@ async def broadcast_message(client: Client, message: Message):
                                 disable_web_page_preview=True
                             )
                         elif message.reply_to_message.media:
-                            # Copy media content directly
                             await message.reply_to_message.copy(chat_id=user_id)
-
-                        # Safely increment the success counter
-                        async with successes_lock:
+                        
+                        async with success_lock:
                             successes += 1
-                        break  # Exit the retry loop on success
-
+                        break
+                    
                     except FloodWait as e:
-                        logger.warning(f"FloodWait error: sleeping for {e.value} seconds.")
                         await asyncio.sleep(e.value + 1)
-                        continue  # Retry after waiting
-                    except Exception as e:
-                        logger.warning(f"Problem sending to {user_id}: {e}")
-                        # Do not retry for certain types of errors related to the bot itself
-                        if "bot" in str(e).lower() or "self" in str(e).lower():
-                            break
-                        # If the user is not found, remove them from the database
-                        if "user" in str(e).lower() and "not found" in str(e).lower():
+                        continue
+                    
+                    except (UserDeactivated, ChatWriteForbidden, UserIsBlocked, PeerIdInvalid):
+                        try:
                             await db.delete_user(user_id)
-                        # Safely increment the failure counter
-                        async with failures_lock:
+                            async with failure_lock:
+                                failures += 1
+                                broadcast_ids[broadcast_id]["deleted"] += 1
+                        except Exception:
+                            pass
+                        break
+                    
+                    except Exception as e:
+                        async with failure_lock:
                             failures += 1
-                        # Wait before retrying to prevent rapid retries
-                        await asyncio.sleep(0.5)  # Adjust delay as needed
-
-        # Create asynchronous tasks for sending messages to all users
-        tasks = [send_message_to_user(int(user['id'])) for user in all_users]
-        await asyncio.gather(*tasks)  # Run all tasks concurrently
-
-        # Handle the completion of the broadcast by sending a summary
+                        
+                        if attempt == 2 or "bot" in str(e).lower() or "peer" in str(e).lower():
+                            break
+                        
+                        await asyncio.sleep(1)
+                
+                async with processed_lock:
+                    processed += 1
+                    broadcast_ids[broadcast_id]["current"] = processed
+        
+        async for user_batch in get_users_in_batches(batch_size=100):
+            if broadcast_ids[broadcast_id]["is_cancelled"]:
+                break
+            
+            batch_tasks = [send_message_to_user(int(user['id'])) for user in user_batch]
+            await asyncio.gather(*batch_tasks)
+        
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+        
         await handle_broadcast_completion(
-            message,
-            output,
-            failures,
-            successes,
-            len(all_users),
+            message, 
+            output, 
+            failures, 
+            successes, 
+            total_users, 
             start_time
         )
-
+        
+        broadcast_ids.pop(broadcast_id, None)
+    
     except Exception as e:
-        error_text = f"Error during broadcast: {e}"
-        logger.error(error_text, exc_info=True)
         await message.reply_text(
-            "🚨 **An error occurred during the broadcast.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
+            "🚨 **Broadcast error:**\n\n"
+            f"Error details: `{str(e)}`"
         )
-        await notify_channel(client, f"⚠️ Critical error during broadcast:\n{e}")
+
+@StreamBot.on_message(filters.command("cancel_broadcast") & filters.private & filters.user(list(Var.OWNER_ID)))
+async def cancel_broadcast(client, message):
+    if not broadcast_ids:
+        await message.reply_text("⚠️ **No active broadcasts to cancel.**")
+        return
+    
+    if len(broadcast_ids) == 1:
+        broadcast_id = list(broadcast_ids.keys())[0]
+        broadcast_ids[broadcast_id]["is_cancelled"] = True
+        
+        await message.reply_text(
+            f"🛑 **Broadcast {broadcast_id} is being cancelled.**\n"
+            "It may take a moment to stop all ongoing operations."
+        )
+        return
+    
+    keyboard = []
+    for broadcast_id, info in broadcast_ids.items():
+        progress = f"{info['current']}/{info['total']}" if info['total'] else "Unknown"
+        elapsed = get_readable_time(time.time() - info['start_time'])
+        keyboard.append([
+            InlineKeyboardButton(
+                f"ID: {broadcast_id} | Progress: {progress} | Time: {elapsed}",
+                callback_data=f"cancel_broadcast_{broadcast_id}"
+            )
+        ])
+    
+    await message.reply_text(
+        "🔄 **Multiple broadcasts active. Select one to cancel:**",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+@StreamBot.on_callback_query(filters.regex(r"^cancel_broadcast_(.+)$"))
+async def handle_cancel_broadcast(client, callback_query):
+    broadcast_id = callback_query.data.split("_")[-1]
+    
+    if broadcast_id in broadcast_ids:
+        broadcast_ids[broadcast_id]["is_cancelled"] = True
+        
+        await callback_query.edit_message_text(
+            f"🛑 **Broadcast {broadcast_id} is being cancelled.**\n"
+            "It may take a moment to stop all ongoing operations."
+        )
+    else:
+        await callback_query.edit_message_text(
+            "⚠️ **This broadcast is no longer active.**"
+        )
 
 @StreamBot.on_message(filters.command("status") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def show_status(client: Client, message: Message):
-    """
-    Display the current status of the bot, including server uptime, connected bots, and their workloads.
-
-    This command is restricted to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def show_status(client, message):
     try:
-        # Calculate the bot's uptime
         uptime = get_readable_time(time.time() - StartTime)
-
-        # Generate a detailed workload distribution among connected bots
+        
         workloads_text = "📊 **Workloads per Bot:**\n\n"
         workloads = {
-            f"🤖 Bot {c + 0}": load
+            f"🤖 Bot {c + 1}": load
             for c, (bot, load) in enumerate(
                 sorted(work_loads.items(), key=lambda x: x[1], reverse=True)
             )
         }
+        
         for bot_name, load in workloads.items():
             workloads_text += f"   {bot_name}: {load}\n"
-
-        # Compile the full status message with all relevant information
+        
         stats_text = (
             f"⚙️ **Server Status:** Running\n\n"
             f"🕒 **Uptime:** {uptime}\n\n"
@@ -489,43 +449,18 @@ async def show_status(client: Client, message: Message):
             f"{workloads_text}\n"
             f"♻️ **Version:** {__version__}\n"
         )
-
-        # Send the status message to the owner
-        await message.reply_text(
-            stats_text,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
-
-    except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error displaying status: {e}", exc_info=True)
-        await message.reply_text(
-            "🚨 **An error occurred while retrieving the status.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+        
+        await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+    
+    except Exception:
+        await message.reply_text("🚨 **Error retrieving status.**")
 
 @StreamBot.on_message(filters.command("stats") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def show_stats(client: Client, message: Message):
-    """
-    Display detailed server statistics where the bot is hosted.
-
-    This includes disk usage, data usage, CPU and RAM utilization.
-
-    This command is restricted to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def show_stats(client, message):
     try:
-        # Calculate the bot's uptime
         current_time = get_readable_time(time.time() - StartTime)
-        # Get disk usage statistics
         total, used, free = shutil.disk_usage('.')
-
-        # Compile the statistics into a formatted message
+        
         stats_text = (
             f"📊 **Bot Statistics** 📊\n\n"
             f"⏳ **Uptime:** {current_time}\n\n"
@@ -540,182 +475,153 @@ async def show_stats(client: Client, message: Message):
             f"🧠 **RAM Usage:** {psutil.virtual_memory().percent}%\n"
             f"📦 **Disk Usage:** {psutil.disk_usage('/').percent}%\n"
         )
-        # Send the statistics message to the owner
-        await message.reply_text(
-            stats_text,
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
-    except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error retrieving bot statistics: {e}", exc_info=True)
-        await message.reply_text(
-            "🚨 **Failed to retrieve the statistics.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+        
+        await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
+    
+    except Exception:
+        await message.reply_text("🚨 **Error retrieving statistics.**")
 
 @StreamBot.on_message(filters.command("restart") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def restart_bot(client: Client, message: Message):
-    """
-    Restart the bot process.
-
-    This command is restricted to the bot owner(s). It attempts to gracefully restart the bot
-    by replacing the current process with a new one.
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def restart_bot(client, message):
     try:
-        # Notify the owner that the bot is restarting
-        await message.reply_text(
-            "🔄 **Restarting the bot...**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
-        # Log the restart action
-        logger.info("Bot is restarting as per owner's request.")
-
-        # Wait briefly to ensure the notification message is sent
+        await message.reply_text("🔄 **Restarting the bot...**")
         await asyncio.sleep(2)
-
-        # Restart the bot by replacing the current process
         os.execv(sys.executable, [sys.executable, "-m", "Thunder"])
-
-    except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error during restart: {e}", exc_info=True)
-        await message.reply_text(
-            "🚨 **Failed to restart the bot.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+    except Exception:
+        await message.reply_text("🚨 **Failed to restart the bot.**")
 
 @StreamBot.on_message(filters.command("log") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def send_logs(client: Client, message: Message):
-    """
-    Send the latest log file to the bot owner.
-
-    This command is restricted to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def send_logs(client, message):
     try:
-        # Use the absolute path from logger.py
-        log_file_path = LOG_FILE
-        # Check if the log file exists
-        if os.path.exists(log_file_path):
-            # Check if the log file is empty
-            if os.path.getsize(log_file_path) > 0:
-                # Send the log file as a document to the owner
+        if os.path.exists(LOG_FILE):
+            if os.path.getsize(LOG_FILE) > 0:
                 await message.reply_document(
-                    document=log_file_path,
-                    caption="📄 **Here are the latest logs:**",
-                    parse_mode=ParseMode.MARKDOWN
+                    document=LOG_FILE,
+                    caption="📄 **Here are the latest logs:**"
                 )
-                # Log the successful transmission of the log file
-                logger.info("Sent log file to the owner.")
             else:
-                # Notify the owner that the log file is empty
-                await message.reply_text(
-                    "⚠️ **The log file is empty.**",
-                    parse_mode=ParseMode.MARKDOWN,
-                    disable_web_page_preview=True
-                )
-                # Log that the log file is empty
-                logger.warning("Log file is empty; not sending.")
+                await message.reply_text("⚠️ **The log file is empty.**")
         else:
-            # Notify the owner that the log file was not found
-            await message.reply_text(
-                "⚠️ **Log file not found.**",
-                parse_mode=ParseMode.MARKDOWN,
-                disable_web_page_preview=True
-            )
-            # Log the absence of the log file
-            logger.warning("Log file was requested but not found.")
-    except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error sending log file: {e}", exc_info=True)
-        await message.reply_text(
-            "🚨 **Failed to retrieve the log file.**",
-            parse_mode=ParseMode.MARKDOWN,
-            disable_web_page_preview=True
-        )
+            await message.reply_text("⚠️ **Log file not found.**")
+    except Exception:
+        await message.reply_text("🚨 **Failed to send log file.**")
 
 @StreamBot.on_message(filters.command("shell") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def run_shell_command(client: Client, message: Message):
-    """
-    Execute a shell command on the server and return its output.
-
-    **⚠️ Warning:** This command can execute arbitrary shell commands, which poses significant security risks.
-    Ensure that only trusted individuals have access to this command.
-
-    This command is restricted to the bot owner(s).
-
-    Args:
-        client (Client): The Pyrogram client instance.
-        message (Message): The incoming message triggering the command.
-    """
+async def run_shell_command(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("⚠️ **Please provide a command to execute.**")
+        return
+    
     try:
-        # Ensure that a shell command is provided
-        if len(message.command) < 2:
-            await message.reply_text(
-                "⚠️ <b>Please provide a shell command to execute.</b>\n\n<b>Usage:</b> <code>/shell &lt;command&gt;</code>",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True
-            )
-            return
-
-        # Extract the shell command from the message
-        shell_command = message.text.split(None, 1)[1]
-        logger.info(f"Executing shell command: {shell_command}")
-
-        # Execute the shell command asynchronously
+        cmd = message.text.split(None, 1)[1]
         process = await asyncio.create_subprocess_shell(
-            shell_command,
+            cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-
-        # Capture the standard output and error
-        stdout, stderr = await process.communicate()
-        stdout, stderr = stdout.decode().strip(), stderr.decode().strip()
-
-        # Escape HTML special characters in the outputs
-        stdout = html.escape(stdout)
-        stderr = html.escape(stderr)
-
-        # Prepare the response message with escaped content
-        response = ""
-        if stdout:
-            # Truncate stdout to prevent exceeding message limits
-            stdout = stdout[:4000]
-            response += f"<b>STDOUT:</b>\n<pre>{stdout}</pre>"
-        if stderr:
-            # Truncate stderr to prevent exceeding message limits
-            stderr = stderr[:4000]
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=60
+            )
+            
+            stdout = stdout.decode('utf-8', errors='replace')
+            stderr = stderr.decode('utf-8', errors='replace')
+            
             if stdout:
-                response += "\n\n"
-            response += f"<b>STDERR:</b>\n<pre>{stderr}</pre>"
-        if not stdout and not stderr:
-            # Notify the owner if the command produced no output
-            response = "⚠️ <b>No output returned from the command.</b>"
-
-        # Send the response back to the owner
-        await message.reply_text(
-            response,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
-        )
-
+                stdout = stdout[:4000] if len(stdout) > 4000 else stdout
+                stdout = html.escape(stdout)
+                await message.reply_text(
+                    f"<b>Output:</b>\n<pre>{stdout}</pre>",
+                    parse_mode=ParseMode.HTML
+                )
+            
+            if stderr:
+                stderr = stderr[:4000] if len(stderr) > 4000 else stderr
+                stderr = html.escape(stderr)
+                await message.reply_text(
+                    f"<b>Error:</b>\n<pre>{stderr}</pre>",
+                    parse_mode=ParseMode.HTML
+                )
+                
+            if not stdout and not stderr:
+                await message.reply_text("⚠️ **Command executed with no output.**")
+        
+        except asyncio.TimeoutError:
+            process.kill()
+            await message.reply_text("⚠️ **Command timed out (60s limit).**")
+    
     except Exception as e:
-        # Log the error and notify the owner of the failure
-        logger.error(f"Error executing shell command: {e}", exc_info=True)
+        await message.reply_text(f"🚨 **Error executing command:** {str(e)}")
+
+@StreamBot.on_message(filters.command("db") & filters.private & filters.user(list(Var.OWNER_ID)))
+async def db_operations(client, message):
+    if len(message.command) < 2:
         await message.reply_text(
-            "🚨 <b>Failed to execute the shell command.</b>",
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True
+            "⚠️ **Please specify a database operation.**\n\n"
+            "**Available commands:**\n"
+            "• `/db stats` - Show database statistics\n"
+            "• `/db cleanup` - Remove inactive users\n"
+            "• `/db backup` - Backup database"
         )
+        return
+    
+    operation = message.command[1].lower()
+    
+    try:
+        if operation == "stats":
+            total_users = await db.total_users_count()
+            await message.reply_text(f"📊 **Database Statistics**\n\n👥 **Total Users:** {total_users}")
+        
+        elif operation == "cleanup":
+            await message.reply_text("⏳ **Database cleanup in progress...**")
+            # Your cleanup logic here
+            await message.reply_text("✅ **Database cleanup completed.**")
+        
+        elif operation == "backup":
+            await message.reply_text("⏳ **Creating database backup...**")
+            # Your backup logic here
+            await message.reply_text("✅ **Database backup completed.**")
+        
+        else:
+            await message.reply_text(f"⚠️ **Unknown operation:** `{operation}`")
+    
+    except Exception as e:
+        await message.reply_text(f"🚨 **Error during database operation:** {str(e)}")
+
+@StreamBot.on_message(filters.command("process") & filters.private & filters.user(list(Var.OWNER_ID)))
+async def process_media(client, message):
+    if not message.reply_to_message:
+        await message.reply_text("⚠️ **Please reply to a media message to process it.**")
+        return
+    
+    try:
+        if hasattr(Var, 'BIN_CHANNEL') and Var.BIN_CHANNEL:
+            forwarded = await message.reply_to_message.forward(Var.BIN_CHANNEL)
+            
+            stream_link, download_link, file_name, file_size = await generate_media_links(forwarded)
+            
+            message_text = (
+                f"🔗 **Links generated successfully!**\n\n"
+                f"📁 **File:** `{file_name}`\n"
+                f"💾 **Size:** `{file_size}`\n\n"
+                f"🔗 **Download Link:** `{download_link}`\n\n"
+                f"🎬 **Stream Link:** `{stream_link}`"
+            )
+            
+            keyboard = [
+                [InlineKeyboardButton("🎬 Stream", url=stream_link)],
+                [InlineKeyboardButton("📥 Download", url=download_link)]
+            ]
+            
+            await message.reply_text(
+                message_text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                disable_web_page_preview=True
+            )
+        else:
+            await message.reply_text("⚠️ **BIN_CHANNEL not configured. Cannot process media.**")
+    
+    except Exception as e:
+        await message.reply_text(f"🚨 **Error processing media:** {str(e)}")

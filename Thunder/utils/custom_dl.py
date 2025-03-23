@@ -2,10 +2,11 @@
 
 import math
 import asyncio
-from typing import Dict, Union
+import time
+from typing import Dict, Union, Optional, AsyncGenerator
 from pyrogram import Client, utils, raw
 from pyrogram.session import Session, Auth
-from pyrogram.errors import AuthBytesInvalid, RPCError, FloodWait
+from pyrogram.errors import AuthBytesInvalid, RPCError, FloodWait, FileReferenceExpired, FileReferenceInvalid
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from Thunder.vars import Var
 from Thunder.bot import work_loads
@@ -14,70 +15,56 @@ from .file_properties import get_file_ids
 from Thunder.utils.logger import logger
 
 class ByteStreamer:
-    """
-    A custom class that handles streaming of media files from Telegram servers.
-
-    Attributes:
-        client (Client): The Pyrogram client instance.
-        clean_timer (int): Interval in seconds to clean the cache.
-        cached_file_ids (Dict[int, FileId]): A cache for file properties.
-        cache_lock (asyncio.Lock): An asyncio lock to ensure thread-safe access to the cache.
-    """
-
+    # A custom class that handles streaming of media files from Telegram servers
+    
     def __init__(self, client: Client):
-        """
-        Initialize the ByteStreamer with a Pyrogram client.
-
-        Args:
-            client (Client): The Pyrogram client instance.
-        """
         self.client = client
         self.clean_timer = 30 * 60  # Cache clean interval in seconds (30 minutes)
         self.cached_file_ids: Dict[int, FileId] = {}
+        self.file_references_cache: Dict[int, Dict[str, Union[FileId, float]]] = {}
         self.cache_lock = asyncio.Lock()
-        asyncio.create_task(self.clean_cache())
-        logger.info("ByteStreamer initialized with client.")
-
+        self.media_sessions_lock = asyncio.Lock()
+        
+        # Start cache cleaning tasks
+        self.cache_cleaner_task = asyncio.create_task(self.clean_cache())
+        self.session_cleaner_task = asyncio.create_task(self.cleanup_media_sessions())
+    
+    async def shutdown(self):
+        if hasattr(self, 'cache_cleaner_task'):
+            self.cache_cleaner_task.cancel()
+            try:
+                await self.cache_cleaner_task
+            except asyncio.CancelledError:
+                pass
+        
+        if hasattr(self, 'session_cleaner_task'):
+            self.session_cleaner_task.cancel()
+            try:
+                await self.session_cleaner_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Clean up all media sessions
+        for dc_id, session in list(self.client.media_sessions.items()):
+            try:
+                await session.stop()
+            except Exception as e:
+                logger.error(f"Error stopping media session for DC {dc_id}: {e}")
+        
+        self.client.media_sessions.clear()
+    
     async def get_file_properties(self, message_id: int) -> FileId:
-        """
-        Get file properties from cache or generate if not available.
-
-        Args:
-            message_id (int): The message ID of the file.
-
-        Returns:
-            FileId: The file properties object.
-
-        Raises:
-            FileNotFound: If the file is not found in the channel.
-        """
-        logger.debug(f"Fetching file properties for message ID {message_id}.")
         async with self.cache_lock:
             file_id = self.cached_file_ids.get(message_id)
         
         if not file_id:
-            logger.debug(f"File ID for message {message_id} not found in cache, generating...")
             file_id = await self.generate_file_properties(message_id)
             async with self.cache_lock:
                 self.cached_file_ids[message_id] = file_id
-            logger.info(f"Cached new file properties for message ID {message_id}.")
         
         return file_id
-
+    
     async def generate_file_properties(self, message_id: int) -> FileId:
-        """
-        Generate file properties for a given message ID.
-
-        Args:
-            message_id (int): The message ID of the file.
-
-        Returns:
-            FileId: The file properties object.
-
-        Raises:
-            FileNotFound: If the file is not found.
-        """
-        logger.debug(f"Generating file properties for message ID {message_id}.")
         file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, message_id)
         
         if not file_id:
@@ -86,83 +73,118 @@ class ByteStreamer:
         
         async with self.cache_lock:
             self.cached_file_ids[message_id] = file_id
-        logger.info(f"Generated and cached file properties for message ID {message_id}.")
         
         return file_id
-
+    
+    async def refresh_file_reference(self, file_id: FileId) -> Optional[FileId]:
+        logger.info(f"Refreshing file reference for message ID {file_id.message_id}")
+        
+        # Check if we have a fresh cached reference
+        async with self.cache_lock:
+            cached_ref = self.file_references_cache.get(file_id.message_id)
+            if cached_ref and time.time() - cached_ref["timestamp"] < 3600:  # Less than 1 hour old
+                return cached_ref["file_id"]
+        
+        try:
+            # Fetch the message again to get fresh file reference
+            message = await self.client.get_messages(
+                chat_id=Var.BIN_CHANNEL,
+                message_ids=file_id.message_id
+            )
+            
+            if not message or not message.media:
+                logger.error(f"Media message {file_id.message_id} not found when refreshing file reference")
+                return None
+            
+            # Extract new file ID
+            new_file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, file_id.message_id)
+            if not new_file_id:
+                logger.error(f"Failed to extract file ID from message {file_id.message_id}")
+                return None
+            
+            # Cache the new file reference
+            async with self.cache_lock:
+                self.file_references_cache[file_id.message_id] = {
+                    "file_id": new_file_id,
+                    "timestamp": time.time()
+                }
+            
+            return new_file_id
+        except Exception as e:
+            logger.error(f"Error refreshing file reference: {e}")
+            return None
+    
     async def generate_media_session(self, client: Client, file_id: FileId) -> Session:
-        """
-        Generates the media session for the DC that contains the media file.
-        This is required for getting the bytes from Telegram servers.
-        """
-        media_session = client.media_sessions.get(file_id.dc_id, None)
-
-        if media_session is None:
-            if file_id.dc_id != await client.storage.dc_id():
-                media_session = Session(
-                    client,
-                    file_id.dc_id,
-                    await Auth(
-                        client, file_id.dc_id, await client.storage.test_mode()
-                    ).create(),
-                    await client.storage.test_mode(),
-                    is_media=True,
-                )
-                await media_session.start()
-
-                for _ in range(6):
-                    exported_auth = await client.invoke(
-                        raw.functions.auth.ExportAuthorization(dc_id=file_id.dc_id)
+        async with self.media_sessions_lock:
+            media_session = client.media_sessions.get(file_id.dc_id, None)
+            
+            if media_session is None:
+                if file_id.dc_id != await client.storage.dc_id():
+                    media_session = Session(
+                        client,
+                        file_id.dc_id,
+                        await Auth(
+                            client, file_id.dc_id, await client.storage.test_mode()
+                        ).create(),
+                        await client.storage.test_mode(),
+                        is_media=True,
                     )
-
-                    try:
-                        await media_session.send(
-                            raw.functions.auth.ImportAuthorization(
-                                id=exported_auth.id, bytes=exported_auth.bytes
+                    await media_session.start()
+                    
+                    for attempt in range(6):
+                        if attempt > 0:
+                            # Add exponential backoff between attempts
+                            await asyncio.sleep(1 * (2 ** (attempt - 1)))
+                        
+                        try:
+                            exported_auth = await client.invoke(
+                                raw.functions.auth.ExportAuthorization(dc_id=file_id.dc_id)
                             )
-                        )
-                        break
-                    except AuthBytesInvalid:
-                        logger.debug(
-                            f"Invalid authorization bytes for DC {file_id.dc_id}"
-                        )
-                        continue
+                            
+                            try:
+                                await media_session.send(
+                                    raw.functions.auth.ImportAuthorization(
+                                        id=exported_auth.id, bytes=exported_auth.bytes
+                                    )
+                                )
+                                break
+                            except AuthBytesInvalid:
+                                continue
+                        except FloodWait as e:
+                            logger.warning(f"FloodWait during auth export: {e.value} seconds")
+                            await asyncio.sleep(e.value + 1)
+                            continue
+                    else:
+                        await media_session.stop()
+                        raise AuthBytesInvalid
                 else:
-                    await media_session.stop()
-                    raise AuthBytesInvalid
+                    media_session = Session(
+                        client,
+                        file_id.dc_id,
+                        await client.storage.auth_key(),
+                        await client.storage.test_mode(),
+                        is_media=True,
+                    )
+                    await media_session.start()
+                
+                # Mark the session creation time for cleanup
+                setattr(media_session, 'last_used', time.time())
+                client.media_sessions[file_id.dc_id] = media_session
             else:
-                media_session = Session(
-                    client,
-                    file_id.dc_id,
-                    await client.storage.auth_key(),
-                    await client.storage.test_mode(),
-                    is_media=True,
-                )
-                await media_session.start()
-            logger.debug(f"Created media session for DC {file_id.dc_id}")
-            client.media_sessions[file_id.dc_id] = media_session
-        else:
-            logger.debug(f"Using cached media session for DC {file_id.dc_id}")
+                # Update last used time
+                setattr(media_session, 'last_used', time.time())
+        
         return media_session
-
+    
     @staticmethod
     async def get_location(file_id: FileId) -> Union[
         raw.types.InputPhotoFileLocation,
         raw.types.InputDocumentFileLocation,
         raw.types.InputPeerPhotoFileLocation,
+        None
     ]:
-        """
-        Get the appropriate location object for the file type.
-
-        Args:
-            file_id (FileId): The file properties object.
-
-        Returns:
-            Union[InputPhotoFileLocation, InputDocumentFileLocation, InputPeerPhotoFileLocation]: The location object.
-        """
-        logger.debug(f"Determining location for file type {file_id.file_type}.")
         file_type = file_id.file_type
-
+        
         if file_type == FileType.CHAT_PHOTO:
             if file_id.chat_id > 0:
                 peer = raw.types.InputPeerUser(
@@ -183,6 +205,9 @@ class ByteStreamer:
                 big=file_id.thumbnail_source == ThumbnailSource.CHAT_PHOTO_BIG,
             )
         elif file_type == FileType.PHOTO:
+            if not file_id.file_reference:
+                logger.warning("Missing file_reference for PHOTO type")
+                return None
             location = raw.types.InputPhotoFileLocation(
                 id=file_id.media_id,
                 access_hash=file_id.access_hash,
@@ -190,15 +215,17 @@ class ByteStreamer:
                 thumb_size=file_id.thumbnail_size,
             )
         else:
+            if not file_id.file_reference:
+                logger.warning("Missing file_reference for DOCUMENT type")
+                return None
             location = raw.types.InputDocumentFileLocation(
                 id=file_id.media_id,
                 access_hash=file_id.access_hash,
                 file_reference=file_id.file_reference,
                 thumb_size=file_id.thumbnail_size,
             )
-        logger.debug(f"Location determined for file ID {file_id.media_id}.")
         return location
-
+    
     async def yield_file(
         self,
         file_id: FileId,
@@ -208,38 +235,76 @@ class ByteStreamer:
         last_part_cut: int,
         part_count: int,
         chunk_size: int,
-    ) -> Union[bytes, None]:
-        """
-        Yield chunks of a file, handling cuts at the first and last parts.
-
-        Args:
-            file_id (FileId): The file properties object.
-            index (int): The client index.
-            offset (int): The offset to start reading from.
-            first_part_cut (int): The number of bytes to cut from the first chunk.
-            last_part_cut (int): The number of bytes to cut from the last chunk.
-            part_count (int): The total number of parts.
-            chunk_size (int): The size of each chunk.
-
-        Yields:
-            bytes: The next chunk of data.
-        """
+    ) -> AsyncGenerator[bytes, None]:
         client = self.client
         work_loads[index] += 1
-        logger.debug(f"Starting to yield file with client index {index}.")
-
-        media_session = await self.generate_media_session(client, file_id)
-        current_part = 1
-        location = await self.get_location(file_id)
-
+        
         try:
-            r = await media_session.send(
-                raw.functions.upload.GetFile(
-                    location=location, offset=offset, limit=chunk_size
-                ),
-            )
-            if isinstance(r, raw.types.upload.File):
-                while True:
+            media_session = await self.generate_media_session(client, file_id)
+            current_part = 1
+            
+            # Get file location
+            location = await self.get_location(file_id)
+            
+            # Handle missing file reference
+            if location is None:
+                logger.warning(f"Missing file reference, attempting to refresh")
+                refreshed_file_id = await self.refresh_file_reference(file_id)
+                if refreshed_file_id:
+                    location = await self.get_location(refreshed_file_id)
+                    file_id = refreshed_file_id
+                
+                if location is None:
+                    logger.error("Failed to get location even after refreshing file reference")
+                    return
+            
+            max_retries = 5
+            retry_count = 0
+            
+            while current_part <= part_count:
+                try:
+                    r = await media_session.send(
+                        raw.functions.upload.GetFile(
+                            location=location, offset=offset, limit=chunk_size
+                        ),
+                    )
+                except FloodWait as e:
+                    logger.warning(f"FloodWait encountered: waiting for {e.value} seconds.")
+                    await asyncio.sleep(e.value + 1)
+                    continue
+                except (FileReferenceExpired, FileReferenceInvalid) as e:
+                    logger.warning(f"File reference expired: {e}")
+                    refreshed_file_id = await self.refresh_file_reference(file_id)
+                    if refreshed_file_id:
+                        file_id = refreshed_file_id
+                        location = await self.get_location(file_id)
+                        if location is None:
+                            logger.error("Failed to get location after refresh")
+                            return
+                        retry_count = 0  # Reset retry count after successful refresh
+                        continue  # Retry with fresh reference
+                    else:
+                        logger.error("Failed to refresh file reference")
+                        return
+                except RPCError as e:
+                    retry_count += 1
+                    logger.error(f"RPC Error during file fetch: {e}")
+                    if retry_count >= max_retries:
+                        return
+                    await asyncio.sleep(1 * (2 ** (retry_count - 1)))  # Exponential backoff
+                    continue
+                except ConnectionError as e:
+                    retry_count += 1
+                    logger.error(f"Connection error during file fetch: {e}")
+                    if retry_count >= max_retries:
+                        return
+                    await asyncio.sleep(1)  # Brief pause before retry
+                    continue
+                except Exception as e:
+                    logger.error(f"Unexpected error during file fetch: {str(e)}", exc_info=True)
+                    return
+                
+                if isinstance(r, raw.types.upload.File):
                     chunk = r.bytes
                     if not chunk:
                         break
@@ -254,28 +319,66 @@ class ByteStreamer:
 
                     current_part += 1
                     offset += chunk_size
+                    retry_count = 0  # Reset retry count after success
 
                     if current_part > part_count:
                         break
-
-                    r = await media_session.send(
-                        raw.functions.upload.GetFile(
-                            location=location, offset=offset, limit=chunk_size
-                        ),
-                    )
-        except (TimeoutError, AttributeError):
-            logger.error(f"Error while yielding file: TimeoutError or AttributeError encountered.")
-            pass
+        except (TimeoutError, AttributeError) as e:
+            logger.error(f"Error while yielding file: {e}")
         finally:
-            logger.debug(f"Finished yielding file with {current_part} parts.")
             work_loads[index] -= 1
-
+    
     async def clean_cache(self) -> None:
-        """
-        Periodically clean the cache of stored file IDs.
-        """
         while True:
-            await asyncio.sleep(self.clean_timer)
-            async with self.cache_lock:
-                self.cached_file_ids.clear()
-            logger.debug("Cache cleaned.")
+            try:
+                await asyncio.sleep(self.clean_timer)
+                
+                async with self.cache_lock:
+                    # Instead of clearing everything, we could selectively clean
+                    # based on timestamps if we tracked them
+                    self.cached_file_ids.clear()
+                    
+                    # Clean file reference cache based on age
+                    now = time.time()
+                    expired_refs = [
+                        key for key, value in self.file_references_cache.items()
+                        if now - value["timestamp"] > 3600  # 1 hour expiry
+                    ]
+                    for key in expired_refs:
+                        self.file_references_cache.pop(key, None)
+                
+                if expired_refs:
+                    logger.info(f"Cache cleaned. Removed {len(expired_refs)} expired file references.")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in cache cleaning task: {e}")
+                await asyncio.sleep(60)  # Wait before retrying
+    
+    async def cleanup_media_sessions(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(1800)  # 30 minutes
+                
+                async with self.media_sessions_lock:
+                    now = time.time()
+                    sessions_to_remove = []
+                    
+                    for dc_id, session in list(self.client.media_sessions.items()):
+                        if hasattr(session, 'last_used') and now - session.last_used > 1800:  # 30 minutes
+                            sessions_to_remove.append(dc_id)
+                    
+                    for dc_id in sessions_to_remove:
+                        try:
+                            await self.client.media_sessions[dc_id].stop()
+                            self.client.media_sessions.pop(dc_id, None)
+                        except Exception as e:
+                            logger.error(f"Error stopping media session for DC {dc_id}: {e}")
+                
+                if sessions_to_remove:
+                    logger.info(f"Cleaned up {len(sessions_to_remove)} inactive media sessions")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in media session cleaning task: {e}")
+                await asyncio.sleep(60)  # Wait before retrying
