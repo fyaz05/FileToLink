@@ -51,7 +51,10 @@ class Var:
     
     # SSL and URL configuration
     HAS_SSL: bool = str2bool(os.getenv('HAS_SSL', 'True'))
-    URL: str = f"https://{FQDN}/" if HAS_SSL else f"http://{FQDN}/"
+    if HAS_SSL:
+        URL = "https://{}/".format(FQDN)
+    else:
+        URL = "http://{}/".format(FQDN)
     
     # Database configuration
     DATABASE_URL: str = os.getenv('DATABASE_URL', '')
