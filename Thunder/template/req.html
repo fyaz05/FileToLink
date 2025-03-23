@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/live.png">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>%s</title>
+    <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/Thunder.jpg" type="image/jpeg">
+    <!-- Plyr CSS -->
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <!-- External Stylesheet -->
+    <link href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/reqStyle.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Light Mode Toggle -->
+    <button class="toggle-dark-mode" onclick="toggleDarkMode()" aria-label="Toggle Light/Dark Mode">
+        <i class="fas fa-moon"></i>
+    </button>
+    <div class="wrapper">
+        <div class="container">
+            <header>
+                <h1 id="file-name">%s</h1>
+            </header>
+            <main>
+                <div class="player-container">
+                    <div class="video-wrapper">
+                        <video class="plyr" controls poster="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/videobg.jpg" loading="lazy">
+                            <source src="%s" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                </div>
+                <p class="unsupported-message">⚠️ If the video isn't playing, it might not be supported in the browser. Try in a video player.</p>
+                <div class="controls">
+                    <button class="btn stream" onclick="toggleDropdown(event)" aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-play-circle"></i> Stream
+                    </button>
+                    <button class="btn download" onclick="download()">
+                        <i class="fas fa-cloud-download-alt"></i> Download
+                    </button>
+                    <button class="btn copy-link" onclick="copyLink()">
+                        <i class="fas fa-link"></i> Copy Link
+                    </button>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Dropdown Menu -->
+    <div class="dropdown-content" id="dropdown-menu" role="menu" aria-hidden="true">
+        <a href="#" onclick="playOnline('vlc')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile" class="player-logo" loading="lazy"> VLC Mobile
+        </a>
+        <a href="#" onclick="playOnline('mxp')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player Pro" class="player-logo" loading="lazy"> MX Player Pro
+        </a>
+        <a href="#" onclick="playOnline('mx')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player" class="player-logo" loading="lazy"> MX Player
+        </a>
+        <a href="#" onclick="playOnline('np')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer" class="player-logo" loading="lazy"> nPlayer
+        </a>
+        <a href="#" onclick="playOnline('sp')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player" class="player-logo" loading="lazy"> S Player
+        </a>
+        <a href="#" onclick="playOnline('km')" role="menuitem" tabindex="0">
+            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" class="player-logo" loading="lazy"> KM Player
+        </a>
+    </div>
+
+    <footer>
+        <div class="footer-links">
+            <a href="https://telegram.me/TeamShoGuN" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-telegram-plane"></i> Join our Telegram channel
+            </a>
+            <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer">
+                <i class="fab fa-github"></i> GitHub
+            </a>
+        </div>
+    </footer>
+
+    <!-- Plyr JS -->
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js" defer></script>
+    <!-- Optimized Scripts -->
+    <script defer>
+        document.addEventListener('DOMContentLoaded', () => {
+            const videoElement = document.querySelector('.plyr');
+            new Plyr(videoElement);
+        });
+
+        const currentUrl = window.location.href;
+        const finalUrl = currentUrl.replace("/watch/", "/");
+
+        function playOnline(player) {
+            const playerUrls = {
+                vlc: `vlc://${finalUrl}`,
+                mxp: `intent:${finalUrl}#Intent;package=com.mxtech.videoplayer.pro;end`,
+                mx: `intent:${finalUrl}#Intent;package=com.mxtech.videoplayer.ad;end`,
+                np: `nplayer-${finalUrl}`,
+                sp: `intent:${finalUrl}#Intent;action=com.young.simple.player.playback_online;package=com.young.simple.player;end`,
+                km: `intent:${finalUrl}#Intent;package=com.kmplayer;end`
+            };
+            window.location.href = playerUrls[player] || finalUrl;
+
+            // Close the dropdown menu
+            const dropdownMenu = document.getElementById('dropdown-menu');
+            dropdownMenu.classList.remove('show');
+            const dropdownButton = document.querySelector('.btn.stream');
+            if (dropdownButton) {
+                dropdownButton.setAttribute('aria-expanded', 'false');
+            }
+            dropdownMenu.setAttribute('aria-hidden', 'true');
+        }
+
+        function download() {
+            window.location.href = finalUrl;
+        }
+
+        function copyLink() {
+            navigator.clipboard.writeText(finalUrl)
+                .then(() => {
+                    showFeedback("📋 Link copied to clipboard!");
+                })
+                .catch(err => console.error('Could not copy text: ', err));
+        }
+
+        function showFeedback(message) {
+            const feedback = document.createElement('div');
+            feedback.className = 'feedback';
+            feedback.textContent = message;
+            feedback.setAttribute("role", "alert");
+            document.body.appendChild(feedback);
+            // Trigger reflow to enable transition
+            void feedback.offsetWidth;
+            feedback.style.opacity = '1';
+            feedback.style.transform = 'translateY(0)';
+            setTimeout(() => {
+                feedback.style.opacity = '0';
+                feedback.style.transform = 'translateY(20px)';
+                setTimeout(() => feedback.remove(), 500);
+            }, 3000);
+        }
+
+        function toggleDropdown(event) {
+            event.stopPropagation();
+            const dropdownMenu = document.getElementById('dropdown-menu');
+            const button = event.currentTarget;
+            const rect = button.getBoundingClientRect();
+
+            // Position the dropdown menu below the button
+            dropdownMenu.style.left = `${rect.left + window.scrollX}px`;
+            dropdownMenu.style.top = `${rect.bottom + window.scrollY}px`;
+
+            // Toggle the 'show' class
+            const isShown = dropdownMenu.classList.toggle('show');
+
+            // Update ARIA attributes
+            button.setAttribute('aria-expanded', isShown);
+            dropdownMenu.setAttribute('aria-hidden', !isShown);
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            const dropdownMenu = document.getElementById('dropdown-menu');
+            const streamButton = document.querySelector('.btn.stream');
+            if (!dropdownMenu.contains(event.target) && !streamButton.contains(event.target)) {
+                dropdownMenu.classList.remove('show');
+                streamButton.setAttribute('aria-expanded', 'false');
+                dropdownMenu.setAttribute('aria-hidden', 'true');
+            }
+        });
+
+        // Keyboard accessibility for dropdown items
+        const dropdownLinks = document.querySelectorAll('#dropdown-menu a');
+        dropdownLinks.forEach(link => {
+            link.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    link.click();
+                }
+            });
+        });
+
+        // Toggle Dark/Light Mode
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('light-mode');
+            const toggleButtonIcon = document.querySelector('.toggle-dark-mode i');
+            if (document.documentElement.classList.contains('light-mode')) {
+                toggleButtonIcon.classList.remove('fa-moon');
+                toggleButtonIcon.classList.add('fa-sun');
+            } else {
+                toggleButtonIcon.classList.remove('fa-sun');
+                toggleButtonIcon.classList.add('fa-moon');
+            }
+        }
+    </script>
+</body>
+</html>
