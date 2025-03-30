@@ -589,39 +589,3 @@ async def db_operations(client, message):
     
     except Exception as e:
         await message.reply_text(f"🚨 **Error during database operation:** {str(e)}")
-
-@StreamBot.on_message(filters.command("process") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def process_media(client, message):
-    if not message.reply_to_message:
-        await message.reply_text("⚠️ **Please reply to a media message to process it.**")
-        return
-    
-    try:
-        if hasattr(Var, 'BIN_CHANNEL') and Var.BIN_CHANNEL:
-            forwarded = await message.reply_to_message.forward(Var.BIN_CHANNEL)
-            
-            stream_link, download_link, file_name, file_size = await generate_media_links(forwarded)
-            
-            message_text = (
-                f"🔗 **Links generated successfully!**\n\n"
-                f"📁 **File:** `{file_name}`\n"
-                f"💾 **Size:** `{file_size}`\n\n"
-                f"🔗 **Download Link:** `{download_link}`\n\n"
-                f"🎬 **Stream Link:** `{stream_link}`"
-            )
-            
-            keyboard = [
-                [InlineKeyboardButton("🎬 Stream", url=stream_link)],
-                [InlineKeyboardButton("📥 Download", url=download_link)]
-            ]
-            
-            await message.reply_text(
-                message_text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                disable_web_page_preview=True
-            )
-        else:
-            await message.reply_text("⚠️ **BIN_CHANNEL not configured. Cannot process media.**")
-    
-    except Exception as e:
-        await message.reply_text(f"🚨 **Error processing media:** {str(e)}")
