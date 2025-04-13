@@ -296,33 +296,40 @@ async def process_media_message(client, command_message, media_message, notify=T
     retries = 0
     max_retries = 3
     
+    # Extract file unique ID for cache lookup
+    cache_key = get_file_unique_id(media_message)
+    if cache_key is None:
+        if notify:
+            await command_message.reply_text(
+                "⚠️ Could not extract file identifier from the media.",
+                quote=True
+            )
+        return None
+    
+    # Check cache first
+    cached_data = await CACHE.get(cache_key)
+    if cached_data:
+        if notify:
+            await send_links_to_user(
+                client,
+                command_message,
+                cached_data['media_name'],
+                cached_data['media_size'],
+                cached_data['stream_link'],
+                cached_data['online_link']
+            )
+        return cached_data['online_link']
+    
+    # Process media if not in cache
     while retries < max_retries:
         try:
-            cache_key = get_file_unique_id(media_message)
-            if cache_key is None:
-                if notify:
-                    await command_message.reply_text(
-                        "⚠️ Could not extract file identifier from the media.",
-                        quote=True
-                    )
-                return None
-            
-            cached_data = await CACHE.get(cache_key)
-            if cached_data:
-                if notify:
-                    await send_links_to_user(
-                        client,
-                        command_message,
-                        cached_data['media_name'],
-                        cached_data['media_size'],
-                        cached_data['stream_link'],
-                        cached_data['online_link']
-                    )
-                return cached_data['online_link']
-            
+            # Forward to bin channel
             log_msg = await forward_media(media_message)
+            
+            # Generate links
             stream_link, online_link, media_name, media_size = await generate_media_links(log_msg)
             
+            # Store in cache
             await CACHE.set(cache_key, {
                 'media_name': media_name,
                 'media_size': media_size,
@@ -332,6 +339,7 @@ async def process_media_message(client, command_message, media_message, notify=T
                 'timestamp': time.time()
             })
             
+            # Send links to user if notify is True
             if notify:
                 await send_links_to_user(
                     client,
@@ -342,6 +350,7 @@ async def process_media_message(client, command_message, media_message, notify=T
                     online_link
                 )
             
+            # Log the request
             await log_request(log_msg, command_message.from_user, stream_link, online_link)
             
             return online_link
@@ -386,6 +395,20 @@ async def process_media_message(client, command_message, media_message, notify=T
     
     return None
 
+async def retry_failed_media(client, command_message, media_messages, status_msg=None):
+    """Simple helper to retry failed media processing"""
+    results = []
+    for msg in media_messages:
+        try:
+            result = await process_media_message(client, command_message, msg, notify=False)
+            if result:
+                results.append(result)
+            if status_msg:
+                await status_msg.edit(f"⏳ **Retrying failed files: {len(results)}/{len(media_messages)}**")
+        except Exception as e:
+            logger.error(f"Error retrying media: {e}")
+    return results
+
 async def process_multiple_messages(client, command_message, reply_msg, num_files, status_msg):
     chat_id = command_message.chat.id
     start_message_id = reply_msg.id
@@ -393,27 +416,35 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
     message_ids = list(range(start_message_id, end_message_id + 1))
     
     try:
-        batch_size = 10
+        batch_size = 10  # Process 10 messages at a time
         processed_count = 0
+        failed_count = 0
         download_links = []
+        failed_messages = []
         
+        # Process messages in batches
         for i in range(0, len(message_ids), batch_size):
             batch_ids = message_ids[i:i+batch_size]
             
             try:
+                # Update status
                 await status_msg.edit(
                     f"⏳ **Processing messages {i+1} to {min(i+batch_size, len(message_ids))} of {len(message_ids)}...**"
                 )
                 
+                # Get messages
                 messages = await client.get_messages(
                     chat_id=chat_id,
                     message_ids=batch_ids
                 )
                 
-                # Process each message that contains media
+                # Create tasks only for valid media messages
                 batch_tasks = []
+                valid_media_msgs = []
+                
                 for msg in messages:
                     if msg and msg.media:
+                        valid_media_msgs.append(msg)
                         task = asyncio.create_task(
                             process_media_message(
                                 client,
@@ -424,34 +455,67 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         )
                         batch_tasks.append(task)
                 
+                # Skip if no media found
+                valid_media_count = len(valid_media_msgs)
+                if valid_media_count == 0:
+                    continue
+                    
+                # Process all tasks concurrently    
                 batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                 
-                for result in batch_results:
+                # Process results
+                for idx, result in enumerate(batch_results):
                     if isinstance(result, Exception):
+                        failed_count += 1
+                        failed_messages.append(valid_media_msgs[idx])
+                        logger.error(f"Error processing media: {result}")
                         continue
                     
                     if result:
                         download_links.append(result)
                         processed_count += 1
                 
+                # Update progress
                 await status_msg.edit(
-                    f"⏳ **Processed {processed_count}/{num_files} files...**"
+                    f"⏳ **Processed {processed_count}/{num_files} files...**\n"
+                    f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
                 )
             
-            except Exception:
+            except Exception as e:
+                failed_count += valid_media_count
+                failed_messages.extend(valid_media_msgs)
+                logger.error(f"Error processing batch: {e}")
                 await status_msg.edit(
-                    f"⚠️ **Error fetching some messages**\n"
-                    f"Continuing with successfully processed files..."
+                    "⚠️ **Error fetching some messages**\n"
+                    "Continuing with successfully processed files..."
                 )
                 await asyncio.sleep(1)
         
-        # Send all links in a single message
+        # Retry failed messages once
+        if failed_messages and len(failed_messages) < num_files / 2:  # Only retry if less than half failed
+            await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
+            retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
+            
+            if retry_results:
+                download_links.extend(retry_results)
+                processed_count += len(retry_results)
+                failed_count -= len(retry_results)
+                
+                await status_msg.edit(
+                    f"⏳ **After retry: {processed_count}/{num_files} files processed**\n"
+                    f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
+                )
+        
+        # Send results
         if download_links:
             links_text = "\n".join(download_links)
             
+            # Create the message with formatted batch links
+            batch_links_message = f"📥 **Here are your {processed_count} download links:**\n\n`{links_text}`"
+            
             # Send to group chat
             await command_message.reply_text(
-                f"📥 **Here are your {processed_count} download links:**\n\n`{links_text}`",
+                batch_links_message,
                 quote=True,
                 disable_web_page_preview=True
             )
@@ -461,18 +525,26 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 try:
                     await client.send_message(
                         chat_id=command_message.from_user.id,
-                        text=f"📥 **Here are your {processed_count} download links from {command_message.chat.title}:**\n\n`{links_text}`",
-                        disable_web_page_preview=True
+                        text=f"📬 **Batch links from {command_message.chat.title}**\n\n{batch_links_message}",
+                        disable_web_page_preview=True,
+                        parse_mode=enums.ParseMode.MARKDOWN
                     )
                 except Exception:
-                    # User might not have started the bot
-                    pass
+                    # Notify in group that user needs to start the bot
+                    await command_message.reply_text(
+                        "⚠️ I couldn't send you a DM. Please start the bot first.",
+                        quote=True
+                    )
         
-        await status_msg.edit(
-            f"✅ **Processed {processed_count} files out of {num_files} requested.**"
-        )
+        # Final status update
+        final_message = f"✅ **Processed {processed_count} files out of {num_files} requested.**"
+        if failed_count > 0:
+            final_message += f"\n❌ Failed: {failed_count} files"
+            
+        await status_msg.edit(final_message)
     
     except Exception as e:
+        logger.error(f"Error in batch processing: {e}")
         await status_msg.edit(
             f"❌ **Error processing files: {e}**\n"
             f"Successfully processed: {processed_count}/{num_files}"
@@ -565,10 +637,21 @@ async def link_handler(client, message):
                     try:
                         cached_data = await CACHE.get(get_file_unique_id(reply_msg))
                         if cached_data:
+                            # Get the exact same message format that was sent to the group
+                            msg_text = (
+                                "🔗 **Your Links are Ready!**\n\n"
+                                f"📄 **File Name:** `{cached_data['media_name']}`\n"
+                                f"📂 **File Size:** `{cached_data['media_size']}`\n\n"
+                                f"📥 **Download Link:**\n`{cached_data['online_link']}`\n\n"
+                                f"🖥️ **Watch Now:**\n`{cached_data['stream_link']}`\n\n"
+                                "⏰ **Note:** Links are available as long as the bot is active."
+                            )
+                            
                             await client.send_message(
                                 chat_id=message.from_user.id,
-                                text=f"📥 **Here is your download link from {message.chat.title}:**\n\n`{cached_data['online_link']}`",
+                                text=f"📬 **Link(s) from {message.chat.title}**\n\n{msg_text}",
                                 disable_web_page_preview=True,
+                                parse_mode=enums.ParseMode.MARKDOWN,
                                 reply_markup=InlineKeyboardMarkup([
                                     [
                                         InlineKeyboardButton("🖥️ Watch Now", url=cached_data['stream_link']),
@@ -577,8 +660,11 @@ async def link_handler(client, message):
                                 ]),
                             )
                     except Exception:
-                        # User might not have started the bot
-                        pass
+                        # Notify in group that user needs to start the bot
+                        await message.reply_text(
+                            "⚠️ I couldn't send you a DM. Please start the bot first.",
+                            quote=True
+                        )
                 await processing_msg.delete()
         else:
             await process_multiple_messages(client, message, reply_msg, num_files, processing_msg)

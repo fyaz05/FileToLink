@@ -9,7 +9,7 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(PROJECT_ROOT, 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, 'bot.log')
+LOG_FILE = os.path.join(LOG_DIR, 'bot.txt')
 
 # Configure logger
 logger = logging.getLogger('ThunderBot')
