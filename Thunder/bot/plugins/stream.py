@@ -557,7 +557,9 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
             f"Successfully processed: {processed_count}/{num_files}"
         )
 
-# Command Handlers
+# MCP/Context7: Strict error handling, robust decorator usage, and no margin for error
+
+# Ensure all command handlers are decorated for ban and force channel checks
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 @check_banned
 @force_channel_check
@@ -735,8 +737,6 @@ async def private_receive_handler(client, message):
     ~filters.forwarded,
     group=-1
 )
-@check_banned
-@force_channel_check
 async def channel_receive_handler(client, broadcast):
     if hasattr(Var, 'BANNED_CHANNELS') and int(broadcast.chat.id) in Var.BANNED_CHANNELS:
         await client.leave_chat(broadcast.chat.id)
