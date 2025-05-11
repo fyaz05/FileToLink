@@ -15,6 +15,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     Message,
     User,
+    LinkPreviewOptions,
 )
 
 from Thunder.bot import StreamBot
@@ -182,7 +183,7 @@ async def start_command(bot: Client, message: Message):
                     logger.error(f"Error adding force channel link to /start message for user {message.from_user.id if message.from_user else 'unknown'}, FORCE_CHANNEL_ID {Var.FORCE_CHANNEL_ID}: {e}")
                     welcome_text += "\n\nP.S. Check out our community channel for more!"
             
-            await message.reply_text(text=welcome_text, disable_web_page_preview=True)
+            await message.reply_text(text=welcome_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
             return
         
         # File ID provided in arguments - generate links
@@ -213,7 +214,7 @@ async def start_command(bot: Client, message: Message):
                     f"🖥️ **Watch Now:**\n`{stream_link}`\n\n"
                     "⏰ **Note:** Links are available as long as the bot is active."
                 ),
-                disable_web_page_preview=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("🎬 Stream Now", url=stream_link),
@@ -254,7 +255,7 @@ async def help_command(bot: Client, message: Message):
             "• `/dc` - Check data center information\n\n"
             "⚡ **Pro Tip:** Forward messages from channels and groups to get direct links instantly!"
         )
-        await message.reply_text(text=help_text, disable_web_page_preview=True)
+        await message.reply_text(text=help_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
     except Exception as e:
         logger.error(f"Error in help_command: {e}")
         await handle_user_error(message, ERROR_MSG)
@@ -280,7 +281,7 @@ async def about_command(bot: Client, message: Message):
             "• Processing: Lightning fast\n\n"
             "Developed with ❤️ by the help of [AI](https://github.com/fyaz05/FileToLink/)"
         )
-        await message.reply_text(text=about_text, disable_web_page_preview=True)
+        await message.reply_text(text=about_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
     except Exception as e:
         logger.error(f"Error in about_command: {e}")
         await handle_user_error(message, ERROR_MSG)
@@ -304,7 +305,7 @@ async def dc_command(bot: Client, message: Message):
             ])
             await message.reply_text(
                 dc_text, 
-                disable_web_page_preview=True, 
+                link_preview_options=LinkPreviewOptions(is_disabled=True), 
                 reply_markup=dc_keyboard, 
                 quote=True
             )
@@ -341,7 +342,7 @@ async def dc_command(bot: Client, message: Message):
                     f"🌐 **Data Center:** `{dc_id}`"
                 )
                 
-                await message.reply_text(dc_text, disable_web_page_preview=True, quote=True)
+                await message.reply_text(dc_text, link_preview_options=LinkPreviewOptions(is_disabled=True), quote=True)
                 
             except Exception as e:
                 logger.error(f"Error processing file info: {e}")

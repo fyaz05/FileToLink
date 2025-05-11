@@ -18,7 +18,8 @@ from pyrogram.enums import ParseMode, ChatMemberStatus
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Message
+    Message,
+    LinkPreviewOptions,
 )
 from pyrogram.errors import (
     FloodWait, 
@@ -195,7 +196,7 @@ async def handle_broadcast_completion(message, output, failures, successes, tota
     await message.reply_text(
         message_text,
         parse_mode=ParseMode.MARKDOWN,
-        disable_web_page_preview=True
+        link_preview_options=LinkPreviewOptions(is_disabled=True)
     )
 
 async def check_admin_privileges(client, chat_id):
@@ -222,7 +223,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
     await command_message.reply_text(
         msg_text,
         quote=True,
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖥️ Watch Now", url=stream_link),
              InlineKeyboardButton("📥 Download", url=online_link)]
@@ -231,7 +232,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
 
 # Command Handlers
 
-@StreamBot.on_message(filters.command("users") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("users") & filters.private & filters.user(Var.OWNER_ID))
 async def get_total_users(client, message):
     try:
         total_users = await db.total_users_count()
@@ -243,7 +244,7 @@ async def get_total_users(client, message):
     except Exception as e:
         await message.reply_text("🚨 **Error fetching user count.**")
 
-@StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(Var.OWNER_ID))
 async def broadcast_message(client, message):
     if not message.reply_to_message:
         await message.reply_text("⚠️ **Please reply to a message to broadcast.**", quote=True)
@@ -313,7 +314,7 @@ async def broadcast_message(client, message):
                                 chat_id=user_id,
                                 text=message.reply_to_message.text or message.reply_to_message.caption,
                                 parse_mode=ParseMode.MARKDOWN,
-                                disable_web_page_preview=True
+                                link_preview_options=LinkPreviewOptions(is_disabled=True)
                             )
                         elif message.reply_to_message.media:
                             await message.reply_to_message.copy(chat_id=user_id)
@@ -658,4 +659,3 @@ async def run_shell_command(client: Client, message: Message):
 
     else:
         await reply_msg.edit_text(output, parse_mode=ParseMode.HTML)
-

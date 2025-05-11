@@ -23,7 +23,9 @@ from pyrogram.types import (
     Message,
     User,
     Chat,
+    LinkPreviewOptions,
 )
+from pyrogram.enums import ChatMemberStatus
 
 from Thunder.bot import StreamBot
 from Thunder.utils.database import Database
@@ -168,7 +170,8 @@ async def handle_user_error(message, error_msg):
     try:
         await message.reply_text(
             f"❌ {error_msg}\nPlease try again or contact support.",
-            quote=True
+            quote=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
     except Exception:
         pass
@@ -244,7 +247,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
         await command_message.reply_text(
             msg_text,
             quote=True,
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [
@@ -264,7 +267,7 @@ async def log_request(log_msg, user, stream_link, online_link):
             f"🆔 **User ID:** `{user.id}`\n\n"
             f"📥 **Download Link:** `{online_link}`\n"
             f"🖥️ **Watch Now Link:** `{stream_link}`",
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
     except Exception:
@@ -521,7 +524,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
             await command_message.reply_text(
                 batch_links_message,
                 quote=True,
-                disable_web_page_preview=True
+                link_preview_options=LinkPreviewOptions(is_disabled=True)
             )
             
             # Also send to DM if in a group
@@ -530,7 +533,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                     await client.send_message(
                         chat_id=command_message.from_user.id,
                         text=f"📬 **Batch links from {command_message.chat.title}**\n\n{batch_links_message}",
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                         parse_mode=enums.ParseMode.MARKDOWN
                     )
                 except Exception:
@@ -567,7 +570,7 @@ async def link_handler(client, message):
             await message.reply_text(
                 "⚠️ You need to start the bot in private first to use this command.\n"
                 f"👉 [Click here]({invite_link}) to start a private chat.",
-                disable_web_page_preview=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
                 parse_mode=enums.ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📩 Start Chat", url=invite_link)]]),
                 quote=True
@@ -616,9 +619,9 @@ async def link_handler(client, message):
     if len(command_parts) > 1:
         try:
             num_files = int(command_parts[1])
-            if num_files < 1 or num_files > 25:
+            if num_files < 1 or num_files > 100:
                 await message.reply_text(
-                    "⚠️ **Please specify a number between 1 and 25.**",
+                    "⚠️ **Please specify a number between 1 and 100.**",
                     quote=True
                 )
                 return
@@ -656,7 +659,7 @@ async def link_handler(client, message):
                             await client.send_message(
                                 chat_id=message.from_user.id,
                                 text=f"📬 **Link(s) from {message.chat.title}**\n\n{msg_text}",
-                                disable_web_page_preview=True,
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
                                 parse_mode=enums.ParseMode.MARKDOWN,
                                 reply_markup=InlineKeyboardMarkup([
                                     [

@@ -3,7 +3,7 @@ Thunder/vars.py - Environment and configuration variables for the Thunder bot.
 """
 
 import os
-from typing import Set, Optional
+from typing import Set, Optional, List
 
 from dotenv import load_dotenv
 from Thunder.utils.logger import logger
@@ -40,7 +40,9 @@ class Var:
     CACHE_SIZE: int = int(os.getenv("CACHE_SIZE", "100"))
 
     # Owner details
-    OWNER_ID: Set[int] = set(int(x) for x in os.getenv("OWNER_ID", "").split() if x.isdigit())
+    OWNER_ID: List[int] = [
+        int(x) for x in os.getenv("OWNER_ID", "").split() if x.isdigit()
+    ]
     OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "")
 
     # Deployment configuration
@@ -62,7 +64,9 @@ class Var:
 
     # Channel configurations
     BANNED_CHANNELS: Set[int] = set(
-        int(x) for x in os.getenv("BANNED_CHANNELS", "").split() if x.lstrip("-").isdigit()
+        int(x)
+        for x in os.getenv("BANNED_CHANNELS", "").split()
+        if x.lstrip("-").isdigit()
     )
 
     # Multi-client support flag
@@ -75,4 +79,7 @@ class Var:
         try:
             FORCE_CHANNEL_ID = int(_force_channel_id)
         except ValueError:
-            logger.warning(f"Invalid FORCE_CHANNEL_ID: {_force_channel_id}. Must be an integer. Disabling force channel.")
+            logger.warning(
+                f"Invalid FORCE_CHANNEL_ID: {_force_channel_id}. "
+                f"Must be an integer. Disabling force channel."
+            )

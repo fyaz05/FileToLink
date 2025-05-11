@@ -15,11 +15,14 @@ class Database:
         self.db = self._client[database_name]
         self.col: AsyncIOMotorCollection = self.db.users
         self.banned_users_col: AsyncIOMotorCollection = self.db.banned_users
-        # Create index for banned_users collection
-        self._client.get_io_loop().create_task(
-            self.banned_users_col.create_index("user_id", unique=True)
-        )
     
+    async def ensure_indexes(self):
+        # Ensure necessary indexes are created
+        await self.banned_users_col.create_index("user_id", unique=True)
+        logger.info(
+            "Database indexes ensured for users and banned_users collections."
+        )
+
     def new_user(self, user_id: int) -> dict:
         # Create new user document
         return {
@@ -69,7 +72,10 @@ class Database:
         cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
         return self.col.find({'join_date': {'$gte': cutoff}})
         
-    async def add_banned_user(self, user_id: int, banned_by: Optional[int] = None, reason: Optional[str] = None):
+    async def add_banned_user(
+        self, user_id: int, banned_by: Optional[int] = None, 
+        reason: Optional[str] = None
+    ):
         # Add or update banned user with upsert
         ban_data = {
             "user_id": user_id,
@@ -84,17 +90,23 @@ class Database:
                 upsert=True
             )
         except Exception as e:
-            logger.error(f"Database error in add_banned_user for user {user_id}: {e}")
+            logger.error(
+                f"Database error in add_banned_user for user {user_id}: {e}"
+            )
             # MCP best practice: raise with clear error
             raise RuntimeError(f"Failed to ban user {user_id}: {e}")
 
     async def remove_banned_user(self, user_id: int) -> bool:
         # Remove banned user and return if document was deleted
         try:
-            result = await self.banned_users_col.delete_one({"user_id": user_id})
+            result = await self.banned_users_col.delete_one(
+                {"user_id": user_id}
+            )
             return result.deleted_count > 0
         except Exception as e:
-            logger.error(f"Database error in remove_banned_user for user {user_id}: {e}")
+            logger.error(
+                f"Database error in remove_banned_user for user {user_id}: {e}"
+            )
             # MCP best practice: return False on error
             return False
 
@@ -103,7 +115,9 @@ class Database:
         try:
             return await self.banned_users_col.find_one({"user_id": user_id})
         except Exception as e:
-            logger.error(f"Database error in is_user_banned for user {user_id}: {e}")
+            logger.error(
+                f"Database error in is_user_banned for user {user_id}: {e}"
+            )
             # MCP best practice: return None on error
             return None
 
