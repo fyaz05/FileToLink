@@ -526,7 +526,7 @@ async def ban_user_command(client, message):
             await message.reply_text(messages.MSG_CANNOT_BAN_OWNER)
             return
         try:
-            await client.db.add_banned_user(
+            await db.add_banned_user(
                 user_id=user_id_to_ban,
                 banned_by=message.from_user.id,
                 reason=ban_reason
@@ -565,7 +565,7 @@ async def unban_user_command(client, message):
             await message.reply_text(messages.MSG_INVALID_USER_ID)
             return
         try:
-            removed = await client.db.remove_banned_user(user_id=user_id_to_unban)
+            removed = await db.remove_banned_user(user_id=user_id_to_unban)
         except Exception as e:
             await message.reply_text(messages.MSG_UNBAN_ERROR.format(error=str(e)))
             return
