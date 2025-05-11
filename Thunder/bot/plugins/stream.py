@@ -1,4 +1,6 @@
-# Thunder/bot/plugins/stream.py
+"""
+Thunder/bot/plugins/stream.py - Streaming and file link plugin handlers for Thunder bot.
+"""
 
 import time
 import asyncio
@@ -9,18 +11,18 @@ from datetime import datetime, timedelta
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import (
-    FloodWait, 
-    RPCError, 
-    MediaEmpty, 
+    FloodWait,
+    RPCError,
+    MediaEmpty,
     FileReferenceExpired,
-    FileReferenceInvalid
+    FileReferenceInvalid,
 )
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
     User,
-    Chat
+    Chat,
 )
 
 from Thunder.bot import StreamBot
@@ -29,6 +31,8 @@ from Thunder.utils.file_properties import get_hash, get_media_file_size, get_nam
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
+from Thunder.utils.decorators import check_banned
+from Thunder.utils.force_channel import force_channel_check
 
 # Database Initialization
 db = Database(Var.DATABASE_URL, Var.NAME)
@@ -459,7 +463,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 valid_media_count = len(valid_media_msgs)
                 if valid_media_count == 0:
                     continue
-                    
+                        
                 # Process all tasks concurrently    
                 batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                 
@@ -552,6 +556,8 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
 
 # Command Handlers
 @StreamBot.on_message(filters.command("link") & ~filters.private)
+@check_banned
+@force_channel_check
 async def link_handler(client, message):
     user_id = message.from_user.id
     
@@ -682,6 +688,8 @@ async def link_handler(client, message):
     ),
     group=4
 )
+@check_banned
+@force_channel_check
 async def private_receive_handler(client, message):
     if not message.from_user:
         return
@@ -724,6 +732,8 @@ async def private_receive_handler(client, message):
     ~filters.forwarded,
     group=-1
 )
+@check_banned
+@force_channel_check
 async def channel_receive_handler(client, broadcast):
     if hasattr(Var, 'BANNED_CHANNELS') and int(broadcast.chat.id) in Var.BANNED_CHANNELS:
         await client.leave_chat(broadcast.chat.id)
