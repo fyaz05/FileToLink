@@ -514,19 +514,20 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 )
         
         # Send results
-        if download_links:
-            links_text = "\n".join(download_links)
-            
-            # Create the message with formatted batch links
-            batch_links_message = f"📥 **Here are your {processed_count} download links:**\n\n`{links_text}`"
-            
+        def chunk_list(lst, n):
+            for i in range(0, len(lst), n):
+                yield lst[i:i + n]
+
+        for chunk in chunk_list(download_links, 20):
+            links_text = "\n".join(chunk)
+            batch_links_message = f"📥 **Here are your {len(chunk)} download links:**\n\n`{links_text}`"
             # Send to group chat
             await command_message.reply_text(
                 batch_links_message,
                 quote=True,
-                link_preview_options=LinkPreviewOptions(is_disabled=True)
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                parse_mode=enums.ParseMode.MARKDOWN
             )
-            
             # Also send to DM if in a group
             if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                 try:
@@ -537,11 +538,12 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         parse_mode=enums.ParseMode.MARKDOWN
                     )
                 except Exception:
-                    # Notify in group that user needs to start the bot
                     await command_message.reply_text(
                         "⚠️ I couldn't send you a DM. Please start the bot first.",
                         quote=True
                     )
+            # Add a small delay to avoid Telegram flood limits
+            await asyncio.sleep(0.1)
         
         # Final status update
         final_message = f"✅ **Processed {processed_count} files out of {num_files} requested.**"
@@ -556,8 +558,6 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
             f"❌ **Error processing files: {e}**\n"
             f"Successfully processed: {processed_count}/{num_files}"
         )
-
-# MCP/Context7: Strict error handling, robust decorator usage, and no margin for error
 
 # Ensure all command handlers are decorated for ban and force channel checks
 @StreamBot.on_message(filters.command("link") & ~filters.private)
@@ -733,8 +733,7 @@ async def private_receive_handler(client, message):
     (
         filters.document | filters.video | filters.photo | filters.audio |
         filters.voice | filters.animation | filters.video_note
-    ) &
-    ~filters.forwarded,
+    ),
     group=-1
 )
 async def channel_receive_handler(client, broadcast):
