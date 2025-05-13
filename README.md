@@ -42,22 +42,26 @@
 > **Thunder** is a powerful, high-performance Telegram bot that transforms media files into streamable direct links. Share and access files via HTTP(S) links instead of downloading from Telegram, for a seamless media experience.
 
 **Perfect for:**
-- 🎬 Content creators sharing media files
-- 👥 Communities distributing resources
-- 🎓 Educational platforms sharing materials
-- 🌍 Anyone needing to share Telegram media with non-Telegram users
+
+- 📤 Download Telegram media at high speed.
+- 🎬 Content creators sharing media files.
+- 👥 Communities distributing resources.
+- 🎓 Educational platforms sharing materials.
+- 🌍 Anyone needing to share Telegram media.
 
 ---
 
 ## ✨ Features
 
 ### 🚀 Core Functionality
+
 - **Generate Direct Links:** Convert Telegram media files into direct streaming links.
 - **Permanent Links:** Links remain active as long as the file exists in the storage channel.
 - **Multi-Client Support:** Distribute workload across multiple Telegram accounts.
-- **HTTP/HTTPS Streaming:** Stream media with seek support for all devices and browsers.
+- **HTTP/HTTPS Streaming:** Stream media with custom player support for all devices and browsers.
 
 ### 🧩 Advanced Features
+
 - **MongoDB Integration:** Store user data and file info with advanced database capabilities.
 - **User Authentication:** Require users to join channels before generating links.
 - **Admin Commands:** Manage users, view stats, and control bot behavior.
@@ -65,6 +69,7 @@
 - **Customizable Templates:** Personalize HTML templates for download pages.
 
 ### ⚙️ Technical Capabilities
+
 - **Asynchronous Architecture:** Built with aiohttp and asyncio for high concurrency.
 - **Rate Limiting:** Prevent abuse with advanced rate-limiting.
 - **Media Info Display:** Show file size, duration, format, and more.
@@ -76,10 +81,10 @@
 
 ## 🔍 How It Works
 
-1.  **Upload:** User sends a media file to the bot. The bot forwards it to a storage channel and stores metadata.
-2.  **Link Generation:** A unique, secure link is generated and sent to the user.
-3.  **Streaming:** When the link is opened, the server authenticates, retrieves the file from Telegram, and streams it directly to the browser.
-4.  **Load Balancing:** Multiple Telegram clients distribute workload, with automatic switching and smart queuing for high traffic.
+1. **Upload:** User sends a media file to the bot. The bot forwards it to a storage channel and stores metadata.
+2. **Link Generation:** A unique, secure link is generated and sent to the user.
+3. **Streaming:** When the link is opened, the server authenticates, retrieves the file from Telegram, and streams it directly to the browser.
+4. **Load Balancing:** Multiple Telegram clients distribute workload, with automatic switching and smart queuing for high traffic.
 
 ---
 
@@ -93,7 +98,6 @@
 - 📦 Telegram storage channel
 
 ---
-
 
 ## ⚙️ Configuration
 
@@ -148,15 +152,6 @@ docker run -d --name Thunder -p 8080:8080 Thunder
 python -m Thunder
 ```
 
-### Deploy to Heroku
-
-<p align="center">
-  <a href="https://heroku.com/deploy?template=https://github.com/fyaz05/FileToLink">
-    <img src="https://www.herokucdn.com/deploy/button.svg" alt="Deploy to Heroku">
-  </a>
-</p>
-<small>Note: Ensure your Heroku environment variables are set according to your `config.py` file.</small>
-
 ### ⚡ Scaling for High Traffic
 
 - Use multiple bot instances with `MULTI_BOT_TOKENS` in your `config.py`.
@@ -167,13 +162,15 @@ python -m Thunder
 ## 📱 Usage
 
 ### Basic
-1.  **Start:** Send `/start` to your bot.
-2.  **Authenticate:** Join required channels if configured by the admin.
-3.  **Upload:** Send any media file to the bot.
-4.  **Get Link:** Receive a direct streaming link.
-5.  **Share:** Anyone with the link can stream or download the file.
+
+1. **Start:** Send `/start` to your bot.
+2. **Authenticate:** Join required channels if configured by the admin.
+3. **Upload:** Send any media file to the bot.
+4. **Get Link:** Receive a direct streaming link.
+5. **Share:** Anyone with the link can stream or download the file.
 
 ### Advanced
+
 - **Batch Processing:** Forward multiple files to the bot for batch link generation.
 - **Custom Thumbnails:** Send a photo with `/set_thumbnail` as its caption to set a custom thumbnail for subsequent files.
 - **Remove Thumbnail:** Use `/del_thumbnail` to remove a previously set custom thumbnail.
@@ -196,22 +193,23 @@ python -m Thunder
 
 ### Admin Commands (for Bot Owner)
 
-| Command        | Description                                                                 |
-|----------------|-----------------------------------------------------------------------------|
-| `/status`      | Check bot status, uptime, and resource usage                                |
-| `/broadcast`   | Send a message to all users (supports text, media, buttons)                 |
-| `/stats`       | View usage statistics and analytics                                         |
-| `/ban`         | Ban a user (reply to message or use user ID)                                |
-| `/unban`       | Unban a user                                                                |
-| `/log`         | Send bot logs                                                               |
-| `/restart`     | Restart the bot                                                             |
-| `/shell`       | Execute a shell command (Use with extreme caution!)                         |
-| `/users`       | Show total number of users                                                  |
+| Command        | Description                                                          |
+|----------------|----------------------------------------------------------------------|
+| `/status`      | Check bot status, uptime, and resource usage.                        |
+| `/broadcast`   | Send a message to all users (supports text, media, buttons).         |
+| `/stats`       | View usage statistics and analytics.                                 |
+| `/ban`         | Ban a user (reply to message or use user ID).                        |
+| `/unban`       | Unban a user.                                                        |
+| `/log`         | Send bot logs.                                                       |
+| `/restart`     | Restart the bot.                                                     |
+| `/shell`       | Execute a shell command (Use with extreme caution!).                 |
+| `/users`       | Show total number of users.                                          |
 
 ### Commands for @BotFather
 
 Paste the following into the BotFather "Edit Commands" section for your bot:
-```
+
+```text
 start - Start the bot and get a welcome message
 link - Generate a direct link for a file (supports batch in groups)
 dc - Get the data center (DC) of a user or file
@@ -235,11 +233,11 @@ users - (Admin) Show total number of users
 
 Contributions are welcome! Please follow these steps:
 
-1.  Fork the repository.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+1. Fork the repository.
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4. Push to the branch (`git push origin feature/AmazingFeature`).
+5. Open a Pull Request.
 
 ---
 
