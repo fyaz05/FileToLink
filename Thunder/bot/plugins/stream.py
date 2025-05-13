@@ -157,12 +157,15 @@ async def notify_owner(client, text):
                 client.send_message(chat_id=owner_id, text=text)
                 for owner_id in owner_ids
             ]
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
+            await asyncio.sleep(0.1)
         else:
             await client.send_message(chat_id=owner_ids, text=text)
+            await asyncio.sleep(0.1)
         
         if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
             await client.send_message(chat_id=Var.BIN_CHANNEL, text=text)
+            await asyncio.sleep(0.1)
     except Exception as e:
         logger.error(f"Failed to send message to owner: {e}")
 
@@ -192,10 +195,14 @@ def get_file_unique_id(media_message):
 async def forward_media(media_message):
     for retry in range(3):
         try:
-            return await media_message.copy(chat_id=Var.BIN_CHANNEL)
+            result = await media_message.copy(chat_id=Var.BIN_CHANNEL)
+            await asyncio.sleep(0.1)
+            return result
         except Exception:
             try:
-                return await media_message.forward(chat_id=Var.BIN_CHANNEL)
+                result = await media_message.forward(chat_id=Var.BIN_CHANNEL)
+                await asyncio.sleep(0.1)
+                return result
             except FloodWait as flood_error:
                 if retry < 2:
                     await handle_flood_wait(flood_error)
@@ -205,7 +212,6 @@ async def forward_media(media_message):
                 if retry == 2:
                     logger.error(f"Error forwarding media: {forward_error}")
                     raise
-        
         await asyncio.sleep(1)
     
     raise Exception("Failed to forward media after multiple attempts")
@@ -256,6 +262,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
                 ]
             ]),
         )
+        await asyncio.sleep(0.1)
     except Exception as e:
         logger.error(f"Error sending links to user: {e}")
         raise
@@ -270,6 +277,7 @@ async def log_request(log_msg, user, stream_link, online_link):
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
+        await asyncio.sleep(0.1)
     except Exception:
         pass
 
@@ -528,6 +536,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
                 parse_mode=enums.ParseMode.MARKDOWN
             )
+            await asyncio.sleep(0.1)
             # Also send to DM if in a group
             if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                 try:
@@ -537,13 +546,12 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         link_preview_options=LinkPreviewOptions(is_disabled=True),
                         parse_mode=enums.ParseMode.MARKDOWN
                     )
+                    await asyncio.sleep(0.1)
                 except Exception:
                     await command_message.reply_text(
                         "⚠️ I couldn't send you a DM. Please start the bot first.",
                         quote=True
                     )
-            # Add a small delay to avoid Telegram flood limits
-            await asyncio.sleep(0.1)
         
         # Final status update
         final_message = f"✅ **Processed {processed_count} files out of {num_files} requested.**"
@@ -670,6 +678,7 @@ async def link_handler(client, message):
                                     ]
                                 ]),
                             )
+                            await asyncio.sleep(0.1)
                     except Exception:
                         # Notify in group that user needs to start the bot
                         await message.reply_text(

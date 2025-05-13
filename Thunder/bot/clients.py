@@ -17,9 +17,9 @@ async def initialize_clients():
     logger.info("✓ Primary client initialized successfully")
     logger.info("╚═══════════════════════════════════════════════════════════╝")
 
-    # Parse tokens from the environment
+    # Parse tokens from configuration
     logger.info("╔═══════════════ PARSING ADDITIONAL TOKENS ═════════════════╗")
-    all_tokens = TokenParser().parse_from_env()
+    all_tokens = TokenParser().parse_from_config()
     if not all_tokens:
         logger.info("▶ No additional clients found. Default client will be used.")
         logger.info("╚═══════════════════════════════════════════════════════════╝")

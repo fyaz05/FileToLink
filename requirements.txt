@@ -4,7 +4,7 @@ aiocache
 apscheduler
 cachetools
 dnspython
-https://github.com/KurimuzonAkuma/pyrogram/archive/dev.zip
+kurigram
 motor
 psutil
 pyromod
