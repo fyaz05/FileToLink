@@ -113,25 +113,23 @@ async def start_services():
     except Exception as e:
         logger.error(f"✖ Failed to initialize clients: {e}")
         return
-    
     # Import Plugins
     await import_plugins()
-    
-    # Start keep-alive service for Heroku
-    if Var.ON_HEROKU:
-        logger.info("▶ Starting Keep-Alive Service...")
-        asyncio.create_task(ping_server())
-        logger.info("✓ Keep-Alive Service started")
     
     # Initialize Web Server
     logger.info("▶ Starting Web Server initialization...")
     try:
         app_runner = web.AppRunner(await web_server())
         await app_runner.setup()
-        bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADDRESS
+        bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
         logger.info(f"✓ Web Server started at {bind_address}:{Var.PORT}")
+        
+        # Start keep-alive ping service
+        logger.info("▶ Starting keep-alive service...")
+        asyncio.create_task(ping_server())
+        logger.info("✓ Keep-alive service started")
     except Exception as e:
         logger.error(f"✖ Failed to start Web Server: {e}")
         return
@@ -143,8 +141,6 @@ async def start_services():
     logger.info(f"▶ Username: @{bot_info.username}")
     logger.info(f"▶ Server: {bind_address}:{Var.PORT}")
     logger.info(f"▶ Owner: {Var.OWNER_USERNAME}")
-    if Var.ON_HEROKU:
-        logger.info(f"▶ App URL: {Var.FQDN}")
     logger.info(f"▶ Startup Time: {elapsed_time:.2f} seconds")
     logger.info("╚════════════════════════════════════════════════════════╝")
     logger.info("▶ Bot is now running! Press CTRL+C to stop.")

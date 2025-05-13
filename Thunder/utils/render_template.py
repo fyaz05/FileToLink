@@ -3,6 +3,7 @@
 import urllib.parse
 import aiofiles
 import aiohttp
+import html as html_module
 from Thunder.vars import Var
 from Thunder.bot import StreamBot
 from Thunder.utils.human_readable import humanbytes
@@ -23,15 +24,16 @@ async def render_page(id: int, secure_hash: str) -> str:
 
     # Generate source URL for the file
     src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{str(id)}')
-    mime_type = file_data.mime_type.split('/')[0].strip()
-
     # Choose template based on file type
+    mime_type = file_data.mime_type.split('/')[0].strip()
+    
     if mime_type in ('video', 'audio'):
         async with aiofiles.open('Thunder/template/req.html', 'r') as f:
             template_content = await f.read()
             
-        heading = f"{'Watch' if mime_type == 'video' else 'Listen'} {file_data.file_name}"
-        html = template_content.replace('tag', mime_type) % (heading, file_data.file_name, src)
+        safe_filename = html_module.escape(file_data.file_name)
+        heading = f"{'Watch' if mime_type == 'video' else 'Listen'} {safe_filename}"
+        html = template_content.replace('tag', mime_type) % (heading, safe_filename, src)
     else:
         # For documents and other file types
         async with aiofiles.open('Thunder/template/dl.html', 'r') as f:
@@ -42,7 +44,8 @@ async def render_page(id: int, secure_hash: str) -> str:
             async with session.get(src) as response:
                 file_size = humanbytes(int(response.headers.get('Content-Length', 0)))
                 
-        heading = f"Download {file_data.file_name}"
-        html = template_content % (heading, file_data.file_name, src, file_size)
+        safe_filename = html_module.escape(file_data.file_name)
+        heading = f"Download {safe_filename}"
+        html = template_content % (heading, safe_filename, src, file_size)
 
     return html

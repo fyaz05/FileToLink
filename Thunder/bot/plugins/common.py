@@ -1,4 +1,6 @@
-# Thunder/bot/plugins/common.py
+"""
+Thunder/bot/plugins/common.py - Common plugin handlers and helpers for Thunder bot.
+"""
 
 import time
 import asyncio
@@ -7,11 +9,13 @@ from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
 from pyrogram.errors import RPCError
+from Thunder.utils.decorators import check_banned
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
-    User
+    User,
+    LinkPreviewOptions,
 )
 
 from Thunder.bot import StreamBot
@@ -133,8 +137,14 @@ def get_file_id_from_message(file_msg: Message) -> Optional[str]:
         return file_msg.video_note.file_id
     return None
 
+    # Continue propagation if not banned or error occurred
+    message.continue_propagation()
+
 # ====== COMMAND HANDLERS ======
 
+from Thunder.utils.force_channel import force_channel_check
+
+@check_banned
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, message: Message):
     # Process /start command and handle file info retrieval
@@ -156,7 +166,24 @@ async def start_command(bot: Client, message: Message):
                 "• `/dc` - View data center information\n\n"
                 "✨ Enjoy using the bot, and feel free to share your feedback!"
             )
-            await message.reply_text(text=welcome_text)
+            
+            if Var.FORCE_CHANNEL_ID:
+                try:
+                    chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
+                    invite_link = chat.invite_link
+                    if not invite_link and chat.username:
+                        invite_link = f"https://t.me/{chat.username}"
+                    
+                    if invite_link:
+                        welcome_text += f"\n\nP.S. To unlock all features and get updates, please join our community channel: {invite_link}"
+                    else:
+                        logger.warning(f"Could not retrieve invite link for FORCE_CHANNEL_ID {Var.FORCE_CHANNEL_ID} for /start message. Channel: {chat.title}")
+                        welcome_text += "\n\nP.S. Join our community channel to get the best experience! Ask an admin for the link."
+                except Exception as e:
+                    logger.error(f"Error adding force channel link to /start message for user {message.from_user.id if message.from_user else 'unknown'}, FORCE_CHANNEL_ID {Var.FORCE_CHANNEL_ID}: {e}")
+                    welcome_text += "\n\nP.S. Check out our community channel for more!"
+            
+            await message.reply_text(text=welcome_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
             return
         
         # File ID provided in arguments - generate links
@@ -187,7 +214,7 @@ async def start_command(bot: Client, message: Message):
                     f"🖥️ **Watch Now:**\n`{stream_link}`\n\n"
                     "⏰ **Note:** Links are available as long as the bot is active."
                 ),
-                disable_web_page_preview=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
                 reply_markup=InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("🎬 Stream Now", url=stream_link),
@@ -203,6 +230,7 @@ async def start_command(bot: Client, message: Message):
         logger.error(f"Error in start_command: {e}")
         await handle_user_error(message, ERROR_MSG)
 
+@check_banned
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, message: Message):
     # Handle /help command
@@ -227,11 +255,12 @@ async def help_command(bot: Client, message: Message):
             "• `/dc` - Check data center information\n\n"
             "⚡ **Pro Tip:** Forward messages from channels and groups to get direct links instantly!"
         )
-        await message.reply_text(text=help_text, disable_web_page_preview=True)
+        await message.reply_text(text=help_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
     except Exception as e:
         logger.error(f"Error in help_command: {e}")
         await handle_user_error(message, ERROR_MSG)
 
+@check_banned
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, message: Message):
     # Handle /about command
@@ -252,11 +281,13 @@ async def about_command(bot: Client, message: Message):
             "• Processing: Lightning fast\n\n"
             "Developed with ❤️ by the help of [AI](https://github.com/fyaz05/FileToLink/)"
         )
-        await message.reply_text(text=about_text, disable_web_page_preview=True)
+        await message.reply_text(text=about_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
     except Exception as e:
         logger.error(f"Error in about_command: {e}")
         await handle_user_error(message, ERROR_MSG)
 
+@check_banned
+@force_channel_check
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, message: Message):
     # Handle /dc command with optimized logic for both users and files
@@ -274,7 +305,7 @@ async def dc_command(bot: Client, message: Message):
             ])
             await message.reply_text(
                 dc_text, 
-                disable_web_page_preview=True, 
+                link_preview_options=LinkPreviewOptions(is_disabled=True), 
                 reply_markup=dc_keyboard, 
                 quote=True
             )
@@ -311,7 +342,7 @@ async def dc_command(bot: Client, message: Message):
                     f"🌐 **Data Center:** `{dc_id}`"
                 )
                 
-                await message.reply_text(dc_text, disable_web_page_preview=True, quote=True)
+                await message.reply_text(dc_text, link_preview_options=LinkPreviewOptions(is_disabled=True), quote=True)
                 
             except Exception as e:
                 logger.error(f"Error processing file info: {e}")
@@ -353,6 +384,8 @@ async def dc_command(bot: Client, message: Message):
         logger.error(f"Error in dc_command: {e}")
         await handle_user_error(message, ERROR_MSG)
 
+@check_banned
+@force_channel_check
 @StreamBot.on_message(filters.command("ping") & filters.private)
 async def ping_command(bot: Client, message: Message):
     # Handle /ping command - check bot response time

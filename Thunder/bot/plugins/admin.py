@@ -10,7 +10,7 @@ import random
 import string
 import html
 import hashlib
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
@@ -18,7 +18,8 @@ from pyrogram.enums import ParseMode, ChatMemberStatus
 from pyrogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    Message
+    Message,
+    LinkPreviewOptions,
 )
 from pyrogram.errors import (
     FloodWait, 
@@ -35,6 +36,7 @@ from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.database import Database
 from Thunder.utils.logger import logger, LOG_FILE
+from Thunder.utils import messages
 
 # Initialize database
 db = Database(Var.DATABASE_URL, Var.NAME)
@@ -194,7 +196,7 @@ async def handle_broadcast_completion(message, output, failures, successes, tota
     await message.reply_text(
         message_text,
         parse_mode=ParseMode.MARKDOWN,
-        disable_web_page_preview=True
+        link_preview_options=LinkPreviewOptions(is_disabled=True)
     )
 
 async def check_admin_privileges(client, chat_id):
@@ -221,7 +223,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
     await command_message.reply_text(
         msg_text,
         quote=True,
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🖥️ Watch Now", url=stream_link),
              InlineKeyboardButton("📥 Download", url=online_link)]
@@ -230,7 +232,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
 
 # Command Handlers
 
-@StreamBot.on_message(filters.command("users") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("users") & filters.private & filters.user(Var.OWNER_ID))
 async def get_total_users(client, message):
     try:
         total_users = await db.total_users_count()
@@ -242,7 +244,7 @@ async def get_total_users(client, message):
     except Exception as e:
         await message.reply_text("🚨 **Error fetching user count.**")
 
-@StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(Var.OWNER_ID))
 async def broadcast_message(client, message):
     if not message.reply_to_message:
         await message.reply_text("⚠️ **Please reply to a message to broadcast.**", quote=True)
@@ -312,7 +314,7 @@ async def broadcast_message(client, message):
                                 chat_id=user_id,
                                 text=message.reply_to_message.text or message.reply_to_message.caption,
                                 parse_mode=ParseMode.MARKDOWN,
-                                disable_web_page_preview=True
+                                link_preview_options=LinkPreviewOptions(is_disabled=True)
                             )
                         elif message.reply_to_message.media:
                             await message.reply_to_message.copy(chat_id=user_id)
@@ -378,7 +380,7 @@ async def broadcast_message(client, message):
             f"Error details: `{str(e)}`"
         )
 
-@StreamBot.on_message(filters.command("cancel_broadcast") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("cancel_broadcast") & filters.private & filters.user(Var.OWNER_ID))
 async def cancel_broadcast(client, message):
     if not broadcast_ids:
         await message.reply_text("⚠️ **No active broadcasts to cancel.**")
@@ -426,7 +428,7 @@ async def handle_cancel_broadcast(client, callback_query):
             "⚠️ **This broadcast is no longer active.**"
         )
 
-@StreamBot.on_message(filters.command("status") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("status") & filters.private & filters.user(Var.OWNER_ID))
 async def show_status(client, message):
     try:
         uptime = get_readable_time(time.time() - StartTime)
@@ -455,7 +457,7 @@ async def show_status(client, message):
     except Exception:
         await message.reply_text("🚨 **Error retrieving status.**")
 
-@StreamBot.on_message(filters.command("stats") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("stats") & filters.private & filters.user(Var.OWNER_ID))
 async def show_stats(client, message):
     try:
         current_time = get_readable_time(time.time() - StartTime)
@@ -481,7 +483,7 @@ async def show_stats(client, message):
     except Exception:
         await message.reply_text("🚨 **Error retrieving statistics.**")
 
-@StreamBot.on_message(filters.command("restart") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("restart") & filters.private & filters.user(Var.OWNER_ID))
 async def restart_bot(client, message):
     try:
         await message.reply_text("🔄 **Restarting the bot...**")
@@ -490,7 +492,7 @@ async def restart_bot(client, message):
     except Exception:
         await message.reply_text("🚨 **Failed to restart the bot.**")
 
-@StreamBot.on_message(filters.command("log") & filters.private & filters.user(list(Var.OWNER_ID)))
+@StreamBot.on_message(filters.command("log") & filters.private & filters.user(Var.OWNER_ID))
 async def send_logs(client, message):
     try:
         if os.path.exists(LOG_FILE):
@@ -503,89 +505,157 @@ async def send_logs(client, message):
                 await message.reply_text("⚠️ **The log file is empty.**")
         else:
             await message.reply_text("⚠️ **Log file not found.**")
-    except Exception:
-        await message.reply_text("🚨 **Failed to send log file.**")
+    except Exception as e:
+        await message.reply_text(f"🚨 **Error getting logs:** {str(e)}")
 
-@StreamBot.on_message(filters.command("shell") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def run_shell_command(client, message):
-    if len(message.command) < 2:
-        await message.reply_text("⚠️ **Please provide a command to execute.**")
-        return
-    
+@StreamBot.on_message(filters.command("ban") & filters.private & filters.user(Var.OWNER_ID))
+async def ban_user_command(client, message):
+    """Ban a user from using the bot"""
     try:
-        cmd = message.text.split(None, 1)[1]
+        if len(message.command) < 2:
+            await message.reply_text(messages.MSG_BAN_USAGE)
+            return
+        user_id_to_ban = message.command[1]
+        ban_reason = ' '.join(message.command[2:]) if len(message.command) > 2 else None
+        try:
+            user_id_to_ban = int(user_id_to_ban)
+        except ValueError:
+            await message.reply_text(messages.MSG_INVALID_USER_ID)
+            return
+        if user_id_to_ban in Var.OWNER_ID:
+            await message.reply_text(messages.MSG_CANNOT_BAN_OWNER)
+            return
+        try:
+            await db.add_banned_user(
+                user_id=user_id_to_ban,
+                banned_by=message.from_user.id,
+                reason=ban_reason
+            )
+        except Exception as e:
+            await message.reply_text(messages.MSG_BAN_ERROR.format(error=str(e)))
+            return
+        admin_msg = messages.MSG_ADMIN_USER_BANNED.format(user_id=user_id_to_ban)
+        if ban_reason:
+            admin_msg += messages.MSG_BAN_REASON_SUFFIX.format(reason=ban_reason)
+        await message.reply_text(admin_msg)
+        try:
+            ban_notification = messages.MSG_USER_BANNED_NOTIFICATION
+            if ban_reason:
+                ban_notification += messages.MSG_BAN_REASON_SUFFIX.format(reason=ban_reason)
+            await client.send_message(
+                chat_id=user_id_to_ban,
+                text=ban_notification
+            )
+        except Exception as e:
+            await message.reply_text(messages.MSG_COULD_NOT_NOTIFY_USER.format(user_id=user_id_to_ban, error=str(e)))
+    except Exception as e:
+        await message.reply_text(messages.MSG_BAN_ERROR.format(error=str(e)))
+
+@StreamBot.on_message(filters.command("unban") & filters.private & filters.user(Var.OWNER_ID))
+async def unban_user_command(client, message):
+    """Unban a user from using the bot"""
+    try:
+        if len(message.command) < 2:
+            await message.reply_text(messages.MSG_UNBAN_USAGE)
+            return
+        user_id_to_unban = message.command[1]
+        try:
+            user_id_to_unban = int(user_id_to_unban)
+        except ValueError:
+            await message.reply_text(messages.MSG_INVALID_USER_ID)
+            return
+        try:
+            removed = await db.remove_banned_user(user_id=user_id_to_unban)
+        except Exception as e:
+            await message.reply_text(messages.MSG_UNBAN_ERROR.format(error=str(e)))
+            return
+        if removed:
+            await message.reply_text(messages.MSG_ADMIN_USER_UNBANNED.format(user_id=user_id_to_unban))
+            try:
+                await client.send_message(
+                    chat_id=user_id_to_unban,
+                    text=messages.MSG_USER_UNBANNED_NOTIFICATION
+                )
+            except Exception as e:
+                await message.reply_text(messages.MSG_COULD_NOT_NOTIFY_USER.format(user_id_to_unban, error=str(e)))
+        else:
+            await message.reply_text(messages.MSG_USER_NOT_IN_BAN_LIST.format(user_id=user_id_to_unban))
+    except Exception as e:
+        await message.reply_text(messages.MSG_UNBAN_ERROR.format(error=str(e)))
+
+@StreamBot.on_message(filters.command("shell") & filters.private & filters.user(Var.OWNER_ID))
+async def run_shell_command(client: Client, message: Message):
+    """
+    Executes a shell command and replies with its output.
+    Only accessible by OWNER_ID.
+    """
+    if len(message.command) < 2:
+        await message.reply_text(
+            "<b>Usage:</b>\n"
+            "/shell &lt;command&gt;\n\n"
+            "<b>Example:</b>\n"
+            "/shell ls -l",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    command_to_run = " ".join(message.command[1:])
+    
+    reply_msg = await message.reply_text(
+        f"🔩 Executing: <pre>{html.escape(command_to_run)}</pre>",
+        parse_mode=ParseMode.HTML,
+        quote=True
+    )
+
+    try:
         process = await asyncio.create_subprocess_shell(
-            cmd,
+            command_to_run,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=60
-            )
-            
-            stdout = stdout.decode('utf-8', errors='replace')
-            stderr = stderr.decode('utf-8', errors='replace')
-            
-            if stdout:
-                stdout = stdout[:4000] if len(stdout) > 4000 else stdout
-                stdout = html.escape(stdout)
-                await message.reply_text(
-                    f"<b>Output:</b>\n<pre>{stdout}</pre>",
-                    parse_mode=ParseMode.HTML
-                )
-            
-            if stderr:
-                stderr = stderr[:4000] if len(stderr) > 4000 else stderr
-                stderr = html.escape(stderr)
-                await message.reply_text(
-                    f"<b>Error:</b>\n<pre>{stderr}</pre>",
-                    parse_mode=ParseMode.HTML
-                )
-                
-            if not stdout and not stderr:
-                await message.reply_text("⚠️ **Command executed with no output.**")
-        
-        except asyncio.TimeoutError:
-            process.kill()
-            await message.reply_text("⚠️ **Command timed out (60s limit).**")
-    
-    except Exception as e:
-        await message.reply_text(f"🚨 **Error executing command:** {str(e)}")
+        stdout, stderr = await process.communicate()
 
-@StreamBot.on_message(filters.command("db") & filters.private & filters.user(list(Var.OWNER_ID)))
-async def db_operations(client, message):
-    if len(message.command) < 2:
-        await message.reply_text(
-            "⚠️ **Please specify a database operation.**\n\n"
-            "**Available commands:**\n"
-            "• `/db stats` - Show database statistics\n"
-            "• `/db cleanup` - Remove inactive users\n"
-            "• `/db backup` - Backup database"
-        )
-        return
-    
-    operation = message.command[1].lower()
-    
-    try:
-        if operation == "stats":
-            total_users = await db.total_users_count()
-            await message.reply_text(f"📊 **Database Statistics**\n\n👥 **Total Users:** {total_users}")
-        
-        elif operation == "cleanup":
-            await message.reply_text("⏳ **Database cleanup in progress...**")
-            # Your cleanup logic here
-            await message.reply_text("✅ **Database cleanup completed.**")
-        
-        elif operation == "backup":
-            await message.reply_text("⏳ **Creating database backup...**")
-            # Your backup logic here
-            await message.reply_text("✅ **Database backup completed.**")
-        
-        else:
-            await message.reply_text(f"⚠️ **Unknown operation:** `{operation}`")
-    
+        output = ""
+        if stdout:
+            output += f"<b>[stdout]:</b>\n<pre>{html.escape(stdout.decode().strip())}</pre>\n"
+        if stderr:
+            output += f"<b>[stderr]:</b>\n<pre>{html.escape(stderr.decode().strip())}</pre>\n"
+
+        if not output:
+            output = "<b>[!] No output from command.</b>"
+
     except Exception as e:
-        await message.reply_text(f"🚨 **Error during database operation:** {str(e)}")
+        output = f"<b>[ERROR]:</b>\n<pre>{html.escape(str(e))}</pre>"
+        logger.error(f"Error executing shell command '{command_to_run}': {e}")
+
+    if len(output) > 4096:
+        try:
+            with open("shell_output.txt", "w", encoding="utf-8") as file:
+                # Write a plain text version for the file
+                plain_text_output = []
+                if stdout:
+                    plain_text_output.append("[stdout]:\n" + stdout.decode().strip() + "\n")
+                if stderr:
+                    plain_text_output.append("[stderr]:\n" + stderr.decode().strip() + "\n")
+                if not plain_text_output and "[ERROR]" in output: # if only error
+                     plain_text_output.append(output.replace("<b>","").replace("</b>","").replace("<pre>","").replace("</pre>",""))
+
+
+                file.write("".join(plain_text_output) if plain_text_output else "No output.")
+
+            await message.reply_document(
+                document="shell_output.txt",
+                caption=f"Output for: <pre>{html.escape(command_to_run)}</pre>",
+                parse_mode=ParseMode.HTML,
+                quote=True
+            )
+            os.remove("shell_output.txt")
+            await reply_msg.delete() # Delete "Executing..." message
+        except Exception as e_file:
+            logger.error(f"Error sending shell output as file: {e_file}")
+            await reply_msg.edit_text(f"Output is too long and sending as file failed: {html.escape(str(e_file))}", parse_mode=ParseMode.HTML)
+            # Fallback to sending truncated message if file sending fails
+            # await message.reply_text(output[:4000] + "\n\n<b>[Output Truncated]</b>", parse_mode=ParseMode.HTML, quote=True)
+
+    else:
+        await reply_msg.edit_text(output, parse_mode=ParseMode.HTML)

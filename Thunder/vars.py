@@ -1,66 +1,69 @@
-# Thunder/vars.py
+"""
+Thunder/vars.py - Configuration variables for the Thunder bot.
+"""
 
-import os
-from dotenv import load_dotenv
-from typing import Set, Optional
-
-load_dotenv()
-
-def str2bool(value: str) -> bool:
-    # Convert string to boolean value
-    return value.lower() in ('true', '1', 'yes', 'y', 't')
+from typing import Set, Optional, List
+import config
+from Thunder.utils.logger import logger
 
 class Var:
-    # Configuration variables for the Thunder bot
-    
+    """Configuration variables for the Thunder bot."""
     # Telegram API credentials
-    API_ID: int = int(os.getenv('API_ID', ''))
-    API_HASH: str = os.getenv('API_HASH', '')
-    
+    API_ID: int = getattr(config, "API_ID", 0)
+    if API_ID == 0:
+        logger.critical("CRITICAL: API_ID is not configured in Thunder/config.py!")
+        raise ValueError("CRITICAL: API_ID is not configured in Thunder/config.py!")
+
+    API_HASH: str = getattr(config, "API_HASH", "")
+    if not API_HASH:
+        logger.critical("CRITICAL: API_HASH is not configured in Thunder/config.py!")
+        raise ValueError("CRITICAL: API_HASH is not configured in Thunder/config.py!")
+
     # Bot token and identity
-    BOT_TOKEN: str = os.getenv('BOT_TOKEN', '')
-    NAME: str = os.getenv('NAME', 'ThunderF2L')
+    BOT_TOKEN: str = getattr(config, "BOT_TOKEN", "")
+    if not BOT_TOKEN:
+        logger.critical("CRITICAL: BOT_TOKEN is not configured in Thunder/config.py!")
+        raise ValueError("CRITICAL: BOT_TOKEN is not configured in Thunder/config.py!")
+    NAME: str = getattr(config, "NAME", "ThunderF2L")
     
     # Performance settings
-    SLEEP_THRESHOLD: int = int(os.getenv('SLEEP_THRESHOLD', '60'))
-    WORKERS: int = int(os.getenv('WORKERS', '100'))
-    
+    SLEEP_THRESHOLD: int = getattr(config, "SLEEP_THRESHOLD", 60)
+    WORKERS: int = getattr(config, "WORKERS", 100)
+
     # Channel for file storage
-    BIN_CHANNEL: int = int(os.getenv('BIN_CHANNEL', ''))
-    
+    BIN_CHANNEL: int = getattr(config, "BIN_CHANNEL", 0)
+    if BIN_CHANNEL == 0:
+        logger.critical("CRITICAL: BIN_CHANNEL is not configured in Thunder/config.py!")
+        raise ValueError("CRITICAL: BIN_CHANNEL is not configured in Thunder/config.py!")
+
     # Web server configuration
-    PORT: int = int(os.getenv('PORT', '460'))
-    BIND_ADDRESS: str = os.getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0')
-    PING_INTERVAL: int = int(os.getenv('PING_INTERVAL', '1200'))  # 20 minutes
-    NO_PORT: bool = str2bool(os.getenv('NO_PORT', 'True'))
-    CACHE_SIZE: int = int(os.getenv('CACHE_SIZE', '100'))
-    
+    PORT: int = getattr(config, "PORT", 8080)
+    BIND_ADDRESS: str = getattr(config, "BIND_ADDRESS", "0.0.0.0")
+    PING_INTERVAL: int = getattr(config, "PING_INTERVAL", 1200)
+    NO_PORT: bool = getattr(config, "NO_PORT", True)
+    CACHE_SIZE: int = getattr(config, "CACHE_SIZE", 100)
+
     # Owner details
-    OWNER_ID: Set[int] = set(int(x) for x in os.getenv('OWNER_ID', '').split() if x.isdigit())
-    OWNER_USERNAME: str = os.getenv('OWNER_USERNAME', '')
+    OWNER_ID: List[int] = getattr(config, "OWNER_ID", [])
+    if not OWNER_ID:
+        logger.warning("WARNING: OWNER_ID is empty. No user will have admin access.")
+    OWNER_USERNAME: str = getattr(config, "OWNER_USERNAME", "")
     
-    # Deployment configuration
-    APP_NAME: str = os.getenv('APP_NAME', '')
-    ON_HEROKU: bool = 'DYNO' in os.environ
-    
-    # Domain name configuration
-    if ON_HEROKU:
-        FQDN: str = os.getenv('FQDN', '') or f"{APP_NAME}.herokuapp.com"
-    else:
-        FQDN: str = os.getenv('FQDN', BIND_ADDRESS)
-    
-    # SSL and URL configuration
-    HAS_SSL: bool = str2bool(os.getenv('HAS_SSL', 'True'))
-    URL: str = f"https://{FQDN}/" if HAS_SSL else f"http://{FQDN}/"
-    
+    # Domain and URL configuration
+    FQDN: str = getattr(config, "FQDN", None) or BIND_ADDRESS
+    HAS_SSL: bool = getattr(config, "HAS_SSL", False)
+    PROTOCOL: str = "https" if HAS_SSL else "http"
+    PORT_SEGMENT: str = "" if NO_PORT else f":{PORT}"
+    URL: str = f"{PROTOCOL}://{FQDN}{PORT_SEGMENT}/"
+
     # Database configuration
-    DATABASE_URL: str = os.getenv('DATABASE_URL', '')
-    
+    DATABASE_URL: str = getattr(config, "DATABASE_URL", "")
+
     # Channel configurations
-    UPDATES_CHANNEL: Optional[str] = os.getenv('UPDATES_CHANNEL')
-    BANNED_CHANNELS: Set[int] = set(
-        int(x) for x in os.getenv('BANNED_CHANNELS', '').split() if x.lstrip('-').isdigit()
-    )
-    
+    BANNED_CHANNELS: Set[int] = getattr(config, "BANNED_CHANNELS", set())
+
     # Multi-client support flag
     MULTI_CLIENT: bool = False
+
+    # Force channel configuration
+    FORCE_CHANNEL_ID: Optional[int] = getattr(config, "FORCE_CHANNEL_ID", None)

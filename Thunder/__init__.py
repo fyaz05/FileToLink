@@ -6,4 +6,4 @@ import time
 StartTime = time.time()
 
 # Define the version
-__version__ = "1.7.5"
+__version__ = "1.8.0"

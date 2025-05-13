@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 import json
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionError
@@ -53,13 +54,15 @@ def exception_handler(func):
         try:
             return await func(request)
         except InvalidHash as e:
+            logger.debug(f"InvalidHash exception: {e}")
             raise web.HTTPForbidden(
                 text=json_error(403, "Invalid security credentials"),
                 content_type="application/json"
             )
         except FileNotFound as e:
+            logger.debug(f"FileNotFound exception: {e}")
             raise web.HTTPNotFound(
-                text=json_error(404, str(e)),
+                text=json_error(404, "File not found"),
                 content_type="application/json"
             )
         except (ClientConnectionError, asyncio.CancelledError):
@@ -67,9 +70,13 @@ def exception_handler(func):
         except web.HTTPException:
             raise
         except Exception as e:
-            logger.exception("Unhandled exception")
+            # Log the full exception with stack trace for debugging, but don't expose it to users
+            error_id = secrets.token_hex(6)  # Generate a unique error ID for reference
+            logger.error(f"Unhandled exception (ID: {error_id}): {str(e)}")
+            logger.error(f"Stack trace for error {error_id}:\n{traceback.format_exc()}")
+            
             raise web.HTTPInternalServerError(
-                text=json_error(500, "Internal server error"),
+                text=json_error(500, f"Internal server error (Reference ID: {error_id})"),
                 content_type="application/json"
             )
     return wrapper
@@ -211,6 +218,7 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
     if range_header:
         range_match = RANGE_REGEX.fullmatch(range_header)
         if not range_match:
+            logger.debug(f"Malformed range header received: {range_header}")
             raise web.HTTPBadRequest(
                 text=json_error(400, "Malformed range header"),
                 content_type="application/json"
@@ -227,6 +235,7 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
         except Exception:
             start, end = 0, file_size - 1
     if start < 0 or end >= file_size or start > end:
+        logger.debug(f"Invalid range request: start={start}, end={end}, file_size={file_size}")
         raise web.HTTPRequestRangeNotSatisfiable(
             headers={"Content-Range": f"bytes */{file_size}"}
         )
