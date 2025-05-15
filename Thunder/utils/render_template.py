@@ -15,7 +15,6 @@ from Thunder.utils.logger import logger
 async def render_page(id: int, secure_hash: str) -> str:
     # Render HTML page for streaming or downloading files
     file_data = await get_file_ids(StreamBot, int(Var.BIN_CHANNEL), id)
-    
     # Verify hash matches to prevent unauthorized access
     if file_data.unique_id[:6] != secure_hash:
         logger.debug(f'Link hash: {secure_hash} - Expected: {file_data.unique_id[:6]}')
@@ -24,6 +23,7 @@ async def render_page(id: int, secure_hash: str) -> str:
 
     # Generate source URL for the file
     src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{str(id)}')
+    
     # Choose template based on file type
     mime_type = file_data.mime_type.split('/')[0].strip()
     

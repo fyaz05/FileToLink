@@ -101,20 +101,20 @@
 
 ## ⚙️ Configuration
 
-Rename `config_sample.py` to `config.py` and edit the following variables:
+Rename `config_sample.env` to `config.env` and edit the following variables:
 
 ### Required
 
 | Variable         | Description                                 | Example                                 |
 |------------------|---------------------------------------------|-----------------------------------------|
 | `API_ID`         | Telegram API ID from my.telegram.org         | `12345`                                 |
-| `API_HASH`       | Telegram API Hash from my.telegram.org       | `"0123456789abcdef0123456789abcdef"`    |
-| `BOT_TOKEN`      | Bot token from @BotFather                   | `"123456789:ABCdefGHIjklMNOpqrsTUVwxyz"`|
+| `API_HASH`       | Telegram API Hash from my.telegram.org       | `abc123def456`                          |
+| `BOT_TOKEN`      | Bot token from @BotFather                   | `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`  |
 | `BIN_CHANNEL`    | Channel ID for storing files (add bot as admin) | `-1001234567890`                    |
-| `OWNER_ID`       | Your Telegram user ID                        | `[12345678]`                            |
-| `OWNER_USERNAME` | Your Telegram username (without @)           | `"yourusername"`                        |
-| `FQDN`           | Your domain name or server IP                | `"files.yourdomain.com"`                |
-| `HAS_SSL`        | Set to True if using HTTPS                   | `False` or `True`                       |
+| `OWNER_ID`       | Your Telegram user ID(s) (space-separated)   | `12345678 87654321`                     |
+| `OWNER_USERNAME` | Your Telegram username (without @)           | `yourusername`                          |
+| `FQDN`           | Your domain name or server IP                | `files.yourdomain.com`                  |
+| `HAS_SSL`        | Set to "True" if using HTTPS                | `True` or `False`                       |
 | `PORT`           | Web server port                              | `8080`                                  |
 | `NO_PORT`        | Hide port in URLs                            | `True` or `False`                       |
 
@@ -122,14 +122,18 @@ Rename `config_sample.py` to `config.py` and edit the following variables:
 
 | Variable             | Description                              | Default   | Example                       |
 |----------------------|------------------------------------------|-----------|-------------------------------|
-| `MULTI_BOT_TOKENS`   | Additional bot tokens for load balancing | `[]`      | `["token1", "token2"]`        |
-| `FORCE_CHANNEL_ID`   | Channel ID users must join               | `None`    | `-1001234567890`              |
+| `MULTI_BOT_TOKENS`   | Additional bot tokens for load balancing | *(empty)* | `MULTI_TOKEN1=`              |
+| `FORCE_CHANNEL_ID`   | Channel ID users must join               | *(empty)* | `-1001234567890`              |
+| `BANNED_CHANNELS`    | Space-separated banned channel IDs       | *(empty)* | `-1001234567890 -100987654321`|
 | `SLEEP_THRESHOLD`    | Threshold for client switching           | `60`      | `30`                          |
 | `WORKERS`            | Number of async workers                  | `100`     | `200`                         |
-| `DATABASE_URL`       | MongoDB connection string                | `None`    | `"mongodb+srv://user:pass@host/db"` |
-| `SESSION_NAME`       | Custom session name                      | `"Thunder"` | `"MyFileBot"`               |
+| `DATABASE_URL`       | MongoDB connection string                | *(empty)* | `mongodb+srv://user:pass@host/db` |
+| `NAME`               | Bot application name                     | `ThunderF2L` | `MyFileBot`                |
+| `BIND_ADDRESS`       | Address to bind web server               | `0.0.0.0` | `127.0.0.1`                   |
+| `PING_INTERVAL`      | Ping interval in seconds                 | `840`     | `1200`                        |
+| `CACHE_SIZE`         | Cache size in MB                         | `100`     | `200`                         |
 
-> ℹ️ For all options, see `config_sample.py`.
+> ℹ️ For all options, see `config_sample.env`.
 
 ---
 
@@ -138,7 +142,7 @@ Rename `config_sample.py` to `config.py` and edit the following variables:
 ### Using Docker (Recommended)
 
 ```bash
-# Ensure you have configured config.py as per the Configuration section
+# Ensure you have configured config.env as per the Configuration section
 # Build and run with Docker
 docker build -t Thunder .
 docker run -d --name Thunder -p 8080:8080 Thunder
@@ -154,8 +158,8 @@ python -m Thunder
 
 ### ⚡ Scaling for High Traffic
 
-- Use multiple bot instances with `MULTI_BOT_TOKENS` in your `config.py`.
-- Increase `WORKERS` in `config.py` based on your server's capabilities.
+- Use multiple bot instances.
+- Increase `WORKERS` in `config.env` based on your server's capabilities.
 
 ---
 

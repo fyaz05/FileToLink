@@ -413,13 +413,14 @@ async def process_media_message(client, command_message, media_message, notify=T
 async def retry_failed_media(client, command_message, media_messages, status_msg=None):
     """Simple helper to retry failed media processing"""
     results = []
-    for msg in media_messages:
+    for i, msg in enumerate(media_messages):
         try:
             result = await process_media_message(client, command_message, msg, notify=False)
             if result:
                 results.append(result)
-            if status_msg:
-                await status_msg.edit(f"⏳ **Retrying failed files: {len(results)}/{len(media_messages)}**")
+                if status_msg and i % 2 == 0:
+                    await status_msg.edit(f"⏳ **Retry progress: {len(results)}/{len(media_messages)}**")
+            await asyncio.sleep(0.25)
         except Exception as e:
             logger.error(f"Error retrying media: {e}")
     return results
@@ -437,91 +438,89 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
         download_links = []
         failed_messages = []
         
+        async def process_single_message(msg):
+            """Process individual message with minimal retry logic"""
+            try:
+                return await process_media_message(
+                    client,
+                    command_message,
+                    msg,
+                    notify=False
+                )
+            except FloodWait as e:
+                await handle_flood_wait(e)
+                return await process_media_message(client, command_message, msg, notify=False)
+            except Exception as e:
+                logger.error(f"Message {msg.id} error: {e}")
+                return None
+        
         # Process messages in batches
         for i in range(0, len(message_ids), batch_size):
             batch_ids = message_ids[i:i+batch_size]
             
+            await asyncio.sleep(0.7)
+            
+            await status_msg.edit(
+                f"⏳ Processing batch {(i//batch_size)+1}/{(len(message_ids)+batch_size-1)//batch_size}"
+            )
+            
+            messages = []
             try:
-                # Update status
-                await status_msg.edit(
-                    f"⏳ **Processing messages {i+1} to {min(i+batch_size, len(message_ids))} of {len(message_ids)}...**"
-                )
-                
-                # Get messages
                 messages = await client.get_messages(
                     chat_id=chat_id,
                     message_ids=batch_ids
                 )
-                
-                # Create tasks only for valid media messages
-                batch_tasks = []
-                valid_media_msgs = []
-                
-                for msg in messages:
-                    if msg and msg.media:
-                        valid_media_msgs.append(msg)
-                        task = asyncio.create_task(
-                            process_media_message(
-                                client,
-                                command_message,
-                                msg,
-                                notify=False
-                            )
-                        )
-                        batch_tasks.append(task)
-                
-                # Skip if no media found
-                valid_media_count = len(valid_media_msgs)
-                if valid_media_count == 0:
-                    continue
-                        
-                # Process all tasks concurrently    
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                
-                # Process results
-                for idx, result in enumerate(batch_results):
-                    if isinstance(result, Exception):
-                        failed_count += 1
-                        failed_messages.append(valid_media_msgs[idx])
-                        logger.error(f"Error processing media: {result}")
-                        continue
-                    
-                    if result:
-                        download_links.append(result)
-                        processed_count += 1
-                
-                # Update progress
-                await status_msg.edit(
-                    f"⏳ **Processed {processed_count}/{num_files} files...**\n"
-                    f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
+            except FloodWait as e:
+                await handle_flood_wait(e)
+                messages = await client.get_messages(
+                    chat_id=chat_id,
+                    message_ids=batch_ids
                 )
-            
             except Exception as e:
-                failed_count += valid_media_count
-                failed_messages.extend(valid_media_msgs)
-                logger.error(f"Error processing batch: {e}")
+                logger.error(f"Batch fetch error: {e}")
+            
+            for msg in messages:
+                if msg and msg.media:
+                    try:
+                        result = await process_single_message(msg)
+                        if result:
+                            download_links.append(result)
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                            failed_messages.append(msg)
+                    except Exception as e:
+                        failed_count += 1
+                        failed_messages.append(msg)
+                        logger.error(f"Failed to process {msg.id}: {e}")
+
+                    await asyncio.sleep(0.7)
+
+                if processed_count % 5 == 0 or processed_count + failed_count == len(messages):
+                    await status_msg.edit(
+                        f"⏳ Processed {processed_count}/{num_files}\n"
+                        f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
+                    )
+          # Simplified retry logic for failed messages
+        if failed_messages:
+            logger.warning(f"{len(failed_messages)} files failed processing")
+            
+            # Retry if fewer than half the files failed
+            if failed_messages and len(failed_messages) < num_files / 2:
+                await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
+                retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
+                
+                if retry_results:
+                    download_links.extend(retry_results)
+                    processed_count += len(retry_results)
+                    failed_count -= len(retry_results)
+            else:
                 await status_msg.edit(
-                    "⚠️ **Error fetching some messages**\n"
+                    "⚠️ Some messages failed processing\n"
                     "Continuing with successfully processed files..."
                 )
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
         
-        # Retry failed messages once
-        if failed_messages and len(failed_messages) < num_files / 2:  # Only retry if less than half failed
-            await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
-            retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
-            
-            if retry_results:
-                download_links.extend(retry_results)
-                processed_count += len(retry_results)
-                failed_count -= len(retry_results)
-                
-                await status_msg.edit(
-                    f"⏳ **After retry: {processed_count}/{num_files} files processed**\n"
-                    f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
-                )
-        
-        # Send results
         def chunk_list(lst, n):
             for i in range(0, len(lst), n):
                 yield lst[i:i + n]
@@ -529,7 +528,6 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
         for chunk in chunk_list(download_links, 20):
             links_text = "\n".join(chunk)
             batch_links_message = f"📥 **Here are your {len(chunk)} download links:**\n\n`{links_text}`"
-            # Send to group chat
             await command_message.reply_text(
                 batch_links_message,
                 quote=True,
@@ -537,7 +535,6 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 parse_mode=enums.ParseMode.MARKDOWN
             )
             await asyncio.sleep(0.1)
-            # Also send to DM if in a group
             if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                 try:
                     await client.send_message(
@@ -553,7 +550,6 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         quote=True
                     )
         
-        # Final status update
         final_message = f"✅ **Processed {processed_count} files out of {num_files} requested.**"
         if failed_count > 0:
             final_message += f"\n❌ Failed: {failed_count} files"
@@ -651,12 +647,10 @@ async def link_handler(client, message):
         if num_files == 1:
             result = await process_media_message(client, message, reply_msg)
             if result:
-                # Also send to DM if in a group
                 if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                     try:
                         cached_data = await CACHE.get(get_file_unique_id(reply_msg))
                         if cached_data:
-                            # Get the exact same message format that was sent to the group
                             msg_text = (
                                 "🔗 **Your Links are Ready!**\n\n"
                                 f"📄 **File Name:** `{cached_data['media_name']}`\n"
@@ -680,7 +674,6 @@ async def link_handler(client, message):
                             )
                             await asyncio.sleep(0.1)
                     except Exception:
-                        # Notify in group that user needs to start the bot
                         await message.reply_text(
                             "⚠️ I couldn't send you a DM. Please start the bot first.",
                             quote=True
