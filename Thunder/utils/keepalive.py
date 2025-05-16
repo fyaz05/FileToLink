@@ -13,10 +13,9 @@ async def ping_server():
         await asyncio.sleep(sleep_time)
         try:
             async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as session:
+                timeout=aiohttp.ClientTimeout(total=10)            ) as session:
                 async with session.get(Var.URL) as resp:
-                    logger.info(f"Ping status: {resp.status}")
+                    pass
         except asyncio.TimeoutError:
             logger.warning("Server ping timeout")
         except Exception as e:

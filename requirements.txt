@@ -11,3 +11,4 @@ pyromod
 python-dotenv
 requests
 tgcrypto
+shortzy

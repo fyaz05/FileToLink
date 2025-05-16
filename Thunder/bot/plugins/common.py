@@ -8,7 +8,6 @@ from typing import Tuple, Optional
 from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
-from pyrogram.errors import RPCError
 from Thunder.utils.decorators import check_banned
 from pyrogram.types import (
     InlineKeyboardButton,
@@ -23,12 +22,14 @@ from Thunder.vars import Var
 from Thunder.utils.database import Database
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.file_properties import get_hash, get_media_file_size, get_name
+from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.logger import logger
+from Thunder.utils.tokens import get, check, validate_activation_token
 
-# Initialize database connection
+# DB connection
 db = Database(Var.DATABASE_URL, Var.NAME)
 
-# ====== CONSTANTS & MESSAGES ======
+# Error messages
 ERROR_MSG = "🚨 **An unexpected error occurred.**"
 INVALID_ARG_MSG = "❌ **Invalid argument.** Please provide a valid Telegram User ID or username."
 FAILED_USER_INFO_MSG = "❌ **Failed to retrieve user information.**"
@@ -88,7 +89,7 @@ async def generate_media_links(log_msg: Message) -> Tuple[str, str]:
         return stream_link, download_link
     except Exception as e:
         logger.error(f"Error generating media links: {e}")
-        await notify_channel(log_msg._client, f"Error generating media links: {e}")
+        await notify_channel(log_msg._client._client, f"Error generating media links: {e}")
         # Return fallback empty links if generation fails
         return "", ""
 
@@ -137,12 +138,7 @@ def get_file_id_from_message(file_msg: Message) -> Optional[str]:
         return file_msg.video_note.file_id
     return None
 
-    # Continue propagation if not banned or error occurred
-    message.continue_propagation()
-
 # ====== COMMAND HANDLERS ======
-
-from Thunder.utils.force_channel import force_channel_check
 
 @check_banned
 @StreamBot.on_message(filters.command("start") & filters.private)
@@ -151,9 +147,49 @@ async def start_command(bot: Client, message: Message):
     try:
         if message.from_user:
             await log_new_user(bot, message.from_user.id, message.from_user.first_name)
+        # Handle token activation if present
+        if len(message.command) == 2:
+            token = message.command[1]
+            
+            try:
+                # Check if it's a token activation command
+                if token.startswith("token"):
+                    
+                    validation_result = await validate_activation_token(token)
+                    
+                    if (validation_result["valid"]):
+                        await db.update_user_token(message.from_user.id, token)
+                        await message.reply_text(
+                            f"🎉 Token activated successfully!\n\n"
+                            f"🔑 You can use all features until: {validation_result['expiry_date']}\n"
+                            f"📝 Note: {validation_result['description']}",
+                            quote=True
+                        )
+                        return
+                    else:
+                        await message.reply_text(
+                            f"❌ Token activation failed: {validation_result['reason']}",
+                            quote=True
+                        )
+                        return
+                else:
+                    
+                    # Try to get token from database
+                    record = await get(token)
+                    if record and record["user_id"] == message.from_user.id and await check(message.from_user.id):
+                        await message.reply_text("✅ Token activated! You may now use the bot.", quote=True)
+                        return
+                    else:
+                        await message.reply_text("❌ Invalid or expired token. Please get a new one.", quote=True)
+                        return
+            except Exception as e:
+                logger.error(f"Token activation error: {e}")
+                await message.reply_text("❌ An error occurred during token activation. Please try again.", quote=True)
+                return
         
-        args = message.text.strip().split("_", 1)
-        if len(args) == 1 or args[-1].lower() == "start":
+        # Parse /start payload (if any) by whitespace
+        parts = message.text.strip().split(maxsplit=1)
+        if len(parts) == 1 or parts[1].lower() == "start":
             welcome_text = (
                 "👋 **Welcome to the Thunder File to Link Bot!**\n\n"
                 "I can generate direct download and streaming links for your files. "
@@ -186,9 +222,10 @@ async def start_command(bot: Client, message: Message):
             await message.reply_text(text=welcome_text, link_preview_options=LinkPreviewOptions(is_disabled=True))
             return
         
-        # File ID provided in arguments - generate links
+        # File ID provided in command payload - generate links
+        payload = parts[1]
         try:
-            msg_id = int(args[-1])
+            msg_id = int(payload)
             file_msg = await bot.get_messages(chat_id=Var.BIN_CHANNEL, message_ids=msg_id)
             
             if not file_msg:
@@ -394,7 +431,7 @@ async def ping_command(bot: Client, message: Message):
         response = await message.reply_text("🏓 Pinging...")
         end_time = time.time()
         time_taken_ms = (end_time - start_time) * 1000
-        await response.edit(
+        await response.edit_text(
             f"⚡ **PONG!**\n\n"
             f"⏱️ **Response Time:** `{time_taken_ms:.2f} ms`\n"
             f"🔌 **Server Status:** `Online`\n"

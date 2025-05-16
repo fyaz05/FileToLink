@@ -10,6 +10,7 @@ import random
 import string
 import html
 import hashlib
+from datetime import datetime
 from typing import Tuple, List, Dict, Optional
 from urllib.parse import quote_plus
 
@@ -37,17 +38,18 @@ from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.database import Database
 from Thunder.utils.logger import logger, LOG_FILE
 from Thunder.utils import messages
+from Thunder.utils.tokens import authorize, deauthorize, list_allowed
 
-# Initialize database
+# Init database
 db = Database(Var.DATABASE_URL, Var.NAME)
 
-# Track active broadcasts
+# Active broadcasts
 broadcast_ids = {}
 
-# Maximum concurrent tasks
+# Max concurrent tasks
 MAX_CONCURRENT_TASKS = 10
 
-# Media utility functions - implemented directly to fix import error
+# Media utility functions
 def get_name(message):
     try:
         if message.document:
@@ -508,9 +510,102 @@ async def send_logs(client, message):
     except Exception as e:
         await message.reply_text(f"🚨 **Error getting logs:** {str(e)}")
 
+@StreamBot.on_message(filters.command("authorize") & filters.private & filters.user(Var.OWNER_ID))
+async def authorize_command(client, message):
+    """Authorize user permanently"""
+    
+    # Check if enabled
+    if not getattr(Var, "TOKEN_ENABLED", False):
+        return await message.reply_text("❌ Token system is disabled in configuration.")
+        
+    if len(message.command) != 2:
+        return await message.reply_text("❌ Usage: `/authorize user_id`")
+    
+    try:
+        user_id = int(message.command[1])
+    except ValueError:
+        return await message.reply_text("❌ Invalid user ID. Must be a number.")
+    
+    # Authorize
+    admin_id = message.from_user.id
+    result = await authorize(user_id, admin_id)
+    
+    if result:
+        return await message.reply_text(f"✅ User {user_id} has been authorized permanently.")
+    else:
+        return await message.reply_text(f"❌ Failed to authorize user {user_id}.")
+
+@StreamBot.on_message(filters.command("deauthorize") & filters.private & filters.user(Var.OWNER_ID))
+async def deauthorize_command(client, message):
+    """Remove user's permanent authorization"""
+
+    # Check if enabled
+    if not getattr(Var, "TOKEN_ENABLED", False):
+        return await message.reply_text("❌ Token system is disabled in configuration.")
+        
+    if len(message.command) != 2:
+        return await message.reply_text("❌ Usage: `/deauthorize user_id`")
+    
+    try:
+        user_id = int(message.command[1])
+    except ValueError:
+        return await message.reply_text("❌ Invalid user ID. Must be a number.")
+    
+    # Deauthorize
+    result = await deauthorize(user_id)
+    
+    if result:
+        return await message.reply_text(f"✅ User {user_id} has been deauthorized.")
+    else:
+        return await message.reply_text(f"❌ Failed to deauthorize user {user_id} or user wasn't authorized.")
+
+@StreamBot.on_message(filters.command("listauth") & filters.private & filters.user(Var.OWNER_ID))
+async def list_authorized_command(client, message):
+    """List all authorized users"""
+    
+    # Check if enabled
+    if not getattr(Var, "TOKEN_ENABLED", False):
+        return await message.reply_text("❌ Token system is disabled in configuration.")
+    
+    # Get authorized users
+    cursor = await list_allowed()
+    auth_users = []
+    
+    async for user in cursor:
+        auth_users.append(user)
+    
+    if not auth_users:
+        return await message.reply_text("ℹ️ No authorized users found.")
+    
+    text = "**Authorized Users:**\n\n"
+    for i, user in enumerate(auth_users, 1):
+        auth_time = user.get("authorized_at", datetime.now()).strftime('%Y-%m-%d %H:%M:%S UTC')
+        text += f"{i}. User ID: `{user['user_id']}`\n"
+        text += f"   Authorized by: `{user.get('authorized_by', 'Unknown')}`\n"
+        text += f"   Date: `{auth_time}`\n\n"
+    
+    # Split message if too long
+    if len(text) > 4000:
+        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
+        for chunk in chunks:
+            await message.reply_text(
+                chunk,
+                parse_mode=ParseMode.MARKDOWN,
+                link_preview_options=LinkPreviewOptions(is_disabled=True)
+            )
+    else:
+        await message.reply_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
+        )
+        text += f"   Authorized at: {auth_time}\n\n"
+    
+    return await message.reply_text(text)
+
 @StreamBot.on_message(filters.command("ban") & filters.private & filters.user(Var.OWNER_ID))
 async def ban_user_command(client, message):
-    """Ban a user from using the bot"""
+    """Ban user"""
     try:
         if len(message.command) < 2:
             await message.reply_text(messages.MSG_BAN_USAGE)
@@ -553,7 +648,7 @@ async def ban_user_command(client, message):
 
 @StreamBot.on_message(filters.command("unban") & filters.private & filters.user(Var.OWNER_ID))
 async def unban_user_command(client, message):
-    """Unban a user from using the bot"""
+    """Unban user"""
     try:
         if len(message.command) < 2:
             await message.reply_text(messages.MSG_UNBAN_USAGE)
@@ -585,10 +680,7 @@ async def unban_user_command(client, message):
 
 @StreamBot.on_message(filters.command("shell") & filters.private & filters.user(Var.OWNER_ID))
 async def run_shell_command(client: Client, message: Message):
-    """
-    Executes a shell command and replies with its output.
-    Only accessible by OWNER_ID.
-    """
+    """Execute shell command"""
     if len(message.command) < 2:
         await message.reply_text(
             "<b>Usage:</b>\n"

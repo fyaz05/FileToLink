@@ -1,26 +1,33 @@
-# Thunder/utils/database.py
-
+"""Database utilities for managing users, bans, and tokens via MongoDB."""
 import datetime
-from typing import Optional, List, Dict, Any
-import motor.motor_asyncio
-from motor.motor_asyncio import AsyncIOMotorCollection
+from typing import Optional, Dict, Any
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from Thunder.utils.logger import logger
+from Thunder.vars import Var
 
 class Database:
     # Database class for handling user data using MongoDB
     
     def __init__(self, uri: str, database_name: str):
         # Initialize database connection
-        self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+        self._client = AsyncIOMotorClient(uri)
         self.db = self._client[database_name]
         self.col: AsyncIOMotorCollection = self.db.users
         self.banned_users_col: AsyncIOMotorCollection = self.db.banned_users
+        self.token_col: AsyncIOMotorCollection = self.db.tokens
+        self.authorized_users_col: AsyncIOMotorCollection = self.db.authorized_users
     
     async def ensure_indexes(self):
         # Ensure necessary indexes are created
         await self.banned_users_col.create_index("user_id", unique=True)
+        await self.token_col.create_index("token", unique=True)
+        await self.authorized_users_col.create_index("user_id", unique=True)
+        # Add unique index on users.id
+        await self.col.create_index("id", unique=True)
+        # TTL index to auto-remove expired tokens
+        await self.token_col.create_index("expires_at", expireAfterSeconds=0)
         logger.info(
-            "Database indexes ensured for users and banned_users collections."
+            "Database indexes ensured for users, banned_users, tokens and authorized_users collections."
         )
 
     def new_user(self, user_id: int) -> dict:
@@ -93,7 +100,6 @@ class Database:
             logger.error(
                 f"Database error in add_banned_user for user {user_id}: {e}"
             )
-            # MCP best practice: raise with clear error
             raise RuntimeError(f"Failed to ban user {user_id}: {e}")
 
     async def remove_banned_user(self, user_id: int) -> bool:
@@ -107,7 +113,6 @@ class Database:
             logger.error(
                 f"Database error in remove_banned_user for user {user_id}: {e}"
             )
-            # MCP best practice: return False on error
             return False
 
     async def is_user_banned(self, user_id: int) -> Optional[Dict[str, Any]]:
@@ -118,8 +123,48 @@ class Database:
             logger.error(
                 f"Database error in is_user_banned for user {user_id}: {e}"
             )
-            # MCP best practice: return None on error
             return None
+
+    async def check_user_token(self, user_id: int) -> Dict[str, bool]:
+        """Check if user has valid token."""
+        try:
+            # Only return active (not expired) tokens
+            token_data = await self.token_col.find_one({
+                "user_id": user_id,
+                "expires_at": {"$gt": datetime.datetime.utcnow()}
+            })
+            return {"has_token": bool(token_data)}
+        except Exception as e:
+            logger.error(f"Database error checking token for {user_id}: {e}")
+            return {"has_token": False}
+            
+    async def update_user_token(self, user_id: int, token: str) -> None:
+        """Update user's active token in database."""
+        try:
+            # Find the token data first
+            token_data = await self.token_col.find_one({"token": token})
+            
+            if token_data:
+                # Link token to user and refresh expiration
+                await self.token_col.update_one(
+                    {"token": token},
+                    {"$set": {
+                        "user_id": user_id,
+                        "expires_at": datetime.datetime.utcnow() + datetime.timedelta(hours=Var.TOKEN_TTL_HOURS)
+                    }}
+                )
+            else:
+                # If no token data found, create a basic entry (this is a fallback)
+                logger.warning(f"Token {token} not found in database when assigning to user {user_id}")
+                await self.token_col.insert_one({
+                    "user_id": user_id,
+                    "token": token,
+                    "created_at": datetime.datetime.utcnow(),
+                    "expires_at": datetime.datetime.utcnow() + datetime.timedelta(hours=Var.TOKEN_TTL_HOURS)
+                })
+        except Exception as e:
+            logger.error(f"Database error updating token for {user_id}: {e}")
+            raise RuntimeError(f"Failed to update token: {e}")
 
     async def close(self):
         # Close database connection

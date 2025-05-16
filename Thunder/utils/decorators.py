@@ -1,9 +1,10 @@
 from functools import wraps
-from datetime import datetime
-from typing import Optional, Dict, Any
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from ..vars import Var
-from . import messages
 from Thunder.utils.database import Database
+from Thunder.utils.logger import logger
+from Thunder.utils.tokens import check, allowed, generate
+from Thunder.utils.shortener import shorten
 
 # Initialize database
 db = Database(Var.DATABASE_URL, Var.NAME)
@@ -22,12 +23,62 @@ def check_banned(func):
         if ban_details:
             banned_at = ban_details.get('banned_at')
             ban_time = banned_at.strftime('%B %d, %Y, %I:%M %p UTC') if banned_at else 'N/A'
-            ban_message = messages.MSG_DECORATOR_BANNED.format(
-                reason=ban_details.get('reason', 'Not specified'),
-                ban_time=ban_time
-            )
+            ban_message = f"❌ **You are banned from using this bot!**\n\n**Reason:** {ban_details.get('reason', 'Not specified')}\n**Banned on:** {ban_time}"
             await message.reply_text(ban_message, quote=True)
             return
             
         return await func(client, message)
+    return wrapper
+
+def require_token(func):
+    """
+    Decorator to check if user has a valid token. If not, prompts user to get a new token.
+    """
+    @wraps(func)
+    async def wrapper(client, message):
+        if not message.from_user:
+            return await func(client, message)
+            
+        user_id = message.from_user.id
+        
+        # Skip check if token system is disabled
+        if not getattr(Var, "TOKEN_ENABLED", False):
+            return await func(client, message)
+        
+        # Skip check for owners
+        if user_id in Var.OWNER_ID:
+            return await func(client, message)
+        
+        # Check if user is authorized
+        if await allowed(user_id):
+            return await func(client, message)
+        
+        # Check and auto-generate token
+        if not await check(user_id):
+            # Token is invalid or missing: generate a new one and build a deep-link
+            token_data = await generate(user_id)
+            # Retrieve bot username from token
+            me = await client.get_me()
+            deep_link = f"https://t.me/{me.username}?start={token_data['token']}"
+            
+            # Try to shorten URL with proper error handling
+            try:
+                short_url = await shorten(deep_link)
+            except Exception as e:
+                logger.error(f"URL shortening failed: {e}")
+                short_url = deep_link  # Use original URL as fallback
+
+            await message.reply_text(
+                "❌ **Access Denied!**\n\n"
+                "Please get a new token to continue using the bot.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("Get New Token", url=short_url)]]
+                ),
+                quote=True
+            )
+            return  # Do not proceed with the original function
+        
+        # Token is valid, continue with the original function
+        return await func(client, message)
+    
     return wrapper

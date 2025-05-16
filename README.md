@@ -132,6 +132,10 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `BIND_ADDRESS`       | Address to bind web server               | `0.0.0.0` | `127.0.0.1`                   |
 | `PING_INTERVAL`      | Ping interval in seconds                 | `840`     | `1200`                        |
 | `CACHE_SIZE`         | Cache size in MB                         | `100`     | `200`                         |
+| `TOKEN_ENABLED`      | Enable token authentication system      | `False`   | `True`                         |
+| `SHORTEN_ENABLED`    | Enable URL shortening for tokens        | `False`   | `True`                         |
+| `SHORTEN_MEDIA_LINKS`| Enable URL shortening for media links   | `False`   | `True`                         |
+| `SHORTZY_KEY`        | API key for Shortzy URL shortener       | *(empty)* | `your_shortzy_api_key`         |
 
 > ℹ️ For all options, see `config_sample.env`.
 
@@ -169,9 +173,10 @@ python -m Thunder
 
 1. **Start:** Send `/start` to your bot.
 2. **Authenticate:** Join required channels if configured by the admin.
-3. **Upload:** Send any media file to the bot.
-4. **Get Link:** Receive a direct streaming link.
-5. **Share:** Anyone with the link can stream or download the file.
+3. **Token Authentication:** If token system is enabled, you'll need a valid token to use the bot. When you try to use a feature requiring authorization, the bot will automatically generate a token for you with an activation link.
+4. **Upload:** Send any media file to the bot.
+5. **Get Link:** Receive a direct streaming link.
+6. **Share:** Anyone with the link can stream or download the file.
 
 ### Advanced
 
@@ -188,7 +193,7 @@ python -m Thunder
 
 | Command   | Description |
 |-----------|-------------|
-| `/start`  | Start the bot and get a welcome message. |
+| `/start`  | Start the bot and get a welcome message. Also used for token activation. |
 | `/link`   | Generate a direct link for a file in a group. Supports batch files by replying to the first file in a group (e.g., `/link 5`). |
 | `/dc`     | Get the data center (DC) of a user or file. Use `/dc id`, or reply to a file or user. Works in both groups and private chats. |
 | `/ping`   | Check if the bot is online and measure response time. |
@@ -208,6 +213,9 @@ python -m Thunder
 | `/restart`     | Restart the bot.                                                     |
 | `/shell`       | Execute a shell command (Use with extreme caution!).                 |
 | `/users`       | Show total number of users.                                          |
+| `/authorize`   | Permanently authorize a user to use the bot (bypasses token system). |
+| `/unauthorize` | Remove permanent authorization from a user.                          |
+| `/authorized`  | List all permanently authorized users.                              |
 
 ### Commands for @BotFather
 
@@ -229,7 +237,30 @@ log - (Admin) Send bot logs
 restart - (Admin) Restart the bot
 shell - (Admin) Execute a shell command
 users - (Admin) Show total number of users
+authorize - (Admin) Grant permanent access to a user
+unauthorize - (Admin) Remove permanent access from a user
+authorized - (Admin) List all authorized users
 ```
+
+---
+
+## 🔑 Token System
+
+Thunder Bot includes an optional token-based access control system that allows admins to control who can use the bot.
+
+### How It Works
+
+1. Enable the token system by setting `TOKEN_ENABLED=True` in your config.
+2. Users without a valid token will receive an "Access Denied" message when trying to use the bot
+3. Admins can authorize users permanently, or users receive automatically generated tokens
+
+### Admin Commands
+
+| Command | Description |
+|---------|-------------|
+| `/authorize <user_id>` | Grant a user permanent access to the bot |
+| `/deauthorize <user_id>` | Remove a user's permanent access |
+| `/listauth` | List all permanently authorized users |
 
 ---
 

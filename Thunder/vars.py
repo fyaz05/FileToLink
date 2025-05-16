@@ -80,6 +80,9 @@ class Var:
     
     # Database configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    if not DATABASE_URL:
+        logger.critical("CRITICAL: DATABASE_URL is not configured in config.env!")
+        raise ValueError("CRITICAL: DATABASE_URL is not configured in config.env!")
 
     # Channel configurations
     BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
@@ -95,3 +98,13 @@ class Var:
             FORCE_CHANNEL_ID = int(force_channel_env)
         except ValueError:
             logger.warning(f"Invalid FORCE_CHANNEL_ID '{force_channel_env}' in environment; must be an integer.")
+
+    # Token System
+    TOKEN_ENABLED: bool = str_to_bool(os.getenv("TOKEN_ENABLED", "False"))
+    TOKEN_TTL_HOURS: int = int(os.getenv("TOKEN_TTL_HOURS", "24"))
+
+    # URL Shortener
+    SHORTEN_ENABLED: bool = str_to_bool(os.getenv("SHORTEN_ENABLED", "False"))
+    SHORTEN_MEDIA_LINKS: bool = str_to_bool(os.getenv("SHORTEN_MEDIA_LINKS", "False"))
+    SHORTZY_KEY: str = os.getenv("SHORTZY_KEY", "")
+    SHORTZY_SITE: str = os.getenv("SHORTZY_SITE", "")

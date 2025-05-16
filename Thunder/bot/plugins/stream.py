@@ -8,6 +8,7 @@ import random
 from urllib.parse import quote
 from typing import Optional, Tuple, Dict, Union, List, Set
 from datetime import datetime, timedelta
+from Thunder.utils.shortener import shorten
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import (
@@ -33,13 +34,14 @@ from Thunder.utils.file_properties import get_hash, get_media_file_size, get_nam
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
-from Thunder.utils.decorators import check_banned
+from Thunder.utils.decorators import check_banned, require_token
 from Thunder.utils.force_channel import force_channel_check
+from Thunder.utils.shortener import shorten
 
-# Database Initialization
+# Database
 db = Database(Var.DATABASE_URL, Var.NAME)
 
-# Cache Implementation
+# LRU Cache
 class LRUCache:
     def __init__(self, max_size=1000, ttl=86400):
         self.cache = {}
@@ -100,7 +102,7 @@ class LRUCache:
 # Initialize cache
 CACHE = LRUCache(max_size=getattr(Var, "CACHE_SIZE", 1000), ttl=86400)
 
-# Rate Limiter Implementation
+# Rate Limiter
 class RateLimiter:
     def __init__(self, max_calls, time_period):
         self.max_calls = max_calls
@@ -196,12 +198,12 @@ async def forward_media(media_message):
     for retry in range(3):
         try:
             result = await media_message.copy(chat_id=Var.BIN_CHANNEL)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             return result
         except Exception:
             try:
                 result = await media_message.forward(chat_id=Var.BIN_CHANNEL)
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.5)
                 return result
             except FloodWait as flood_error:
                 if retry < 2:
@@ -216,7 +218,7 @@ async def forward_media(media_message):
     
     raise Exception("Failed to forward media after multiple attempts")
 
-async def generate_media_links(log_msg):
+async def generate_media_links(log_msg, shortener: bool = True):
     try:
         base_url = Var.URL.rstrip("/")
         file_id = log_msg.id
@@ -233,6 +235,11 @@ async def generate_media_links(log_msg):
         
         stream_link = f"{base_url}/watch/{hash_value}{file_id}/{file_name_encoded}"
         online_link = f"{base_url}/{hash_value}{file_id}/{file_name_encoded}"
+        
+        # Apply URL shortening if media link shortening is enabled
+        if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
+            stream_link = await shorten(stream_link)
+            online_link = await shorten(online_link)
         
         return stream_link, online_link, media_name, media_size
     except Exception as e:
@@ -262,7 +269,7 @@ async def send_links_to_user(client, command_message, media_name, media_size, st
                 ]
             ]),
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
     except Exception as e:
         logger.error(f"Error sending links to user: {e}")
         raise
@@ -277,7 +284,7 @@ async def log_request(log_msg, user, stream_link, online_link):
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
     except Exception:
         pass
 
@@ -420,7 +427,7 @@ async def retry_failed_media(client, command_message, media_messages, status_msg
                 results.append(result)
                 if status_msg and i % 2 == 0:
                     await status_msg.edit(f"⏳ **Retry progress: {len(results)}/{len(media_messages)}**")
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.5)
         except Exception as e:
             logger.error(f"Error retrying media: {e}")
     return results
@@ -432,7 +439,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
     message_ids = list(range(start_message_id, end_message_id + 1))
     
     try:
-        batch_size = 10  # Process 10 messages at a time
+        batch_size = 10  # Messages per batch
         processed_count = 0
         failed_count = 0
         download_links = []
@@ -458,7 +465,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
         for i in range(0, len(message_ids), batch_size):
             batch_ids = message_ids[i:i+batch_size]
             
-            await asyncio.sleep(0.7)
+            await asyncio.sleep(1)
             
             await status_msg.edit(
                 f"⏳ Processing batch {(i//batch_size)+1}/{(len(message_ids)+batch_size-1)//batch_size}"
@@ -501,25 +508,25 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         f"⏳ Processed {processed_count}/{num_files}\n"
                         f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
                     )
-          # Simplified retry logic for failed messages
-        if failed_messages:
-            logger.warning(f"{len(failed_messages)} files failed processing")
-            
-            # Retry if fewer than half the files failed
-            if failed_messages and len(failed_messages) < num_files / 2:
-                await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
-                retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
+            # Simplified retry for failed messages
+            if failed_messages:
+                logger.warning(f"{len(failed_messages)} files failed processing")
                 
-                if retry_results:
-                    download_links.extend(retry_results)
-                    processed_count += len(retry_results)
-                    failed_count -= len(retry_results)
-            else:
-                await status_msg.edit(
-                    "⚠️ Some messages failed processing\n"
-                    "Continuing with successfully processed files..."
-                )
-                await asyncio.sleep(0.5)
+                # Retry if less than half failed
+                if failed_messages and len(failed_messages) < num_files / 2:
+                    await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
+                    retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
+                    
+                    if retry_results:
+                        download_links.extend(retry_results)
+                        processed_count += len(retry_results)
+                        failed_count -= len(retry_results)
+                else:
+                    await status_msg.edit(
+                        "⚠️ Some messages failed processing\n"
+                        "Continuing with successfully processed files..."
+                    )
+                    await asyncio.sleep(0.5)
         
         def chunk_list(lst, n):
             for i in range(0, len(lst), n):
@@ -534,7 +541,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
                 parse_mode=enums.ParseMode.MARKDOWN
             )
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                 try:
                     await client.send_message(
@@ -543,7 +550,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         link_preview_options=LinkPreviewOptions(is_disabled=True),
                         parse_mode=enums.ParseMode.MARKDOWN
                     )
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.5)
                 except Exception:
                     await command_message.reply_text(
                         "⚠️ I couldn't send you a DM. Please start the bot first.",
@@ -563,9 +570,10 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
             f"Successfully processed: {processed_count}/{num_files}"
         )
 
-# Ensure all command handlers are decorated for ban and force channel checks
+# Command handlers with ban and force channel checks
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 @check_banned
+@require_token
 @force_channel_check
 async def link_handler(client, message):
     user_id = message.from_user.id
@@ -672,7 +680,7 @@ async def link_handler(client, message):
                                     ]
                                 ]),
                             )
-                            await asyncio.sleep(0.1)
+                            await asyncio.sleep(0.7)
                     except Exception:
                         await message.reply_text(
                             "⚠️ I couldn't send you a DM. Please start the bot first.",
@@ -696,6 +704,7 @@ async def link_handler(client, message):
     group=4
 )
 @check_banned
+@require_token
 @force_channel_check
 async def private_receive_handler(client, message):
     if not message.from_user:
@@ -807,10 +816,13 @@ async def channel_receive_handler(client, broadcast):
 async def clean_cache_task():
     while True:
         try:
-            await asyncio.sleep(3600)  # Run every hour
-            await CACHE.clean_expired()
+            # Clean expired cache items periodically
+            cleaned_count = await CACHE.clean_expired()
+            if cleaned_count > 0:
+                pass
+            await asyncio.sleep(3600)  # Clean every hour
         except Exception as e:
             logger.error(f"Error in cache cleaning task: {e}")
 
-# Start the cache cleaning task
+# Start cache cleaning
 StreamBot.loop.create_task(clean_cache_task())
