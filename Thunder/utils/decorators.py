@@ -11,13 +11,13 @@ db = Database(Var.DATABASE_URL, Var.NAME)
 
 def check_banned(func):
     @wraps(func)
-    async def wrapper(client, message):
+    async def wrapper(client, message, *args, **kwargs):
         if not message.from_user:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
             
         user_id = message.from_user.id
         if user_id in Var.OWNER_ID:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
             
         ban_details = await db.is_user_banned(user_id)
         if ban_details:
@@ -27,7 +27,7 @@ def check_banned(func):
             await message.reply_text(ban_message, quote=True)
             return
             
-        return await func(client, message)
+        return await func(client, message, *args, **kwargs)
     return wrapper
 
 def require_token(func):
@@ -35,23 +35,23 @@ def require_token(func):
     Decorator to check if user has a valid token. If not, prompts user to get a new token.
     """
     @wraps(func)
-    async def wrapper(client, message):
+    async def wrapper(client, message, *args, **kwargs):
         if not message.from_user:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
             
         user_id = message.from_user.id
         
         # Skip check if token system is disabled
         if not getattr(Var, "TOKEN_ENABLED", False):
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
         
         # Skip check for owners
         if user_id in Var.OWNER_ID:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
         
         # Check if user is authorized
         if await allowed(user_id):
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
         
         # Check and auto-generate token
         if not await check(user_id):
@@ -79,6 +79,30 @@ def require_token(func):
             return  # Do not proceed with the original function
         
         # Token is valid, continue with the original function
-        return await func(client, message)
+        return await func(client, message, *args, **kwargs)
+    
+    return wrapper
+
+def shorten_link(func):
+    """
+    Decorator to control whether links should be shortened.
+    When applied, the function will receive a 'shortener' parameter indicating whether
+    to shorten the links based on configuration.
+    """
+    @wraps(func)
+    async def wrapper(client, message, *args, **kwargs):
+        user_id = None
+        if message.from_user:
+            user_id = message.from_user.id
+
+        if user_id and (user_id in Var.OWNER_ID or await allowed(user_id)):
+            # For owners or authorized users, override global setting and disable shortening
+            kwargs['shortener'] = False
+        else:
+            # For other users, adhere to the global link shortening setting
+            kwargs['shortener'] = getattr(Var, "SHORTEN_MEDIA_LINKS", False)
+        
+        # Call the original function with the shortener flag
+        return await func(client, message, *args, **kwargs)
     
     return wrapper

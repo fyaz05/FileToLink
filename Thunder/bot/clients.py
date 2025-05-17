@@ -16,12 +16,18 @@ async def initialize_clients():
     work_loads[0] = 0
     logger.info("✓ Primary client initialized successfully")
     logger.info("╚═══════════════════════════════════════════════════════════╝")
-
+    
     # Parse tokens from the environment
     logger.info("╔═══════════════ PARSING ADDITIONAL TOKENS ═════════════════╗")
-    all_tokens = TokenParser().parse_from_env()
-    if not all_tokens:
-        logger.info("▶ No additional clients found. Default client will be used.")
+    try:
+        all_tokens = TokenParser().parse_from_env()
+        if not all_tokens:
+            logger.info("▶ No additional clients found. Default client will be used.")
+            logger.info("╚═══════════════════════════════════════════════════════════╝")
+            return
+    except Exception as e:
+        logger.error(f"▶ Error parsing additional tokens: {e}")
+        logger.info("▶ Default client will be used.")
         logger.info("╚═══════════════════════════════════════════════════════════╝")
         return
 

@@ -4,6 +4,7 @@ from pyrogram import Client
 import pyromod.listen
 from Thunder.vars import Var
 from os import getcwd
+from Thunder.utils.logger import logger
 
 # Initialize the main bot client
 StreamBot = Client(

@@ -14,6 +14,8 @@ LOG_FILE = os.path.join(LOG_DIR, 'bot.txt')
 # Configure logger
 logger = logging.getLogger('ThunderBot')
 logger.setLevel(logging.INFO)
+# Prevent propagation to root logger
+logger.propagate = False
 
 # Setup log formatting
 log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -27,10 +29,19 @@ file_handler = RotatingFileHandler(
 file_handler.setFormatter(log_formatter)
 file_handler.setLevel(logging.INFO)
 
+class HerokuRouterLogFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        # Filter out all Heroku logs
+        if "heroku[" in msg:
+            return False  # Do not log this record
+        return True
+
 # Configure console output
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
 console_handler.setLevel(logging.INFO)
+console_handler.addFilter(HerokuRouterLogFilter())
 
 # Add handlers if not already added
 if not logger.handlers:

@@ -16,14 +16,14 @@ def force_channel_check(
     func: Callable[[Any, Message], Coroutine[Any, Any, Any]]
 ) -> Callable[[Any, Message], Coroutine[Any, Any, Any]]:
     """Decorator to enforce channel membership before allowing command execution."""
-    async def wrapper(client: Any, message: Message) -> None:
+    async def wrapper(client: Any, message: Message, *args, **kwargs) -> None:
         # Bypass check if force channel not configured
         if not Var.FORCE_CHANNEL_ID:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
 
         # Allow messages from the force channel itself
         if message.chat.id == Var.FORCE_CHANNEL_ID:
-            return await func(client, message)
+            return await func(client, message, *args, **kwargs)
 
         user_id = message.from_user.id
         try:
@@ -32,7 +32,7 @@ def force_channel_check(
                 user_id=user_id
             )
             if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-                return await func(client, message)
+                return await func(client, message, *args, **kwargs)
             else:
                 logger.info(f"[ForceChannelCheck] User {user_id} has status {member.status}, not allowed.")
         except UserNotParticipant:

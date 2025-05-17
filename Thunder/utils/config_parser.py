@@ -2,6 +2,7 @@
 
 import os
 from typing import Dict, Optional
+from Thunder.utils.logger import logger
 
 
 class TokenParser:
@@ -19,12 +20,12 @@ class TokenParser:
         # Filter environment variables that start with "MULTI_TOKEN"
         multi_tokens = {
             key: value for key, value in os.environ.items() 
-            if key.startswith("MULTI_TOKEN")
+            if key.startswith("MULTI_TOKEN") and value.strip()
         }
 
         if not multi_tokens:
-            logger.error("No MULTI_TOKEN environment variables found.")
-            raise ValueError("No MULTI_TOKEN environment variables found.")
+            logger.info("No MULTI_TOKEN environment variables found. Running with primary bot only.")
+            return {}
 
         # Extract numeric part and sort tokens
         sorted_tokens = sorted(
@@ -34,11 +35,11 @@ class TokenParser:
 
         # Map to a dictionary with integer keys starting at 1
         self.tokens = {
-            index + 1: token for index, (_, token) in enumerate(sorted_tokens)
+            index + 1: token for index, (_, token) in enumerate(sorted_tokens) if token.strip()
         }
 
         if not self.tokens:
-            logger.error("No valid MULTI_TOKEN environment variables found.")
-            raise ValueError("No valid MULTI_TOKEN environment variables found.")
+            logger.info("No valid MULTI_TOKEN environment variables found. Running with primary bot only.")
+            return {}
 
         return self.tokens

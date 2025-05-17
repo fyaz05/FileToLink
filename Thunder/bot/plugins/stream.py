@@ -8,7 +8,6 @@ import random
 from urllib.parse import quote
 from typing import Optional, Tuple, Dict, Union, List, Set
 from datetime import datetime, timedelta
-from Thunder.utils.shortener import shorten
 
 from pyrogram import Client, filters, enums
 from pyrogram.errors import (
@@ -34,7 +33,7 @@ from Thunder.utils.file_properties import get_hash, get_media_file_size, get_nam
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
-from Thunder.utils.decorators import check_banned, require_token
+from Thunder.utils.decorators import check_banned, require_token, shorten_link
 from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.shortener import shorten
 
@@ -221,6 +220,7 @@ async def forward_media(media_message):
 async def generate_media_links(log_msg, shortener: bool = True):
     try:
         base_url = Var.URL.rstrip("/")
+        
         file_id = log_msg.id
         
         media_name = get_name(log_msg)
@@ -233,13 +233,16 @@ async def generate_media_links(log_msg, shortener: bool = True):
         file_name_encoded = quote(media_name)
         hash_value = get_hash(log_msg)
         
-        stream_link = f"{base_url}/watch/{hash_value}{file_id}/{file_name_encoded}"
-        online_link = f"{base_url}/{hash_value}{file_id}/{file_name_encoded}"
+        stream_link_raw = f"{base_url}/watch/{hash_value}{file_id}/{file_name_encoded}"
+        online_link_raw = f"{base_url}/{hash_value}{file_id}/{file_name_encoded}"
+        
+        stream_link = stream_link_raw
+        online_link = online_link_raw
         
         # Apply URL shortening if media link shortening is enabled
         if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
-            stream_link = await shorten(stream_link)
-            online_link = await shorten(online_link)
+            stream_link = await shorten(stream_link_raw)
+            online_link = await shorten(online_link_raw)
         
         return stream_link, online_link, media_name, media_size
     except Exception as e:
@@ -314,7 +317,7 @@ async def log_new_user(bot, user_id, first_name):
     except Exception:
         pass
 
-async def process_media_message(client, command_message, media_message, notify=True):
+async def process_media_message(client, command_message, media_message, notify=True, shortener=True):
     retries = 0
     max_retries = 3
     
@@ -349,7 +352,7 @@ async def process_media_message(client, command_message, media_message, notify=T
             log_msg = await forward_media(media_message)
             
             # Generate links
-            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg)
+            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg, shortener)
             
             # Store in cache
             await CACHE.set(cache_key, {
@@ -417,12 +420,12 @@ async def process_media_message(client, command_message, media_message, notify=T
     
     return None
 
-async def retry_failed_media(client, command_message, media_messages, status_msg=None):
+async def retry_failed_media(client, command_message, media_messages, status_msg=None, shortener=True):
     """Simple helper to retry failed media processing"""
     results = []
     for i, msg in enumerate(media_messages):
         try:
-            result = await process_media_message(client, command_message, msg, notify=False)
+            result = await process_media_message(client, command_message, msg, notify=False, shortener=shortener)
             if result:
                 results.append(result)
                 if status_msg and i % 2 == 0:
@@ -432,7 +435,7 @@ async def retry_failed_media(client, command_message, media_messages, status_msg
             logger.error(f"Error retrying media: {e}")
     return results
 
-async def process_multiple_messages(client, command_message, reply_msg, num_files, status_msg):
+async def process_multiple_messages(client, command_message, reply_msg, num_files, status_msg, shortener=True):
     chat_id = command_message.chat.id
     start_message_id = reply_msg.id
     end_message_id = start_message_id + num_files - 1
@@ -452,11 +455,12 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                     client,
                     command_message,
                     msg,
-                    notify=False
+                    notify=False,
+                    shortener=shortener
                 )
             except FloodWait as e:
                 await handle_flood_wait(e)
-                return await process_media_message(client, command_message, msg, notify=False)
+                return await process_media_message(client, command_message, msg, notify=False, shortener=shortener)
             except Exception as e:
                 logger.error(f"Message {msg.id} error: {e}")
                 return None
@@ -508,6 +512,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                         f"⏳ Processed {processed_count}/{num_files}\n"
                         f"✅ Success: {processed_count} | ❌ Failed: {failed_count}"
                     )
+            
             # Simplified retry for failed messages
             if failed_messages:
                 logger.warning(f"{len(failed_messages)} files failed processing")
@@ -515,7 +520,7 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
                 # Retry if less than half failed
                 if failed_messages and len(failed_messages) < num_files / 2:
                     await status_msg.edit(f"⏳ **Retrying {len(failed_messages)} failed files...**")
-                    retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg)
+                    retry_results = await retry_failed_media(client, command_message, failed_messages, status_msg, shortener)
                     
                     if retry_results:
                         download_links.extend(retry_results)
@@ -574,8 +579,9 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 @check_banned
 @require_token
+@shorten_link
 @force_channel_check
-async def link_handler(client, message):
+async def link_handler(client, message, shortener=True):
     user_id = message.from_user.id
     
     if not await db.is_user_exist(user_id):
@@ -653,7 +659,7 @@ async def link_handler(client, message):
     
     try:
         if num_files == 1:
-            result = await process_media_message(client, message, reply_msg)
+            result = await process_media_message(client, message, reply_msg, shortener=shortener)
             if result:
                 if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
                     try:
@@ -688,7 +694,7 @@ async def link_handler(client, message):
                         )
                 await processing_msg.delete()
         else:
-            await process_multiple_messages(client, message, reply_msg, num_files, processing_msg)
+            await process_multiple_messages(client, message, reply_msg, num_files, processing_msg, shortener)
     except Exception as e:
         logger.error(f"Error handling link command: {e}")
         await processing_msg.edit(
@@ -705,8 +711,9 @@ async def link_handler(client, message):
 )
 @check_banned
 @require_token
+@shorten_link
 @force_channel_check
-async def private_receive_handler(client, message):
+async def private_receive_handler(client, message, shortener=True):
     if not message.from_user:
         return
     
@@ -727,10 +734,9 @@ async def private_receive_handler(client, message):
     processing_msg = await message.reply_text(
         "⏳ **Processing your file...**",
         quote=True
-    )
-    
+    )    
     try:
-        result = await process_media_message(client, message, message)
+        result = await process_media_message(client, message, message, shortener=shortener)
         if result:
             await processing_msg.delete()
     except Exception as e:
@@ -747,7 +753,8 @@ async def private_receive_handler(client, message):
     ),
     group=-1
 )
-async def channel_receive_handler(client, broadcast):
+@shorten_link
+async def channel_receive_handler(client, broadcast, shortener=True):
     if hasattr(Var, 'BANNED_CHANNELS') and int(broadcast.chat.id) in Var.BANNED_CHANNELS:
         await client.leave_chat(broadcast.chat.id)
         return
@@ -768,7 +775,7 @@ async def channel_receive_handler(client, broadcast):
     while retries < max_retries:
         try:
             log_msg = await forward_media(broadcast)
-            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg)
+            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg, shortener)
             await log_request(log_msg, broadcast.chat, stream_link, online_link)
             
             if can_edit:

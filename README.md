@@ -135,7 +135,8 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `TOKEN_ENABLED`      | Enable token authentication system      | `False`   | `True`                         |
 | `SHORTEN_ENABLED`    | Enable URL shortening for tokens        | `False`   | `True`                         |
 | `SHORTEN_MEDIA_LINKS`| Enable URL shortening for media links   | `False`   | `True`                         |
-| `SHORTZY_KEY`        | API key for Shortzy URL shortener       | *(empty)* | `your_shortzy_api_key`         |
+| `SHORTZY_KEY`        | API key for Shortzy URL shortener      | *(empty)* | `your_shortzy_api_key`         |
+| `SHORTZY_SITE`       | Custom domain for Shortzy URL shortener | *(empty)* | `thunder.com`       |
 
 > ℹ️ For all options, see `config_sample.env`.
 
