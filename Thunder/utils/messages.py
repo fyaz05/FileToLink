@@ -159,6 +159,7 @@ MSG_BUTTON_JOIN_CHANNEL = "📢 Join {channel_title}"
 MSG_BUTTON_GITHUB = "🛠️ GitHub"
 MSG_BUTTON_START_CHAT = "📩 Start Chat"
 MSG_BUTTON_JOIN_CHAT = "📢 Join {chat_title}"
+MSG_BUTTON_CLOSE = "✖ Close"
 
 # ------ Quick Start Guide ------
 MSG_QUICK_START_GUIDE = (
@@ -221,7 +222,7 @@ MSG_HELP = (
 
 MSG_ABOUT = (
     "🌟 **About Thunder File to Link Bot** ℹ️\n\n"
-    "I'm your go-to bot for **instant direct download & streaming links!** ⚡\n\n"
+    "I'm your go-to bot for **instant download & streaming!** ⚡\n\n"
     "**🚀 Key Features:**\n"
     "> **Instant Links:** Get your links within seconds.\n"
     "> **Online Streaming:** Watch videos or listen to audio directly (for supported formats).\n"
@@ -309,8 +310,9 @@ MSG_NEW_FILE_REQUEST = (
 MSG_PROCESSING_BATCH = "🔄 **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_PROCESSING_WARNING = "⚠️ **Warning:** Too many files failed processing. Please try again with fewer files or contact support."
-MSG_BATCH_LINKS_READY = "🔗 **Batch Links ({count} files):**\n\n`{links}`"
-MSG_BATCH_LINKS_FROM = "📬 **Links from {chat_title}**\n\n`{links_message}`"
+MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
+MSG_DM_BATCH_PREFIX = "📬 **Batch Links from {chat_title}**\n"
+MSG_LINK_FROM_GROUP = "📬 **Links from {chat_title}**\n\n{links_message}"
 MSG_PROCESSING_RESULT = "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
 MSG_PROCESSING_ERROR = "❌ **Error Processing Files:** {error}\n\n{processed}/{total} files were processed (ID: {error_id})"
 MSG_RETRYING_FILES = "🔄 **Retrying {count} Failed Files...**"
@@ -337,15 +339,12 @@ MSG_ERROR_BROADCAST_INSTRUCTION = "To start a new broadcast, use the /broadcast 
 MSG_ERROR_CALLBACK_UNSUPPORTED = "This button is not active or no longer supported."
 MSG_ERROR_GENERIC_CALLBACK = "An error occurred. Please try again later. (ID: {error_id})"
 MSG_BROADCAST_COMPLETE = (
-    "📢 **Broadcast Completed Successfully!** 📢\n"
-    "──────────────────────────────\n"
+    "📢 **Broadcast Completed Successfully!** 📢\n\n"
     "⏱️ **Duration:** `{elapsed_time}`\n"
     "👥 **Total Users:** `{total_users}`\n"
     "✅ **Successful Deliveries:** `{successes}`\n"
-    "❌ **Failed Deliveries:** `{failures}`\n"
-    "──────────────────────────────\n"
-    "🗑️ **Accounts Removed (Blocked/Deactivated):** `{deleted_accounts}`\n" # Clarified
-    "──────────────────────────────"
+    "❌ **Failed Deliveries:** `{failures}`\n\n"
+    "🗑️ **Accounts Removed (Blocked/Deactivated):** `{deleted_accounts}`\n"
 )
 MSG_BROADCAST_CANCEL = "🛑 **Cancelling Broadcast:** `{broadcast_id}`\n\n> ⏳ Stopping operations..."
 MSG_BROADCAST_FAILED = (

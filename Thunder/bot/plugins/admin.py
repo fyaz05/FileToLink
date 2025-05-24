@@ -93,7 +93,7 @@ async def get_total_users(client, message):
     try:
         total_users = await db.total_users_count()
         reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+            [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ])
         await message.reply_text(
             MSG_DB_STATS.format(total_users=total_users),
@@ -289,7 +289,7 @@ async def show_status(client, message):
             version=__version__
         )
         reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+            [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ])
         await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     except:
@@ -314,7 +314,7 @@ async def show_stats(client, message):
             disk_percent=psutil.disk_usage('.').percent
         )
         reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+            [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ])
         await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     except:
@@ -399,7 +399,7 @@ async def list_authorized_command(client, message):
                 auth_time=user['authorized_at']
             )
         reply_markup = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+            [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ])
         await message.reply_text(
             message_text,
@@ -550,7 +550,7 @@ async def close_panel(client, callback_query):
 async def restart_broadcast(client, callback_query):
     try:
         await callback_query.edit_message_text(
-            "Please use `/broadcast` command with a reply to the message you want to broadcast.",
+            MSG_ERROR_BROADCAST_INSTRUCTION,
             parse_mode=ParseMode.MARKDOWN
         )
     except:

@@ -135,7 +135,7 @@ async def start_command(bot: Client, message: Message):
                 ],
                 [
                     InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),
-                    InlineKeyboardButton("🗙 Close", callback_data="close_panel")
+                    InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")
                 ]
             ])
 
@@ -248,7 +248,7 @@ async def help_command(bot: Client, message: Message):
             except Exception as e_help:
                 logger.error(f"(ID: {error_id_context_help}) Error adding force channel button to /help command (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_help}")
 
-        buttons.append([InlineKeyboardButton("🗙 Close", callback_data="close_panel")])
+        buttons.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
         reply_markup = InlineKeyboardMarkup(buttons)
 
         await message.reply_text(
@@ -273,7 +273,7 @@ async def about_command(bot: Client, message: Message):
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")],
             [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink"),
-             InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+             InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
 
         reply_markup = InlineKeyboardMarkup(buttons)
@@ -310,7 +310,7 @@ async def dc_command(bot: Client, message: Message):
                 InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=profile_url)
             ])
             buttons.append([
-                InlineKeyboardButton("🗙 Close", callback_data="close_panel")
+                InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")
             ])
             dc_keyboard = InlineKeyboardMarkup(buttons)
 
@@ -411,7 +411,7 @@ async def ping_command(bot: Client, message: Message):
         time_taken_ms = (end_time - start_time) * 1000
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
-             InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+             InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
         
         await sent_msg.edit_text(

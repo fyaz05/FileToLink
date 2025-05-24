@@ -252,10 +252,12 @@ async def forward_media(media_message):
     for retry in range(3):
         try:
             result = await media_message.copy(chat_id=Var.BIN_CHANNEL)
+            await asyncio.sleep(0.1)
             return result
         except Exception:
             try:
                 result = await media_message.forward(chat_id=Var.BIN_CHANNEL)
+                await asyncio.sleep(0.1)
                 return result
             except FloodWait as flood_error:
                 if retry < 2:
@@ -284,6 +286,7 @@ async def log_request(log_msg, user, stream_link, online_link):
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
+        await asyncio.sleep(0.3)
     except Exception:
         pass
 
@@ -497,17 +500,40 @@ async def process_multiple_messages(client, command_message, reply_msg, num_file
 
         for chunk in chunk_list(download_links, 20):
             links_text = "\n".join(chunk)
-            batch_links_message = MSG_BATCH_LINKS_READY.format(
-                count=len(chunk),
-                links=links_text
-            )
             
-            await command_message.reply_text(
-                batch_links_message,
-                quote=True,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                parse_mode=enums.ParseMode.MARKDOWN
-            )
+            # Message for the group chat
+            group_message_content = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{links_text}`"
+            
+            # Message for the user's DM
+            dm_prefix = MSG_DM_BATCH_PREFIX.format(chat_title=command_message.chat.title)
+            dm_message_text = f"{dm_prefix}\n{group_message_content}"
+
+            # Send to original chat (group/supergroup)
+            try:
+                await command_message.reply_text(
+                    group_message_content,
+                    quote=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    parse_mode=enums.ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Error sending batch links to original chat {command_message.chat.id}: {e}")
+
+            # Send to user's DM (if in a group/supergroup)
+            if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+                try:
+                    await client.send_message(
+                        chat_id=command_message.from_user.id,
+                        text=dm_message_text,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        parse_mode=enums.ParseMode.MARKDOWN
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending batch links to user DM {command_message.from_user.id}: {e}")
+                    await command_message.reply_text(
+                        MSG_ERROR_DM_FAILED,
+                        quote=True
+                    )
             
             if len(chunk) > 10:
                 await asyncio.sleep(0.5)
@@ -639,7 +665,7 @@ async def link_handler(client, message, shortener=True):
                             )
                             await client.send_message(
                                 chat_id=message.from_user.id,
-                                text=MSG_BATCH_LINKS_FROM.format(
+                                text=MSG_LINK_FROM_GROUP.format(
                                     chat_title=message.chat.title,
                                     links_message=msg_text
                                 ),
@@ -652,7 +678,8 @@ async def link_handler(client, message, shortener=True):
                                     ]
                                 ]),
                             )
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"Error sending DM to user {message.from_user.id} from group: {e}")
                         await message.reply_text(
                             MSG_ERROR_DM_FAILED,
                             quote=True

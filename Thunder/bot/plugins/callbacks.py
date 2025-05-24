@@ -59,7 +59,7 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
             buttons.append(force_button)
         
         # Add close button at the end
-        buttons.append([InlineKeyboardButton("🗙 Close", callback_data="close_panel")])
+        buttons.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
         
         await callback_query.message.edit_text(
             text=MSG_HELP,
@@ -85,7 +85,7 @@ async def about_callback(client: Client, callback_query: CallbackQuery):
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")],
             [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink"),
-             InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+             InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
         
         await callback_query.message.edit_text(
@@ -113,7 +113,7 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
         # Create back and close buttons
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
-             InlineKeyboardButton("🗙 Close", callback_data="close_panel")]
+             InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
         
         await callback_query.message.edit_text(
