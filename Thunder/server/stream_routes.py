@@ -15,7 +15,6 @@ from cachetools import LRUCache
 from functools import wraps
 from urllib.parse import unquote, quote
 from contextlib import asynccontextmanager
-from pyrogram.errors import RPCError
 
 from Thunder import StartTime, __version__
 from Thunder.bot import multi_clients, StreamBot, work_loads
@@ -25,12 +24,6 @@ from Thunder.utils.logger import logger
 from Thunder.utils.render_template import render_page
 from Thunder.utils.time_format import get_readable_time
 from Thunder.vars import Var
-from Thunder.utils.messages import (
-    MSG_INVALID_SECURITY_CREDENTIALS,
-    MSG_FILE_NOT_FOUND,
-    MSG_MALFORMED_RANGE_HEADER,
-    MSG_INTERNAL_SERVER_ERROR
-)
 
 routes = web.RouteTableDef()
 
@@ -38,6 +31,7 @@ routes = web.RouteTableDef()
 SECURE_HASH_LENGTH = 6
 CHUNK_SIZE = 1 * 1024 * 1024
 MAX_CLIENTS = 50
+THREADPOOL_MAX_WORKERS = 10
 
 # Updated regex: Correctly capture start and end values with named groups.
 PATTERN_HASH_FIRST = re.compile(rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
@@ -48,9 +42,9 @@ RANGE_REGEX = re.compile(r"bytes=(?P<start>\d*)-(?P<end>\d*)")
 class_cache = LRUCache(maxsize=Var.CACHE_SIZE)
 cache_lock = asyncio.Lock()
 
-def json_error(status, message, error_id=None):
-    if error_id and "{error_id}" in message:
-        message = message.format(error_id=error_id)
+executor = ThreadPoolExecutor(max_workers=THREADPOOL_MAX_WORKERS)
+
+def json_error(status, message):
     return json.dumps({"error": message})
 
 def exception_handler(func):
@@ -60,23 +54,14 @@ def exception_handler(func):
             return await func(request)
         except InvalidHash as e:
             logger.debug(f"InvalidHash exception: {e}")
-            error_id = secrets.token_hex(6)
             raise web.HTTPForbidden(
-                text=json_error(403, MSG_INVALID_SECURITY_CREDENTIALS, error_id=error_id),
+                text=json_error(403, "Invalid security credentials"),
                 content_type="application/json"
             )
         except FileNotFound as e:
             logger.debug(f"FileNotFound exception: {e}")
-            error_id = secrets.token_hex(6)
             raise web.HTTPNotFound(
-                text=json_error(404, MSG_FILE_NOT_FOUND, error_id=error_id),
-                content_type="application/json"
-            )
-        except (TimeoutError, RPCError) as e:
-            error_id = secrets.token_hex(6)
-            logger.warning(f"A {type(e).__name__} occurred after retries (ID: {error_id}): {e}")
-            raise web.HTTPInternalServerError(
-                text=json_error(500, MSG_INTERNAL_SERVER_ERROR, error_id=error_id),
+                text=json_error(404, "File not found"),
                 content_type="application/json"
             )
         except (ClientConnectionError, asyncio.CancelledError):
@@ -89,7 +74,7 @@ def exception_handler(func):
             logger.error(f"Stack trace for error {error_id}:\n{traceback.format_exc()}")
             
             raise web.HTTPInternalServerError(
-                text=json_error(500, MSG_INTERNAL_SERVER_ERROR, error_id=error_id),
+                text=json_error(500, f"Internal server error (Reference ID: {error_id})"),
                 content_type="application/json"
             )
     return wrapper
@@ -122,9 +107,8 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
 
 def optimal_client_selection():
     if not work_loads:
-        error_id = secrets.token_hex(6)
         raise web.HTTPInternalServerError(
-            text=json_error(500, MSG_INTERNAL_SERVER_ERROR, error_id=error_id),
+            text=json_error(500, "No available clients"),
             content_type="application/json"
         )
     client_id, _ = min(work_loads.items(), key=lambda item: item[1])
@@ -159,7 +143,7 @@ async def root_redirect(request):
 @routes.get("/status", allow_head=True)
 async def status_endpoint(request):
     uptime_seconds = time.time() - StartTime
-    uptime_formatted = get_readable_time(int(uptime_seconds))
+    uptime_formatted = get_readable_time(uptime_seconds)
     
     sorted_workloads = dict(sorted(
         {f"client_{k}": v for k, v in work_loads.items()}.items(),
@@ -199,6 +183,7 @@ async def status_endpoint(request):
         },
         "system": {
             "chunk_size": f"{CHUNK_SIZE / (1024 * 1024):.1f} MB",
+            "thread_pool_workers": THREADPOOL_MAX_WORKERS
         }
     }
     
@@ -246,9 +231,8 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
         range_match = RANGE_REGEX.fullmatch(range_header)
         if not range_match:
             logger.debug(f"Malformed range header received: {range_header}")
-            error_id = secrets.token_hex(6)
             raise web.HTTPBadRequest(
-                text=json_error(400, MSG_MALFORMED_RANGE_HEADER, error_id=error_id),
+                text=json_error(400, "Malformed range header"),
                 content_type="application/json"
             )
         start = int(range_match.group("start")) if range_match.group("start") else 0
@@ -287,11 +271,33 @@ async def handle_media_stream(request, message_id, secure_hash, client_id, clien
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin"
     }
-    stream_generator = streamer.yield_file(
-        file_meta, client_id, offset, first_chunk_cut, last_chunk_cut, total_chunks, CHUNK_SIZE
-    )
+    if hasattr(streamer, 'async_yield_file'):
+        stream_generator = streamer.async_yield_file(
+            file_meta, client_id, offset, first_chunk_cut, last_chunk_cut, total_chunks, CHUNK_SIZE
+        )
+    else:
+        stream_generator = streamer.yield_file(
+            file_meta, client_id, offset, first_chunk_cut, last_chunk_cut, total_chunks, CHUNK_SIZE
+        )
+    if inspect.isgenerator(stream_generator):
+        stream_generator = async_gen_wrapper(stream_generator)
     return web.Response(
         status=206 if range_header else 200,
         body=stream_generator,
         headers=headers
     )
+
+async def async_gen_wrapper(sync_gen):
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            try:
+                yield await loop.run_in_executor(executor, next, sync_gen)
+            except StopIteration:
+                break
+    except Exception as e:
+        logger.error(f"Error in async generator wrapper: {e}")
+        try:
+            sync_gen.close()
+        except Exception:
+            pass

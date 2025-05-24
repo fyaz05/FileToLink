@@ -421,12 +421,3 @@ MSG_PERFORMANCE_STATS = (
 MSG_DB_STATS = "📊 **Database Statistics**\n\n> 👥 **Total Users:** `{total_users}`"
 MSG_BOT_WORKLOAD_ITEM = "🔹 Bot {num}: {load}"
 MSG_BOT_WORKLOAD_TEXT = "   {bot_name}: {load}\n"
-
-# =====================================================================================
-# ====== API & SERVER ERROR MESSAGES ======
-# =====================================================================================
-
-MSG_INVALID_SECURITY_CREDENTIALS = "Invalid security credentials"
-MSG_FILE_NOT_FOUND = "File not found"
-MSG_MALFORMED_RANGE_HEADER = "Malformed range header"
-MSG_INTERNAL_SERVER_ERROR = "Internal server error (Reference ID: {error_id})"
