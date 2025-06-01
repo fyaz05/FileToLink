@@ -15,17 +15,15 @@ from .file_properties import get_file_ids
 from Thunder.utils.logger import logger
 
 class ByteStreamer:
-    # A custom class that handles streaming of media files from Telegram servers
     
     def __init__(self, client: Client):
         self.client = client
-        self.clean_timer = 30 * 60  # Cache clean interval in seconds (30 minutes)
+        self.clean_timer = 30 * 60
         self.cached_file_ids: Dict[int, FileId] = {}
         self.file_references_cache: Dict[int, Dict[str, Union[FileId, float]]] = {}
         self.cache_lock = asyncio.Lock()
         self.media_sessions_lock = asyncio.Lock()
         
-        # Start cache cleaning tasks
         self.cache_cleaner_task = asyncio.create_task(self.clean_cache())
         self.session_cleaner_task = asyncio.create_task(self.cleanup_media_sessions())
     
@@ -44,7 +42,6 @@ class ByteStreamer:
             except asyncio.CancelledError:
                 pass
         
-        # Clean up all media sessions
         for dc_id, session in list(self.client.media_sessions.items()):
             try:
                 await session.stop()
@@ -79,14 +76,12 @@ class ByteStreamer:
     async def refresh_file_reference(self, file_id: FileId) -> Optional[FileId]:
         logger.debug(f"Refreshing file reference for message ID {file_id.message_id}")
         
-        # Check if we have a fresh cached reference
         async with self.cache_lock:
             cached_ref = self.file_references_cache.get(file_id.message_id)
-            if cached_ref and time.time() - cached_ref["timestamp"] < 3600:  # Less than 1 hour old
+            if cached_ref and time.time() - cached_ref["timestamp"] < 3600:
                 return cached_ref["file_id"]
         
         try:
-            # Fetch the message again to get fresh file reference
             message = await self.client.get_messages(
                 chat_id=Var.BIN_CHANNEL,
                 message_ids=file_id.message_id
@@ -96,13 +91,11 @@ class ByteStreamer:
                 logger.debug(f"Media message {file_id.message_id} not found when refreshing file reference")
                 return None
             
-            # Extract new file ID
             new_file_id = await get_file_ids(self.client, Var.BIN_CHANNEL, file_id.message_id)
             if not new_file_id:
                 logger.error(f"Failed to extract file ID from message {file_id.message_id}")
                 return None
             
-            # Cache the new file reference
             async with self.cache_lock:
                 self.file_references_cache[file_id.message_id] = {
                     "file_id": new_file_id,
@@ -133,7 +126,6 @@ class ByteStreamer:
                     
                     for attempt in range(6):
                         if attempt > 0:
-                            # Add exponential backoff between attempts
                             await asyncio.sleep(1 * (2 ** (attempt - 1)))
                         
                         try:
@@ -167,11 +159,9 @@ class ByteStreamer:
                     )
                     await media_session.start()
                 
-                # Mark the session creation time for cleanup
                 setattr(media_session, 'last_used', time.time())
                 client.media_sessions[file_id.dc_id] = media_session
             else:
-                # Update last used time
                 setattr(media_session, 'last_used', time.time())
         
         return media_session
@@ -248,17 +238,18 @@ class ByteStreamer:
             
             # Handle missing file reference
             if location is None:
-                logger.warning(f"Missing file reference for {file_id.message_id}, attempting to refresh")
+                logger.warning(f"Missing file reference, attempting to refresh")
                 refreshed_file_id = await self.refresh_file_reference(file_id)
                 if refreshed_file_id:
                     location = await self.get_location(refreshed_file_id)
                     file_id = refreshed_file_id
                 
                 if location is None:
-                    logger.error(f"Failed to get location for {file_id.message_id} even after refreshing file reference")
-                    raise FileNotFound(f"File location not found after refresh for {file_id.message_id}")
+                    logger.error("Failed to get location even after refreshing file reference")
+                    return
             
             max_retries = 5
+            retry_count = 0
             
             while current_part <= part_count:
                 try:
@@ -266,54 +257,42 @@ class ByteStreamer:
                         raw.functions.upload.GetFile(
                             location=location, offset=offset, limit=chunk_size
                         ),
-                        timeout=Var.TIMEOUT
                     )
                 except FloodWait as e:
                     logger.warning(f"FloodWait encountered: waiting for {e.value} seconds.")
                     await asyncio.sleep(e.value + 1)
                     continue
                 except (FileReferenceExpired, FileReferenceInvalid) as e:
-                    logger.warning(f"File reference for {file_id.message_id} expired/invalid: {e}. Attempting refresh.")
+                    logger.debug(f"File reference expired: {e}")
                     refreshed_file_id = await self.refresh_file_reference(file_id)
                     if refreshed_file_id:
-                        file_id = refreshed_file_id # Update file_id
+                        file_id = refreshed_file_id
                         location = await self.get_location(file_id)
                         if location is None:
-                            logger.error(f"Failed to get location for {file_id.message_id} after file reference refresh.")
-                            raise FileNotFoundError(f"File location not found after refresh for {file_id.message_id}")
-                        logger.info(f"Successfully refreshed file reference for {file_id.message_id} and got new location.")
+                            logger.error("Failed to get location after refresh")
+                            return
                         retry_count = 0
                         continue
                     else:
-                        logger.error(f"Failed to refresh file reference for {file_id.message_id}.")
-                        raise FileNotFoundError(f"Failed to refresh file reference for {file_id.message_id}")
-                except asyncio.TimeoutError as e: # Specific handling for asyncio.TimeoutError
-                    retry_count += 1
-                    logger.warning(f"TimeoutError during file fetch for {file_id.message_id} (attempt {retry_count}/{max_retries}): {e}")
-                    if retry_count >= max_retries:
-                        logger.error(f"Max retries reached for TimeoutError on {file_id.message_id}: {e}")
-                        raise TimeoutError(f"Max retries for TimeoutError on {file_id.message_id} after {max_retries} attempts.")
-                    await asyncio.sleep(1 * (2 ** (retry_count - 1)))
-                    continue
+                        logger.error("Failed to refresh file reference")
+                        return
                 except RPCError as e:
                     retry_count += 1
-                    logger.warning(f"RPC Error during file fetch for {file_id.message_id} (attempt {retry_count}/{max_retries}): {e}")
+                    logger.warning(f"RPC Error during file fetch: {e}")
                     if retry_count >= max_retries:
-                        logger.error(f"Max retries reached for RPCError on {file_id.message_id}: {e}")
-                        raise RPCError(f"Max retries for RPCError on {file_id.message_id}: {e}")
+                        return
                     await asyncio.sleep(1 * (2 ** (retry_count - 1)))
                     continue
                 except ConnectionError as e:
                     retry_count += 1
-                    logger.warning(f"Connection error during file fetch for {file_id.message_id} (attempt {retry_count}/{max_retries}): {e}")
+                    logger.error(f"Connection error during file fetch: {e}")
                     if retry_count >= max_retries:
-                        logger.error(f"Max retries reached for ConnectionError on {file_id.message_id}: {e}")
-                        raise ConnectionError(f"Max retries for ConnectionError on {file_id.message_id}: {e}")
-                    await asyncio.sleep(1)  # Brief pause before retry
+                        return
+                    await asyncio.sleep(1)
                     continue
                 except Exception as e:
-                    logger.error(f"Unexpected error during file fetch for {file_id.message_id}: {str(e)}", exc_info=True)
-                    raise
+                    logger.error(f"Unexpected error during file fetch: {str(e)}", exc_info=True)
+                    return
                 
                 if isinstance(r, raw.types.upload.File):
                     chunk = r.bytes
@@ -330,13 +309,12 @@ class ByteStreamer:
 
                     current_part += 1
                     offset += chunk_size
-                    retry_count = 0  # Reset retry count after success
+                    retry_count = 0
 
                     if current_part > part_count:
                         break
-        except (AttributeError) as e:
-            logger.error(f"Error while yielding file for {file_id.message_id if 'file_id' in locals() else 'unknown file'} (AttributeError): {e}", exc_info=True)
-            raise
+        except (TimeoutError, AttributeError) as e:
+            logger.error(f"Error while yielding file: {e}")
         finally:
             work_loads[index] -= 1
     
@@ -346,15 +324,12 @@ class ByteStreamer:
                 await asyncio.sleep(self.clean_timer)
                 
                 async with self.cache_lock:
-                    # Instead of clearing everything, we could selectively clean
-                    # based on timestamps if we tracked them
                     self.cached_file_ids.clear()
                     
-                    # Clean file reference cache based on age
                     now = time.time()
                     expired_refs = [
                         key for key, value in self.file_references_cache.items()
-                        if now - value["timestamp"] > 3600  # 1 hour expiry
+                        if now - value["timestamp"] > 3600
                     ]
                     for key in expired_refs:
                         self.file_references_cache.pop(key, None)
@@ -365,12 +340,12 @@ class ByteStreamer:
                 break
             except Exception as e:
                 logger.error(f"Error in cache cleaning task: {e}")
-                await asyncio.sleep(60)  # Wait before retrying
+                await asyncio.sleep(60)
     
     async def cleanup_media_sessions(self) -> None:
         while True:
             try:
-                await asyncio.sleep(1800)  # 30 minutes
+                await asyncio.sleep(1800)
                 
                 async with self.media_sessions_lock:
                     now = time.time()
@@ -393,4 +368,4 @@ class ByteStreamer:
                 break
             except Exception as e:
                 logger.error(f"Error in media session cleaning task: {e}")
-                await asyncio.sleep(60)  # Wait before retrying
+                await asyncio.sleep(60)

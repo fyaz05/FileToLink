@@ -1,7 +1,4 @@
-"""
-Centralized message constants for the Thunder File to Link Bot.
-All user-facing strings should be defined here to maintain consistency and ease of maintenance.
-"""
+# Thunder/utils/messages.py
 
 # =====================================================================================
 # ====== ERROR MESSAGES ======
@@ -300,8 +297,8 @@ MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
 MSG_PROCESSING_FILE = "⏳ **Processing your file...**"
 MSG_DEFAULT_FILENAME = "Untitled File"
 MSG_NEW_FILE_REQUEST = (
-    "> 👤 **Source:** [{user_name}](tg://user?id={user_id})\n"
-    "> 🆔 **ID:** `{user_id}`\n\n"
+    "> 👤 **Source:** [{source_info}](tg://user?id={id_})\n"
+    "> 🆔 **ID:** `{id_}`\n\n"
     "🔗 **Download:** `{online_link}`\n\n"
     "🖥️ **Stream:** `{stream_link}`"
 )

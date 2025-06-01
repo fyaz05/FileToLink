@@ -1,7 +1,3 @@
-"""
-Thunder/vars.py - Configuration variables for the Thunder bot.
-"""
-
 from typing import Set, Optional, List, Dict
 import os
 from dotenv import load_dotenv
@@ -10,54 +6,37 @@ from Thunder.utils.logger import logger
 # Load environment variables from config.env
 load_dotenv("config.env")
 
-# Helper functions for parsing environment variables
 def str_to_bool(val: str) -> bool:
-    """Convert string value to boolean."""
     return val.lower() in ("true", "1", "t", "y", "yes")
 
 def str_to_int_list(val: str) -> List[int]:
-    """Convert space-separated string to list of integers."""
-    if not val:
-        return []
-    return [int(x) for x in val.split() if x.isdigit()]
+    return [int(x) for x in val.split() if x.isdigit()] if val else []
 
 def str_to_int_set(val: str) -> Set[int]:
-    """Convert space-separated string to set of integers."""
-    if not val:
-        return set()
-    return set(int(x) for x in val.split() if x.isdigit())
+    return {int(x) for x in val.split() if x.isdigit()} if val else set()
 
 class Var:
-    """Configuration variables for the Thunder bot."""
 
     # Telegram API credentials
     API_ID: int = int(os.getenv("API_ID", ""))
-    if not API_ID:
-        logger.critical("CRITICAL: API_ID is not configured in config.env!")
-        raise ValueError("CRITICAL: API_ID is not configured in config.env!")
-        
     API_HASH: str = os.getenv("API_HASH", "")
-    if not API_HASH:
-        logger.critical("CRITICAL: API_HASH is not configured in config.env!")
-        raise ValueError("CRITICAL: API_HASH is not configured in config.env!")
-
-    # Bot token and identity
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-    if not BOT_TOKEN:
-        logger.critical("CRITICAL: BOT_TOKEN is not configured in config.env!")
-        raise ValueError("CRITICAL: BOT_TOKEN is not configured in config.env!")
-    NAME: str = os.getenv("NAME", "ThunderF2L")
     
-    # Performance settings
-    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "60"))
+    if not all([API_ID, API_HASH, BOT_TOKEN]):
+        logger.critical("Missing required Telegram API configuration")
+        raise ValueError("Missing required Telegram API configuration")
+
+    # Bot identity and performance
+    NAME: str = os.getenv("NAME", "ThunderF2L")
+    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "30"))
     WORKERS: int = int(os.getenv("WORKERS", "100"))
-    TIMEOUT: int = int(os.getenv("TIMEOUT", "30"))
+    TIMEOUT: int = int(os.getenv("TIMEOUT", "90"))
 
     # Channel for file storage
     BIN_CHANNEL: int = int(os.getenv("BIN_CHANNEL", "0"))
     if not BIN_CHANNEL:
-        logger.critical("CRITICAL: BIN_CHANNEL is not configured in config.env!")
-        raise ValueError("CRITICAL: BIN_CHANNEL is not configured in config.env!")
+        logger.critical("BIN_CHANNEL is required")
+        raise ValueError("BIN_CHANNEL is required")
 
     # Web server configuration
     PORT: int = int(os.getenv("PORT", "8080"))
@@ -82,8 +61,8 @@ class Var:
     # Database configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     if not DATABASE_URL:
-        logger.critical("CRITICAL: DATABASE_URL is not configured in config.env!")
-        raise ValueError("CRITICAL: DATABASE_URL is not configured in config.env!")
+        logger.critical("DATABASE_URL is required")
+        raise ValueError("DATABASE_URL is required")
 
     # Channel configurations
     BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
