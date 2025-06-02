@@ -26,11 +26,28 @@ VALID_HASH_REGEX = re.compile(r'^[a-zA-Z0-9_-]+$')
 streamers = {}
 
 def get_streamer(client_id: int) -> ByteStreamer:
+    """
+    Retrieves a ByteStreamer instance for the specified client ID, creating and caching it if necessary.
+    
+    Args:
+        client_id: The unique identifier of the client.
+    
+    Returns:
+        The ByteStreamer instance associated with the given client ID.
+    """
     if client_id not in streamers:
         streamers[client_id] = ByteStreamer(multi_clients[client_id])
     return streamers[client_id]
 
 def parse_media_request(path: str, query: dict) -> tuple[int, str]:
+    """
+    Parses a media request path and query to extract the message ID and secure hash.
+    
+    Supports both hash-first and ID-first URL patterns. Validates that the secure hash is the correct length and contains only allowed characters. Raises InvalidHash if parsing or validation fails.
+    
+    Returns:
+        A tuple containing the message ID and secure hash.
+    """
     clean_path = unquote(path).strip('/')
     
     match = PATTERN_HASH_FIRST.match(clean_path)
@@ -56,6 +73,15 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
     raise InvalidHash("Invalid URL structure")
 
 def select_optimal_client() -> tuple[int, ByteStreamer]:
+    """
+    Selects the client with the lowest workload under the concurrency limit.
+    
+    Returns:
+        A tuple containing the selected client ID and its associated ByteStreamer instance.
+    
+    Raises:
+        web.HTTPInternalServerError: If no clients are available.
+    """
     if not work_loads:
         raise web.HTTPInternalServerError(text="No available clients")
     
@@ -69,6 +95,20 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
     return client_id, get_streamer(client_id)
 
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
+    """
+    Parses an HTTP Range header and returns the requested byte range.
+    
+    Args:
+        range_header: The value of the HTTP Range header, or None for full content.
+        file_size: The total size of the file in bytes.
+    
+    Returns:
+        A tuple (start, end) representing the inclusive byte range to serve.
+    
+    Raises:
+        web.HTTPBadRequest: If the Range header is malformed.
+        web.HTTPRequestRangeNotSatisfiable: If the requested range is invalid or outside the file bounds.
+    """
     if not range_header:
         return 0, file_size - 1
     
@@ -88,10 +128,18 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
 @routes.get("/", allow_head=True)
 async def root_redirect(request):
+    """
+    Redirects the root URL to the project's GitHub repository.
+    """
     raise web.HTTPFound("https://github.com/fyaz05/FileToLink")
 
 @routes.get("/status", allow_head=True)
 async def status_endpoint(request):
+    """
+    Handles the /status endpoint, returning server and bot status as a JSON response.
+    
+    Provides operational status, version, uptime, bot username, active client count, and current workload distribution.
+    """
     uptime = time.time() - StartTime
     total_load = sum(work_loads.values())
     
@@ -115,6 +163,11 @@ async def status_endpoint(request):
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
 async def media_preview(request: web.Request):
+    """
+    Handles media preview requests by rendering an HTML page for the specified media.
+    
+    Parses the media request from the URL path and query parameters, then asynchronously renders a preview page. Returns a 404 response if the hash is invalid or the file is not found, and a 500 response for other server errors.
+    """
     try:
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
@@ -130,6 +183,11 @@ async def media_preview(request: web.Request):
 
 @routes.get(r"/{path:.+}", allow_head=True)
 async def media_delivery(request: web.Request):
+    """
+    Handles HTTP requests for media file streaming with support for secure access and byte-range delivery.
+    
+    Parses the media request for message ID and secure hash, selects an optimal client for streaming, validates file existence and hash, and streams the requested byte range to the client. Supports HTTP Range requests for partial content and sets appropriate response headers. Returns 404 for invalid hashes or missing files, and 500 for internal server errors.
+    """
     try:
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
