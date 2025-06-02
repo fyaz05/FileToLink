@@ -40,8 +40,8 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
             secure_hash = match.group(1)
             if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
                 return message_id, secure_hash
-        except ValueError:
-            pass
+        except ValueError as e:
+            raise InvalidHash("Invalid message ID format") from e
     
     match = PATTERN_ID_FIRST.match(clean_path)
     if match:
@@ -50,8 +50,8 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
             secure_hash = query.get("hash", "").strip()
             if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
                 return message_id, secure_hash
-        except ValueError:
-            pass
+        except ValueError as e:
+            raise InvalidHash("Invalid message ID format") from e
     
     raise InvalidHash("Invalid URL structure")
 
@@ -123,10 +123,12 @@ async def media_preview(request: web.Request):
         return web.Response(text=rendered_page, content_type='text/html')
         
     except (InvalidHash, FileNotFound) as e:
-        raise web.HTTPNotFound(text=str(e))
+        logger.debug(f"Client error in preview: {type(e).__name__}")
+        raise web.HTTPNotFound(text="Resource not found")
     except Exception as e:
-        logger.error(f"Preview error: {e}")
-        raise web.HTTPInternalServerError(text="Server error")
+        error_id = secrets.token_hex(6)
+        logger.error(f"Preview error {error_id}: {e}")
+        raise web.HTTPInternalServerError(text="Server error") from e
 
 @routes.get(r"/{path:.+}", allow_head=True)
 async def media_delivery(request: web.Request):
@@ -205,13 +207,19 @@ async def media_delivery(request: web.Request):
                 headers=headers
             )
             
-        except Exception:
+        except (FileNotFound, InvalidHash):
             work_loads[client_id] -= 1
             raise
+        except Exception as e:
+            work_loads[client_id] -= 1
+            error_id = secrets.token_hex(6)
+            logger.error(f"Stream error {error_id}: {e}")
+            raise web.HTTPInternalServerError(text="Server error") from e
         
     except (InvalidHash, FileNotFound) as e:
-        raise web.HTTPNotFound(text=str(e))
+        logger.debug(f"Client error: {type(e).__name__}")
+        raise web.HTTPNotFound(text="Resource not found")
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}")
-        raise web.HTTPInternalServerError(text=f"Server error (ID: {error_id})")
+        raise web.HTTPInternalServerError(text="Server error") from e
