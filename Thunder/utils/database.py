@@ -16,6 +16,7 @@ class Database:
         self.token_col: AsyncIOMotorCollection = self.db.tokens
         self.authorized_users_col: AsyncIOMotorCollection = self.db.authorized_users
         self.restart_message_col: AsyncIOMotorCollection = self.db.restart_message
+        self.pending_tokens_col: AsyncIOMotorCollection = self.db.pending_tokens
 
     @log_errors
     async def ensure_indexes(self):
@@ -26,6 +27,11 @@ class Database:
         await self.token_col.create_index("expires_at", expireAfterSeconds=0)
         await self.restart_message_col.create_index("message_id", unique=True)
         await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
+
+        await self.pending_tokens_col.create_index("token", unique=True)
+        await self.pending_tokens_col.create_index("expires_at", expireAfterSeconds=0)
+        await self.pending_tokens_col.create_index("user_id")
+
         logger.info("Database indexes ensured.")
 
     @log_errors
@@ -119,23 +125,17 @@ class Database:
         return {"has_token": bool(token_data)}
 
     @log_errors
-    async def update_user_token(self, user_id: int, token: str) -> None:
-        token_data = await self.token_col.find_one({"token": token})
-        expires_at = datetime.datetime.utcnow() + datetime.timedelta(hours=Var.TOKEN_TTL_HOURS)
-        if token_data:
+    async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime) -> None:
+        try:
             await self.token_col.update_one(
-                {"token": token},
-                {"$set": {"user_id": user_id, "expires_at": expires_at}}
+                {"user_id": user_id, "token": token_value},
+                {"$set": {"expires_at": expires_at, "created_at": created_at}},
+                upsert=True
             )
-            logger.info(f"Updated token for user {user_id}.")
-        else:
-            await self.token_col.insert_one({
-                "user_id": user_id,
-                "token": token,
-                "created_at": datetime.datetime.utcnow(),
-                "expires_at": expires_at
-            })
-            logger.info(f"Inserted new token for user {user_id}.")
+            logger.info(f"Saved main token {token_value} for user {user_id}.")
+        except Exception as e:
+            logger.error(f"Error saving main token for user {user_id}: {e}")
+            raise
 
     @log_errors
     async def save_broadcast_state(self, broadcast_id, state_data):
@@ -159,8 +159,8 @@ class Database:
     async def add_restart_message(self, message_id: int, chat_id: int) -> None:
         try:
             await self.restart_message_col.insert_one({
-                "message_id": message_id, 
-                "chat_id": chat_id, 
+                "message_id": message_id,
+                "chat_id": chat_id,
                 "timestamp": datetime.datetime.utcnow()
             })
             logger.info(f"Added restart message {message_id} for chat {chat_id}.")
