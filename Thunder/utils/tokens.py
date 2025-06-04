@@ -29,7 +29,7 @@ async def check(user_id: int) -> bool:
     if auth_result:
         return True
     token_result = await db.token_col.find_one(
-        {"user_id": user_id, "expires_at": {"$gt": current_time}},
+        {"user_id": user_id, "expires_at": {"$gt": current_time}, "activated": True},
         {"_id": 1}
     )
     return bool(token_result)
@@ -37,42 +37,22 @@ async def check(user_id: int) -> bool:
 @log_errors
 async def generate(user_id: int) -> str:
     token_str = secrets.token_urlsafe(32)
-    pending_ttl_minutes = getattr(Var, "PENDING_TOKEN_TTL_MINUTES", 15)
+    ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
     created_at = datetime.utcnow()
-    expires_at = created_at + timedelta(minutes=pending_ttl_minutes)
+    expires_at = created_at + timedelta(hours=ttl_hours)
 
-    pending_token_doc = {
-        "token": token_str,
-        "user_id": user_id,
-        "created_at": created_at,
-        "expires_at": expires_at
-    }
     try:
-        await db.pending_tokens_col.insert_one(pending_token_doc)
+        await db.save_main_token(
+            user_id=user_id,
+            token_value=token_str,
+            created_at=created_at,
+            expires_at=expires_at,
+            activated=False
+        )
         return token_str
     except Exception as e:
-        logger.error(f"Failed to insert pending token for user {user_id}: {e}")
+        logger.error(f"Failed to generate and save unactivated token for user {user_id}: {e}")
         raise
-
-@log_errors
-async def get_pending_token_data(token_str: str) -> Optional[Dict[str, Any]]:
-    pending_doc = await db.pending_tokens_col.find_one({"token": token_str})
-    if not pending_doc:
-        return None
-    if datetime.utcnow() > pending_doc["expires_at"]:
-        try:
-            await db.pending_tokens_col.delete_one({"token": token_str})
-        except Exception as e:
-            logger.error(f"Failed to delete expired pending token {token_str}: {e}")
-        return None
-    return pending_doc
-
-@log_errors
-async def delete_pending_token(token_str: str) -> None:
-    try:
-        await db.pending_tokens_col.delete_one({"token": token_str})
-    except Exception as e:
-        logger.error(f"Failed to delete pending token {token_str}: {e}")
 
 @log_errors
 async def allowed(user_id: int) -> bool:
@@ -122,33 +102,9 @@ async def list_tokens() -> List[Dict[str, Any]]:
     current_time = datetime.utcnow()
     cursor = db.token_col.find(
         {"expires_at": {"$gt": current_time}},
-        {"user_id": 1, "expires_at": 1, "created_at": 1}
+        {"user_id": 1, "expires_at": 1, "created_at": 1, "activated": 1}
     )
     return await cursor.to_list(length=None)
-
-@log_errors
-async def validate_activation_token(token: str) -> Dict[str, Any]:
-    clean_token = token
-    if token.startswith("token"):
-        clean_token = token[6:] if len(token) > 5 and token[5] in ('-', '_') else token[5:]
-
-    token_record = await db.token_col.find_one({"token": clean_token})
-
-    if token_record:
-        return {
-            "valid": False,
-            "reason": "Token has already been activated",
-            "token": clean_token,
-            "user_id": token_record.get("user_id"),
-            "expiry_date": token_record.get("expires_at", datetime.min).strftime("%Y-%m-%d %H:%M:%S UTC"),
-            "created_at": token_record.get("created_at", datetime.min).strftime("%Y-%m-%d %H:%M:%S UTC")
-        }
-    else:
-        return {
-            "valid": True,
-            "reason": "Token not found in main database, eligible for new activation flow.",
-            "token": clean_token
-        }
 
 @log_errors
 async def cleanup_expired_tokens() -> int:

@@ -97,7 +97,7 @@ def require_token(func):
                 ]),
                 quote=True
             )
-            logger.info(f"Sent temporary token activation link to user {user_id} for {func.__name__}.")
+            logger.debug(f"Sent temporary token activation link to user {user_id} for {func.__name__}.")
             return
         except Exception as e:
             logger.error(f"Error in require_token decorator for {func.__name__}: {e}")

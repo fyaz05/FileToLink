@@ -48,6 +48,7 @@ MSG_TOKEN_FAILED = (
     "🔑 Please check your token or contact support."
 )
 MSG_TOKEN_ERROR = "⚙️ **Token Activation Error:** Something went wrong. Please try again."
+MSG_START_INVALID_PAYLOAD = "Invalid command format or expired/invalid link. Please use a valid command or activation link. Error ID: {error_id}"
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
 <pre>{error}</pre>"""
 MSG_SHELL_LARGE_OUTPUT = """Output is too large, sending as a file.
@@ -101,14 +102,9 @@ MSG_DEAUTHORIZE_SUCCESS = (
     "> 👤 User ID: `{user_id}`\n"
     "> 🔒 Access: Revoked"
 )
-MSG_TOKEN_ACTIVATED = (
-    "✅ **Token Activated Successfully!**\n\n"
-    "> 🗓️ Access granted until: **{expiry_date}**\n"
-    "> 📝 Details: _{description}_\n\n"
-    "✨ Enjoy all the features!"
-)
+MSG_TOKEN_ACTIVATED = "✅ Token successfully activated!\n\n⏳ This token is valid for {duration_hours} hours."
 MSG_TOKEN_VERIFIED = "🎉 **Token Verified!** You're all set to use the bot's features."
-MSG_TOKEN_INVALID = "🚫 **Expired or Invalid Token.** Please get a new token to continue."
+MSG_TOKEN_INVALID = "Access to this feature requires an active token. Please click the button below to activate your access token."
 MSG_NO_AUTH_USERS = "ℹ️ **No Authorized Users Found:** The list is currently empty."
 MSG_AUTH_USER_INFO = """{i}. 👤 User ID: `{user_id}`
    • Authorized by: `{authorized_by}`

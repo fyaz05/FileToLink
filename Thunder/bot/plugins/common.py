@@ -25,11 +25,7 @@ from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.file_properties import get_media_file_size, get_name
 from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.logger import logger
-from Thunder.utils.tokens import (
-    check,
-    get_pending_token_data,
-    delete_pending_token,
-)
+from Thunder.utils.tokens import check
 from Thunder.utils.decorators import check_banned
 from Thunder.utils.bot_utils import (
     notify_channel,
@@ -60,37 +56,43 @@ async def start_command(bot: Client, message: Message):
         if len(message.command) == 2:
             payload = message.command[1]
 
-            pending_token_doc = await get_pending_token_data(payload)
-            if pending_token_doc:
-                if pending_token_doc["user_id"] == user_id:
-                    main_token_expiry = datetime.utcnow() + timedelta(hours=getattr(Var, "TOKEN_TTL_HOURS", 24))
+            token_doc = await db.token_col.find_one({"token": payload})
 
-                    await db.save_main_token(
-                        user_id,
-                        pending_token_doc["token"],
-                        main_token_expiry,
-                        pending_token_doc["created_at"]
-                    )
-                    await delete_pending_token(pending_token_doc["token"])
-
-                    expiry_date_str = main_token_expiry.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    await message.reply_text(
-                        MSG_TOKEN_ACTIVATED.format(
-                            expiry_date=expiry_date_str,
-                            description="Access token"
-                        ),
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                        quote=True
-                    )
-                    return
+            if token_doc:
+                if token_doc["user_id"] == user_id:
+                    if not token_doc.get("activated", False):
+                        token_expires_at = token_doc.get("expires_at")
+                        if isinstance(token_expires_at, datetime) and token_expires_at > datetime.utcnow():
+                            await db.token_col.update_one(
+                                {"token": payload, "user_id": user_id},
+                                {"$set": {"activated": True}}
+                            )
+                            duration_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
+                            await message.reply_text(
+                                MSG_TOKEN_ACTIVATED.format(duration_hours=duration_hours),
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                                quote=True
+                            )
+                        else:
+                            await message.reply_text(
+                                MSG_TOKEN_FAILED.format(reason="This activation link has expired.", error_id=uuid.uuid4().hex[:8]),
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                                quote=True
+                            )
+                    else:
+                        await message.reply_text(
+                            MSG_TOKEN_FAILED.format(reason="Token has already been activated.", error_id=uuid.uuid4().hex[:8]),
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                            quote=True
+                        )
                 else:
-                    logger.warning(f"User {user_id} tried to use pending token {payload} belonging to user {pending_token_doc.get('user_id')}")
+                    logger.warning(f"User {user_id} attempted to activate token {payload} belonging to user {token_doc.get('user_id')}")
                     await message.reply_text(
-                        MSG_TOKEN_FAILED.format(reason="Token not intended for your account.", error_id=uuid.uuid4().hex[:8]),
+                        MSG_TOKEN_FAILED.format(reason="This activation link is not for your account.", error_id=uuid.uuid4().hex[:8]),
                         link_preview_options=LinkPreviewOptions(is_disabled=True),
                         quote=True
                     )
-                    return
+                return
 
             try:
                 msg_id = int(payload)
@@ -127,7 +129,7 @@ async def start_command(bot: Client, message: Message):
             except ValueError:
                 logger.warning(f"Invalid /start payload from user {user_id_str}: {payload}")
                 await message.reply_text(
-                    MSG_TOKEN_ERROR.format(error_id=uuid.uuid4().hex[:8]),
+                    MSG_START_INVALID_PAYLOAD.format(error_id=uuid.uuid4().hex[:8]),
                     quote=True,
                     link_preview_options=LinkPreviewOptions(is_disabled=True)
                 )
@@ -137,8 +139,11 @@ async def start_command(bot: Client, message: Message):
                 await handle_user_error(message, MSG_FILE_ACCESS_ERROR)
                 return
 
+        # Original start message (no payload / or if len(message.command) != 2)
+        # The check `len(parts) == 1 or (len(parts) > 1 and parts[1].lower() == "start")`
+        # is to handle cases like `/start` or `/start start` explicitly for the welcome message.
         parts = message.text.strip().split(maxsplit=1)
-        if len(parts) == 1 or (len(parts) > 1 and parts[1].lower() == "start"):
+        if len(message.command) == 1 or (len(parts) > 1 and parts[1].lower() == "start"):
             welcome_text = MSG_WELCOME.format(user_name=message.from_user.first_name if message.from_user else "Guest")
 
             if Var.FORCE_CHANNEL_ID:
@@ -245,7 +250,7 @@ async def about_command(bot: Client, message: Message):
         about_text = MSG_ABOUT
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")],
-            [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink"),
+            [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),
              InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)

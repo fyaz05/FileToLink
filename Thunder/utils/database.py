@@ -16,7 +16,6 @@ class Database:
         self.token_col: AsyncIOMotorCollection = self.db.tokens
         self.authorized_users_col: AsyncIOMotorCollection = self.db.authorized_users
         self.restart_message_col: AsyncIOMotorCollection = self.db.restart_message
-        self.pending_tokens_col: AsyncIOMotorCollection = self.db.pending_tokens
 
     @log_errors
     async def ensure_indexes(self):
@@ -25,12 +24,9 @@ class Database:
         await self.authorized_users_col.create_index("user_id", unique=True)
         await self.col.create_index("id", unique=True)
         await self.token_col.create_index("expires_at", expireAfterSeconds=0)
+        await self.token_col.create_index("activated")
         await self.restart_message_col.create_index("message_id", unique=True)
         await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
-
-        await self.pending_tokens_col.create_index("token", unique=True)
-        await self.pending_tokens_col.create_index("expires_at", expireAfterSeconds=0)
-        await self.pending_tokens_col.create_index("user_id")
 
         logger.info("Database indexes ensured.")
 
@@ -117,22 +113,19 @@ class Database:
         return await self.banned_users_col.find_one({"user_id": user_id})
 
     @log_errors
-    async def check_user_token(self, user_id: int) -> Dict[str, bool]:
-        token_data = await self.token_col.find_one({
-            "user_id": user_id,
-            "expires_at": {"$gt": datetime.datetime.utcnow()}
-        })
-        return {"has_token": bool(token_data)}
-
-    @log_errors
-    async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime) -> None:
+    async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime, activated: bool) -> None:
         try:
             await self.token_col.update_one(
                 {"user_id": user_id, "token": token_value},
-                {"$set": {"expires_at": expires_at, "created_at": created_at}},
+                {"$set": {
+                    "expires_at": expires_at,
+                    "created_at": created_at,
+                    "activated": activated
+                    }
+                },
                 upsert=True
             )
-            logger.info(f"Saved main token {token_value} for user {user_id}.")
+            logger.info(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
         except Exception as e:
             logger.error(f"Error saving main token for user {user_id}: {e}")
             raise
