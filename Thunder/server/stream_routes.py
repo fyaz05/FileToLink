@@ -184,9 +184,8 @@ async def media_delivery(request: web.Request):
                             if len(chunk) <= bytes_to_skip:
                                 bytes_to_skip -= len(chunk)
                                 continue
-                            else:
-                                chunk = chunk[bytes_to_skip:]
-                                bytes_to_skip = 0
+                            chunk = chunk[bytes_to_skip:]
+                            bytes_to_skip = 0
                         
                         remaining = content_length - bytes_sent
                         if len(chunk) > remaining:
@@ -200,7 +199,6 @@ async def media_delivery(request: web.Request):
                             break
                 finally:
                     work_loads[client_id] -= 1
-            
             return web.Response(
                 status=206 if range_header else 200,
                 body=stream_generator(),
