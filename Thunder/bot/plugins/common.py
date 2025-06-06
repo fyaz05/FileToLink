@@ -139,9 +139,6 @@ async def start_command(bot: Client, message: Message):
                 await handle_user_error(message, MSG_FILE_ACCESS_ERROR)
                 return
 
-        # Original start message (no payload / or if len(message.command) != 2)
-        # The check `len(parts) == 1 or (len(parts) > 1 and parts[1].lower() == "start")`
-        # is to handle cases like `/start` or `/start start` explicitly for the welcome message.
         parts = message.text.strip().split(maxsplit=1)
         if len(message.command) == 1 or (len(parts) > 1 and parts[1].lower() == "start"):
             welcome_text = MSG_WELCOME.format(user_name=message.from_user.first_name if message.from_user else "Guest")
