@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from Thunder.utils.database import db
 from Thunder.vars import Var
 from Thunder.utils.error_handling import log_errors
+from Thunder.utils.logger import logger
 
 _OWNER_IDS_CACHE = None
 
@@ -28,29 +29,30 @@ async def check(user_id: int) -> bool:
     if auth_result:
         return True
     token_result = await db.token_col.find_one(
-        {"user_id": user_id, "expires_at": {"$gt": current_time}},
+        {"user_id": user_id, "expires_at": {"$gt": current_time}, "activated": True},
         {"_id": 1}
     )
     return bool(token_result)
 
 @log_errors
-async def generate(user_id: int) -> Dict[str, Any]:
-    duration = getattr(Var, "TOKEN_TTL_HOURS", 24)
-    token = secrets.token_urlsafe(32)
+async def generate(user_id: int) -> str:
+    token_str = secrets.token_urlsafe(32)
+    ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
     created_at = datetime.utcnow()
-    expires_at = created_at + timedelta(hours=duration)
-    token_data = {
-        "user_id": user_id,
-        "token": token,
-        "created_at": created_at,
-        "expires_at": expires_at
-    }
-    await db.token_col.update_one(
-        {"user_id": user_id},
-        {"$set": token_data},
-        upsert=True
-    )
-    return token_data
+    expires_at = created_at + timedelta(hours=ttl_hours)
+
+    try:
+        await db.save_main_token(
+            user_id=user_id,
+            token_value=token_str,
+            created_at=created_at,
+            expires_at=expires_at,
+            activated=False
+        )
+        return token_str
+    except Exception as e:
+        logger.error(f"Failed to generate and save unactivated token for user {user_id}: {e}")
+        raise
 
 @log_errors
 async def allowed(user_id: int) -> bool:
@@ -100,38 +102,9 @@ async def list_tokens() -> List[Dict[str, Any]]:
     current_time = datetime.utcnow()
     cursor = db.token_col.find(
         {"expires_at": {"$gt": current_time}},
-        {"user_id": 1, "expires_at": 1, "created_at": 1}
+        {"user_id": 1, "expires_at": 1, "created_at": 1, "activated": 1}
     )
     return await cursor.to_list(length=None)
-
-@log_errors
-async def validate_activation_token(token: str) -> Dict[str, Any]:
-    clean_token = token
-    if token.startswith("token"):
-        clean_token = token[6:] if len(token) > 5 and token[5] in ('-', '_') else token[5:]
-    current_time = datetime.utcnow()
-    token_record = await db.token_col.find_one({"token": clean_token})
-    if not token_record:
-        return {
-            "valid": False,
-            "reason": "Token does not exist or has been revoked",
-            "token": clean_token
-        }
-    if token_record["expires_at"] <= current_time:
-        return {
-            "valid": False,
-            "reason": "Token has expired",
-            "token": clean_token,
-            "expiry_date": token_record["expires_at"].strftime("%Y-%m-%d %H:%M:%S UTC")
-        }
-    return {
-        "valid": True,
-        "token": clean_token,
-        "user_id": token_record["user_id"],
-        "expiry_date": token_record["expires_at"].strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "created_at": token_record["created_at"].strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "description": "Access token"
-    }
 
 @log_errors
 async def cleanup_expired_tokens() -> int:

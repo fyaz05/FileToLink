@@ -3,18 +3,19 @@
 import time
 import asyncio
 import uuid
+from datetime import datetime, timedelta
 from typing import Tuple, Optional
 from urllib.parse import quote_plus
 from pyrogram import filters, StopPropagation
 from pyrogram.client import Client
 from pyrogram.errors import RPCError, MessageNotModified
 from pyrogram.types import (
-InlineKeyboardButton,
-InlineKeyboardMarkup,
-Message,
-User,
-CallbackQuery,
-LinkPreviewOptions
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    User,
+    CallbackQuery,
+    LinkPreviewOptions
 )
 from Thunder.bot import StreamBot
 from Thunder.vars import Var
@@ -24,15 +25,15 @@ from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.file_properties import get_media_file_size, get_name
 from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.logger import logger
-from Thunder.utils.tokens import get, check, validate_activation_token
+from Thunder.utils.tokens import check
 from Thunder.utils.decorators import check_banned
 from Thunder.utils.bot_utils import (
-notify_channel,
-log_new_user,
-generate_media_links,
-handle_user_error,
-generate_dc_text,
-get_user_safely
+    notify_channel,
+    log_new_user,
+    generate_media_links,
+    handle_user_error,
+    generate_dc_text,
+    get_user_safely
 )
 
 def has_media(message):
@@ -45,54 +46,103 @@ def has_media(message):
 @check_banned
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, message: Message):
+    user_id = message.from_user.id if message.from_user else None
+    user_id_str = str(user_id) if user_id else 'unknown'
+
     try:
-        user_id_str = str(message.from_user.id) if message.from_user else 'unknown'
         if message.from_user:
-            await log_new_user(bot, message.from_user.id, message.from_user.first_name)
-        
+            await log_new_user(bot, user_id, message.from_user.first_name)
+
         if len(message.command) == 2:
-            token = message.command[1]
-            try:
-                if token.startswith("token"):
-                    validation_result = await validate_activation_token(token)
-                    if validation_result["valid"]:
-                        await db.update_user_token(message.from_user.id, token)
-                        await message.reply_text(
-                            MSG_TOKEN_ACTIVATED.format(
-                                expiry_date=validation_result['expiry_date'],
-                                description=validation_result['description']
-                            ),
-                            link_preview_options=LinkPreviewOptions(is_disabled=True),
-                            quote=True
-                        )
-                        return
+            payload = message.command[1]
+
+            token_doc = await db.token_col.find_one({"token": payload})
+
+            if token_doc:
+                if token_doc["user_id"] == user_id:
+                    if not token_doc.get("activated", False):
+                        token_expires_at = token_doc.get("expires_at")
+                        if isinstance(token_expires_at, datetime) and token_expires_at > datetime.utcnow():
+                            await db.token_col.update_one(
+                                {"token": payload, "user_id": user_id},
+                                {"$set": {"activated": True}}
+                            )
+                            duration_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
+                            await message.reply_text(
+                                MSG_TOKEN_ACTIVATED.format(duration_hours=duration_hours),
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                                quote=True
+                            )
+                        else:
+                            await message.reply_text(
+                                MSG_TOKEN_FAILED.format(reason="This activation link has expired.", error_id=uuid.uuid4().hex[:8]),
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                                quote=True
+                            )
                     else:
                         await message.reply_text(
-                            MSG_TOKEN_FAILED.format(
-                                reason=validation_result['reason'],
-                                error_id=uuid.uuid4().hex[:8]
-                            ),
+                            MSG_TOKEN_FAILED.format(reason="Token has already been activated.", error_id=uuid.uuid4().hex[:8]),
                             link_preview_options=LinkPreviewOptions(is_disabled=True),
                             quote=True
                         )
-                        return
                 else:
-                    record = await get(token)
-                    if record and record["user_id"] == message.from_user.id and await check(message.from_user.id):
-                        await message.reply_text(MSG_TOKEN_VERIFIED, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
-                        return
-                    else:
-                        await message.reply_text(MSG_TOKEN_INVALID, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
-                        return
+                    logger.warning(f"User {user_id} attempted to activate token {payload} belonging to user {token_doc.get('user_id')}")
+                    await message.reply_text(
+                        MSG_TOKEN_FAILED.format(reason="This activation link is not for your account.", error_id=uuid.uuid4().hex[:8]),
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        quote=True
+                    )
+                return
+
+            try:
+                msg_id = int(payload)
+                retrieved_messages = await bot.get_messages(chat_id=Var.BIN_CHANNEL, message_ids=msg_id)
+                if not retrieved_messages:
+                    await handle_user_error(message, MSG_ERROR_FILE_INVALID)
+                    return
+
+                file_msg = retrieved_messages[0] if isinstance(retrieved_messages, list) else retrieved_messages
+                if not file_msg:
+                    await handle_user_error(message, MSG_ERROR_FILE_INVALID)
+                    return
+
+                stream_link, download_link, file_name, file_size = await generate_media_links(file_msg)
+                reply_text = MSG_LINKS.format(
+                    file_name=file_name,
+                    file_size=file_size,
+                    download_link=download_link,
+                    stream_link=stream_link
+                )
+
+                await message.reply_text(
+                    text=reply_text,
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=stream_link),
+                            InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=download_link)
+                        ]
+                    ]),
+                    quote=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True)
+                )
+                return
+            except ValueError:
+                logger.warning(f"Invalid /start payload from user {user_id_str}: {payload}")
+                await message.reply_text(
+                    MSG_START_INVALID_PAYLOAD.format(error_id=uuid.uuid4().hex[:8]),
+                    quote=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True)
+                )
+                return
             except Exception as e:
-                logger.error(f"Token activation error: {e}")
-                await message.reply_text(MSG_TOKEN_ERROR.format(error_id=uuid.uuid4().hex[:8]), quote=True)
+                logger.error(f"Error processing /start payload '{payload}' for user {user_id_str}: {e}")
+                await handle_user_error(message, MSG_FILE_ACCESS_ERROR)
                 return
 
         parts = message.text.strip().split(maxsplit=1)
-        if len(parts) == 1 or (len(parts) > 1 and parts[1].lower() == "start"):
-            welcome_text = MSG_WELCOME.format(user_name=message.from_user.first_name)
-            
+        if len(message.command) == 1 or (len(parts) > 1 and parts[1].lower() == "start"):
+            welcome_text = MSG_WELCOME.format(user_name=message.from_user.first_name if message.from_user else "Guest")
+
             if Var.FORCE_CHANNEL_ID:
                 error_id_context = uuid.uuid4().hex[:8]
                 try:
@@ -100,26 +150,18 @@ async def start_command(bot: Client, message: Message):
                     invite_link = getattr(chat, 'invite_link', None)
                     chat_username = getattr(chat, 'username', None)
                     chat_title = getattr(chat, 'title', 'Channel')
-                    
+
                     if not invite_link and chat_username:
                         invite_link = f"https://t.me/{chat_username}"
-                    
+
                     if invite_link:
                         welcome_text += f"\n\n{MSG_COMMUNITY_CHANNEL.format(channel_title=chat_title)}"
                     else:
                         logger.warning(f"(ID: {error_id_context}) Could not retrieve invite link for FORCE_CHANNEL_ID {Var.FORCE_CHANNEL_ID} for /start message text (Channel: {chat_title}, User: {user_id_str}).")
-                        welcome_text += f"\n\n{MSG_COMMUNITY_CHANNEL.format(channel_title=chat_title)}"
-                except asyncio.TimeoutError as e_timeout:
-                    logger.error(f"(ID: {error_id_context}) Timeout fetching Force Channel details for /start text (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_timeout}")
-                    welcome_text += f"\n\n{MSG_DEFAULT_WELCOME}"
-                except RPCError as e_rpc:
-                    logger.error(f"(ID: {error_id_context}) RPCError fetching Force Channel details for /start text (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_rpc}")
-                    welcome_text += f"\n\n{MSG_DEFAULT_WELCOME}"
                 except Exception as e:
                     logger.error(f"(ID: {error_id_context}) Error adding force channel link to /start message text (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e}")
-                    welcome_text += f"\n\n{MSG_DEFAULT_WELCOME}"
 
-            reply_markup = InlineKeyboardMarkup([
+            reply_markup_buttons = [
                 [
                     InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
                     InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command"),
@@ -128,72 +170,25 @@ async def start_command(bot: Client, message: Message):
                     InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),
                     InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")
                 ]
-            ])
+            ]
 
             if Var.FORCE_CHANNEL_ID:
-                error_id_context_button = uuid.uuid4().hex[:8]
                 try:
                     chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
                     invite_link = getattr(chat, 'invite_link', None)
                     chat_username = getattr(chat, 'username', None)
-                    chat_title = getattr(chat, 'title', 'Channel')
-                    
-                    if not invite_link and chat_username:
-                        invite_link = f"https://t.me/{chat_username}"
-                    
+                    if not invite_link and chat_username: invite_link = f"https://t.me/{chat_username}"
                     if invite_link:
-                        reply_markup.inline_keyboard.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=chat_title), url=invite_link)])
-                    else:
-                        logger.warning(f"(ID: {error_id_context_button}) Could not retrieve invite link for FORCE_CHANNEL_ID {Var.FORCE_CHANNEL_ID} for /start message button (Channel: {chat_title}, User: {user_id_str}).")
-                except asyncio.TimeoutError as e_timeout_btn:
-                    logger.error(f"(ID: {error_id_context_button}) Timeout fetching Force Channel details for /start button (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_timeout_btn}")
-                except RPCError as e_rpc_btn:
-                    logger.error(f"(ID: {error_id_context_button}) RPCError fetching Force Channel details for /start button (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_rpc_btn}")
-                except Exception as e_btn:
-                    logger.error(f"(ID: {error_id_context_button}) Error adding force channel button to /start message (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e_btn}")
+                        reply_markup_buttons.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=getattr(chat, 'title', 'Channel')), url=invite_link)])
+                except Exception as e:
+                    logger.error(f"Error adding force channel button to /start message (User: {user_id_str}, FChannel: {Var.FORCE_CHANNEL_ID}): {e}")
 
+            reply_markup = InlineKeyboardMarkup(reply_markup_buttons)
             await message.reply_text(text=welcome_text, reply_markup=reply_markup, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
             return
 
-        payload = parts[1]
-        try:
-            msg_id = int(payload)
-            retrieved_messages = await bot.get_messages(chat_id=Var.BIN_CHANNEL, message_ids=msg_id)
-            if not retrieved_messages:
-                await handle_user_error(message, MSG_ERROR_FILE_INVALID)
-                return
-            
-            file_msg = retrieved_messages[0] if isinstance(retrieved_messages, list) else retrieved_messages
-            if not file_msg:
-                await handle_user_error(message, MSG_ERROR_FILE_INVALID)
-                return
-
-            stream_link, download_link, file_name, file_size = await generate_media_links(file_msg)
-            reply_text = MSG_LINKS.format(
-                file_name=file_name,
-                file_size=file_size,
-                download_link=download_link,
-                stream_link=stream_link
-            )
-
-            await message.reply_text(
-                text=reply_text,
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=stream_link),
-                        InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=download_link)
-                    ]
-                ]),
-                quote=True,
-                link_preview_options=LinkPreviewOptions(is_disabled=True)
-            )
-        except ValueError:
-            await handle_user_error(message, MSG_ERROR_FILE_INVALID_ID)
-        except Exception as e:
-            logger.error(f"Error processing /start with payload: {e}")
-            await handle_user_error(message, MSG_FILE_ACCESS_ERROR)
     except Exception as e:
-        logger.error(f"Error in start_command: {e}")
+        logger.error(f"Error in start_command for user {user_id_str}: {e}")
         await handle_user_error(message, MSG_ERROR_GENERIC)
 
 @check_banned
@@ -216,10 +211,10 @@ async def help_command(bot: Client, message: Message):
                 invite_link = getattr(chat, 'invite_link', None)
                 chat_username = getattr(chat, 'username', None)
                 chat_title = getattr(chat, 'title', 'Channel')
-                
+
                 if not invite_link and chat_username:
                     invite_link = f"https://t.me/{chat_username}"
-                
+
                 if invite_link:
                     buttons.append([
                         InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=chat_title), url=invite_link)
@@ -252,7 +247,7 @@ async def about_command(bot: Client, message: Message):
         about_text = MSG_ABOUT
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")],
-            [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink"),
+            [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),
              InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
         reply_markup = InlineKeyboardMarkup(buttons)
@@ -279,19 +274,19 @@ async def dc_command(bot: Client, message: Message):
         async def process_dc_info(user: User):
             dc_text = await generate_dc_text(user)
             buttons = []
-            
+
             if user.username:
                 profile_url = f"https://t.me/{user.username}"
             else:
                 profile_url = f"tg://user?id={user.id}"
-            
+
             buttons.append([
                 InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=profile_url)
             ])
             buttons.append([
                 InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")
             ])
-            
+
             dc_keyboard = InlineKeyboardMarkup(buttons)
             await message.reply_text(
                 dc_text,
@@ -304,7 +299,7 @@ async def dc_command(bot: Client, message: Message):
             try:
                 file_name = get_name(file_msg) or "Untitled File"
                 file_size = humanbytes(get_media_file_size(file_msg))
-                
+
                 file_type_map = {
                     "document": MSG_FILE_TYPE_DOCUMENT,
                     "photo": MSG_FILE_TYPE_PHOTO,
@@ -315,10 +310,10 @@ async def dc_command(bot: Client, message: Message):
                     "animation": MSG_FILE_TYPE_ANIMATION,
                     "video_note": MSG_FILE_TYPE_VIDEO_NOTE
                 }
-                
+
                 file_type_attr = next((attr for attr in file_type_map if getattr(file_msg, attr, None)), "unknown")
                 file_type_display = file_type_map.get(file_type_attr, MSG_FILE_TYPE_UNKNOWN)
-                
+
                 actual_media = None
                 if file_type_attr == "photo" and file_msg.photo and file_msg.photo.sizes:
                     actual_media = file_msg.photo.sizes[-1]
@@ -326,19 +321,19 @@ async def dc_command(bot: Client, message: Message):
                     potential = getattr(file_msg, file_type_attr, None)
                     if potential:
                         actual_media = potential
-                
+
                 dc_id = MSG_DC_UNKNOWN
                 if hasattr(file_msg, 'raw') and hasattr(file_msg.raw, 'media'):
                     if hasattr(file_msg.raw.media, 'document') and hasattr(file_msg.raw.media.document, 'dc_id'):
                         dc_id = file_msg.raw.media.document.dc_id
-                
+
                 dc_text = MSG_DC_FILE_INFO.format(
                     file_name=file_name,
                     file_size=file_size,
                     file_type=file_type_display,
                     dc_id=dc_id
                 )
-                
+
                 await message.reply_text(
                     dc_text,
                     quote=True,
@@ -386,12 +381,12 @@ async def ping_command(bot: Client, message: Message):
         sent_msg = await message.reply_text(MSG_PING_START, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
         end_time = time.time()
         time_taken_ms = (end_time - start_time) * 1000
-        
+
         buttons = [
             [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
              InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
         ]
-        
+
         await sent_msg.edit_text(
             MSG_PING_RESPONSE.format(time_taken_ms=time_taken_ms),
             reply_markup=InlineKeyboardMarkup(buttons),
