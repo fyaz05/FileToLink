@@ -1,16 +1,34 @@
 # Thunder/bot/plugins/callbacks.py
 
 import uuid
-
+import asyncio
 from pyrogram import Client, filters, StopPropagation
-from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
-from pyrogram.errors import MessageNotModified
+from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
+from pyrogram.errors import MessageNotModified, FloodWait
 from Thunder.bot import StreamBot
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import *
 from Thunder.utils.decorators import owner_only
 from Thunder.utils.retry_api import retry_get_chat
+
+async def exec_cb_cmd(cli: Client, cb_qry: CallbackQuery, cmd_name: str, cmd_fn):
+    try:
+        await cb_qry.answer()
+    except FloodWait as e:
+        logger.warning(f"FloodWait: exec_cb_cmd answer. Sleep {e.value}s")
+        await asyncio.sleep(e.value)
+    except Exception as e:
+        logger.error(f"Error: exec_cb_cmd answer: {e}")
+
+    if cb_qry.message:
+        cb_msg = cb_qry.message
+        cb_msg.from_user = cb_qry.from_user
+        cb_msg.text = f"/{cmd_name}"
+        cb_msg.command = [cmd_name]
+        await cmd_fn(cli, cb_msg)
+    else:
+        logger.error(f"exec_cb_cmd called with CallbackQuery that has no associated message. Callback data: {cb_qry.data}")
 
 async def handle_callback_error(callback_query, error, operation="callback"):
     error_id = uuid.uuid4().hex[:8]

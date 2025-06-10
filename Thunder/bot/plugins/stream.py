@@ -1,12 +1,10 @@
-# Thunder/bot/plugins/stream.py
-
 import time
 import asyncio
 import random
 import uuid
 from urllib.parse import quote
-from typing import Optional, Tuple, Dict, Union, List, Set
-from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Any
+
 from pyrogram import Client, filters, enums
 from pyrogram.errors import (
     FloodWait,
@@ -19,664 +17,383 @@ from pyrogram.errors import (
 from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    InlineKeyboardMarkup,
     Message,
-    CallbackQuery,
     LinkPreviewOptions
 )
-from pyrogram.enums import ChatMemberStatus
+
 from Thunder.bot import StreamBot
 from Thunder.utils.database import db
-from Thunder.utils.messages import *
-from Thunder.utils.file_properties import get_hash, get_media_file_size, get_name
-from Thunder.utils.human_readable import humanbytes
+from Thunder.utils.messages import (
+    MSG_ERROR_START_BOT, MSG_BUTTON_START_CHAT, MSG_ERROR_NOT_ADMIN,
+    MSG_ERROR_REPLY_FILE, MSG_ERROR_NO_FILE, MSG_ERROR_NUMBER_RANGE,
+    MSG_ERROR_INVALID_NUMBER, MSG_PROCESSING_REQUEST, MSG_ERROR_PROCESSING_MEDIA,
+    MSG_PROCESSING_FILE, MSG_MEDIA_ERROR, MSG_CRITICAL_ERROR,
+    MSG_PROCESSING_BATCH, MSG_PROCESSING_STATUS,
+    MSG_BATCH_LINKS_READY, MSG_DM_BATCH_PREFIX, MSG_ERROR_DM_FAILED,
+    MSG_PROCESSING_RESULT, MSG_PROCESSING_ERROR,
+    MSG_NEW_FILE_REQUEST,
+    MSG_LINKS, MSG_BUTTON_STREAM_NOW, MSG_BUTTON_DOWNLOAD
+)
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
-from Thunder.utils.decorators import check_banned, require_token, shorten_link
+from Thunder.utils.decorators import check_banned, require_token
 from Thunder.utils.force_channel import force_channel_check
-from Thunder.utils.shortener import shorten
 from Thunder.utils.bot_utils import (
-    notify_owner,
-    handle_user_error,
-    log_new_user,
-    generate_media_links,
-    send_links_to_user,
-    check_admin_privileges
+    notify_own, # Renamed
+    reply_user_err, # Renamed
+    log_newusr, # Renamed
+    gen_links, # Renamed
+    is_admin # Renamed
 )
 
-class LRUCache:
-    def __init__(self, max_size=1000, ttl=86400):
-        self.cache = {}
-        self.max_size = max_size
-        self.ttl = ttl
-        self.access_order = []
-        self._lock = asyncio.Lock()
+MAX_RETRIES = 3
 
-    async def get(self, key):
-        async with self._lock:
-            if key not in self.cache:
-                return None
-            item = self.cache[key]
-            if time.time() - item['timestamp'] > self.ttl:
-                del self.cache[key]
-                self.access_order.remove(key)
-                return None
-            self.access_order.remove(key)
-            self.access_order.append(key)
-            return item
-
-    async def set(self, key, value):
-        async with self._lock:
-            if key in self.cache:
-                self.access_order.remove(key)
-            elif len(self.cache) >= self.max_size:
-                lru_key = self.access_order.pop(0)
-                del self.cache[lru_key]
-            self.cache[key] = value
-            self.access_order.append(key)
-
-    async def delete(self, key):
-        async with self._lock:
-            if key in self.cache:
-                del self.cache[key]
-                self.access_order.remove(key)
-
-    async def clean_expired(self):
-        count = 0
-        current_time = time.time()
-        async with self._lock:
-            for key in list(self.cache.keys()):
-                if current_time - self.cache[key]['timestamp'] > self.ttl:
-                    del self.cache[key]
-                    self.access_order.remove(key)
-                    count += 1
-        return count
-
-CACHE = LRUCache(max_size=getattr(Var, "CACHE_SIZE", 1000), ttl=86400)
-
-class RateLimiter:
-    def __init__(self, max_calls, time_period):
-        self.max_calls = max_calls
-        self.time_period = time_period
-        self.calls = {}
-        self._lock = asyncio.Lock()
-
-    async def is_rate_limited(self, user_id):
-        async with self._lock:
-            now = time.time()
-            if user_id not in self.calls:
-                self.calls[user_id] = []
-            self.calls[user_id] = [
-                ts for ts in self.calls[user_id]
-                if now - ts <= self.time_period
-            ]
-            if len(self.calls[user_id]) >= self.max_calls:
-                return True
-            self.calls[user_id].append(now)
-            return False
-
-    async def get_reset_time(self, user_id):
-        async with self._lock:
-            if user_id not in self.calls or not self.calls[user_id]:
-                return 0
-            now = time.time()
-            oldest_call = min(self.calls[user_id])
-            return max(0, self.time_period - (now - oldest_call))
-
-rate_limiter = RateLimiter(max_calls=20, time_period=60)
-
-async def handle_flood_wait(e):
-    wait_time = e.value
-    logger.warning(f"FloodWait encountered. Sleeping for {wait_time} seconds.")
-    jitter = random.uniform(0, 0.1 * wait_time)
-    await asyncio.sleep(wait_time + jitter + 1)
-
-def get_file_unique_id(media_message):
-    media_types = [
-        'document', 'video', 'audio', 'photo', 'animation',
-        'voice', 'video_note', 'sticker'
-    ]
-    for media_type in media_types:
-        media = getattr(media_message, media_type, None)
-        if media:
-            return media.file_unique_id
-    return None
-
-async def forward_media(media_message):
-    for retry in range(3):
+async def fwd_media(m_msg: Message) -> Optional[Message]: # media_message -> m_msg
+    for attempt in range(MAX_RETRIES):
         try:
-            result = await media_message.copy(chat_id=Var.BIN_CHANNEL)
-            await asyncio.sleep(0.2)
-            return result
-        except Exception:
+            return await m_msg.copy(chat_id=Var.BIN_CHANNEL)
+        except FloodWait as e:
+            logger.warning(f"FloodWait: fwd_media copy (att {attempt + 1}), sleep {e.value}s")
+            await asyncio.sleep(e.value)
+            if attempt == MAX_RETRIES -1: raise
+        except Exception as e:
+            logger.warning(f"Error fwd_media copy (att {attempt + 1}): {e}. Trying forward.")
             try:
-                result = await media_message.forward(chat_id=Var.BIN_CHANNEL)
-                await asyncio.sleep(0.2)
-                return result
-            except FloodWait as flood_error:
-                if retry < 2:
-                    await handle_flood_wait(flood_error)
+                return await m_msg.forward(chat_id=Var.BIN_CHANNEL)
+            except FloodWait as fe:
+                logger.warning(f"FloodWait: fwd_media fwd (att {attempt + 1}), sleep {fe.value}s")
+                await asyncio.sleep(fe.value)
+                if attempt == MAX_RETRIES -1: raise
+            except Exception as final_e:
+                logger.error(f"Error fwd_media fwd (att {attempt + 1}): {final_e}")
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(1 + attempt)
                 else:
-                    raise
-            except Exception as forward_error:
-                if retry == 2:
-                    logger.error(f"Error forwarding media: {forward_error}")
-                    raise
-                await asyncio.sleep(0.5)
-    raise Exception("Failed to forward media after multiple attempts")
+                    raise Exception(f"Failed fwd_media after {MAX_RETRIES} attempts: {final_e}")
 
-async def log_request(log_msg, user, stream_link, online_link):
+async def log_req(fwd_msg_obj: Message, usr: Any, slink: str, olink: str): # log_msg -> fwd_msg_obj, user -> usr, stream_link -> slink, online_link -> olink
     try:
-        if getattr(user, 'title', None):
-            source_info = f"{user.title} (Chat/Channel)"
-        else:
-            first = getattr(user, 'first_name', '') or ''
-            last = getattr(user, 'last_name', '') or ''
-            display_name = f"{first} {last}".strip() or "Unknown"
-            source_info = f"{display_name}"
-        id_ = user.id
-        await log_msg.reply_text(
-            MSG_NEW_FILE_REQUEST.format(
-                source_info=source_info,
-                id_=id_,
-                online_link=online_link,
-                stream_link=stream_link
-            ),
+        src_info = getattr(usr, 'title', None) or f"{getattr(usr, 'first_name', '')} {getattr(usr, 'last_name', '')}".strip() or "Unknown"
+        id_ = usr.id
+        text_to_log = MSG_NEW_FILE_REQUEST.format(source_info=src_info, id_=id_, online_link=olink, stream_link=slink)
+        await fwd_msg_obj.reply_text(
+            text_to_log,
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
-        await asyncio.sleep(0.3)
-    except Exception:
-        pass
+    except FloodWait as e:
+        logger.warning(f"FloodWait: log_req, sleep {e.value}s")
+        await asyncio.sleep(e.value)
+    except Exception as e:
+        logger.warning(f"Failed log_req: {e}")
 
-async def process_media_message(client, command_message, media_message, notify=True, shortener=True):
-    retries = 0
-    max_retries = 3
-    cache_key = get_file_unique_id(media_message)
-    if cache_key is None:
-        if notify:
-            await command_message.reply_text(MSG_ERROR_FILE_ID_EXTRACT, quote=True)
-        return None
-    cached_data = await CACHE.get(cache_key)
-    if cached_data:
-        if notify:
-            await send_links_to_user(
-                client,
-                command_message,
-                cached_data['media_name'],
-                cached_data['media_size'],
-                cached_data['stream_link'],
-                cached_data['online_link']
-            )
-        return cached_data['online_link']
-    while retries < max_retries:
+async def proc_media(cli: Client, cmd_msg: Message, m_msg: Message, shortener: bool = True) -> Optional[Dict[str, Any]]: # client->cli, command_message->cmd_msg, media_message->m_msg
+    for attempt in range(MAX_RETRIES):
         try:
-            log_msg = await forward_media(media_message)
-            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg, shortener=shortener)
-            await CACHE.set(cache_key, {
-                'media_name': media_name,
-                'media_size': media_size,
-                'stream_link': stream_link,
-                'online_link': online_link,
-                'message_id': log_msg.id,
-                'timestamp': time.time()
-            })
-            if notify:
-                await send_links_to_user(
-                    client,
-                    command_message,
-                    media_name,
-                    media_size,
-                    stream_link,
-                    online_link
-                )
-            await log_request(log_msg, command_message.from_user, stream_link, online_link)
-            return online_link
-        except FloodWait as e:
-            await handle_flood_wait(e)
-            retries += 1
-            continue
-        except (FileReferenceExpired, FileReferenceInvalid):
-            retries += 1
-            await asyncio.sleep(0.3)
-            continue
-        except MediaEmpty:
-            if notify:
-                await command_message.reply_text(MSG_MEDIA_ERROR, quote=True)
-            return None
-        except Exception as e:
-            logger.error(f"Error processing media: {e}")
-            if retries < max_retries - 1:
-                retries += 1
-                await asyncio.sleep(0.3)
-                continue
-            if notify:
-                await handle_user_error(
-                    command_message,
-                    MSG_ERROR_PROCESSING_MEDIA
-                )
-            await notify_owner(
-                client,
-                MSG_CRITICAL_ERROR.format(error=e, error_id=uuid.uuid4().hex[:8])
-            )
-            return None
-    return None
-
-async def retry_failed_media(client, command_message, media_messages, status_msg=None, shortener=True):
-    results = []
-    for i, msg in enumerate(media_messages):
-        try:
-            result = await process_media_message(client, command_message, msg, notify=False, shortener=shortener)
-            if result:
-                results.append(result)
-            if status_msg and i % 2 == 0:
-                try:
-                    await status_msg.edit(f"🔄 **Retrying Failed Files:** {len(results)}/{len(media_messages)} processed")
-                except MessageNotModified:
-                    pass
-        except Exception as e:
-            logger.error(f"Error retrying media: {e}")
-    return results
-
-async def process_multiple_messages(client, command_message, reply_msg, num_files, status_msg, shortener=True):
-    chat_id = command_message.chat.id
-    start_message_id = reply_msg.id
-    end_message_id = start_message_id + num_files - 1
-    message_ids = list(range(start_message_id, end_message_id + 1))
-    last_status_text = ""
-    try:
-        batch_size = 5
-        processed_count = 0
-        failed_count = 0
-        download_links = []
-        failed_messages = []
-
-        async def process_single_message(msg):
-            try:
-                return await process_media_message(
-                    client,
-                    command_message,
-                    msg,
-                    notify=False
-                )
-            except FloodWait as e:
-                await handle_flood_wait(e)
-                return await process_media_message(client, command_message, msg, notify=False)
-            except Exception as e:
-                logger.error(f"Message {msg.id} error: {e}")
+            fwd_msg_obj = await fwd_media(m_msg) # log_msg -> fwd_msg_obj
+            if not fwd_msg_obj:
+                await reply_user_err(cmd_msg, MSG_ERROR_PROCESSING_MEDIA)
                 return None
 
-        for i in range(0, len(message_ids), batch_size):
-            batch_ids = message_ids[i:i+batch_size]
-            new_status_text = MSG_PROCESSING_BATCH.format(
-                batch_number=(i//batch_size)+1,
-                total_batches=(len(message_ids)+batch_size-1)//batch_size,
-                file_count=len(batch_ids)
-            )
-            if new_status_text != last_status_text:
-                try:
-                    await status_msg.edit(new_status_text)
-                    last_status_text = new_status_text
-                except MessageNotModified:
-                    pass
-            await asyncio.sleep(1.0)
-            messages = []
-            for retry in range(3):
-                try:
-                    messages = await client.get_messages(
-                        chat_id=chat_id,
-                        message_ids=batch_ids
-                    )
-                    break
-                except FloodWait as e:
-                    await handle_flood_wait(e)
-                except Exception as e:
-                    if retry == 2:
-                        logger.error(f"Failed to get batch {i//batch_size+1}: {e}")
-                    await asyncio.sleep(0.5)
-            for msg in messages:
-                if msg and msg.media:
-                    try:
-                        result = await process_media_message(
-                            client, command_message, msg, notify=False, shortener=shortener
-                        )
-                        if result:
-                            download_links.append(result)
-                            processed_count += 1
-                        else:
-                            failed_count += 1
-                            failed_messages.append(msg)
-                    except Exception as e:
-                        failed_count += 1
-                        failed_messages.append(msg)
-                        logger.error(f"Failed to process {msg.id}: {e}")
-                await asyncio.sleep(1.0)
-            if processed_count % 5 == 0 or processed_count + failed_count == len(message_ids):
-                new_status_text = MSG_PROCESSING_STATUS.format(
-                    processed=processed_count,
-                    total=num_files,
-                    failed=failed_count
-                )
-                if new_status_text != last_status_text:
-                    try:
-                        await status_msg.edit(new_status_text)
-                        last_status_text = new_status_text
-                    except MessageNotModified:
-                        pass
+            ld = await gen_links(fwd_msg_obj, shortener=shortener) # links_data -> ld
+            ld['log_msg'] = fwd_msg_obj
+            return ld
+        except FloodWait as e:
+            logger.warning(f"FloodWait: proc_media (att {attempt + 1}), sleep {e.value}s")
+            await asyncio.sleep(e.value)
+            if attempt == MAX_RETRIES -1:
+                await reply_user_err(cmd_msg, f"Service busy (FloodWait). Try after {e.value}s.")
+                return None
+        except (FileReferenceExpired, FileReferenceInvalid) as e:
+            logger.warning(f"FileRef error: proc_media (att {attempt + 1}): {e}. Retrying.")
+            if attempt < MAX_RETRIES - 1:
+                try: await m_msg.download(in_memory=True)
+                except Exception as dl_err: logger.warning(f"Failed refresh FileRef via download: {dl_err}")
+                await asyncio.sleep(1 + attempt)
+            else:
+                try: await cmd_msg.reply_text(MSG_MEDIA_ERROR, quote=True)
+                except Exception as e_reply: logger.error(f"Error sending MSG_MEDIA_ERROR (FileRef): {e_reply}")
+                return None
+        except MediaEmpty:
+            try: await cmd_msg.reply_text(MSG_MEDIA_ERROR, quote=True)
+            except Exception as e_reply: logger.error(f"Error sending MSG_MEDIA_ERROR (MediaEmpty): {e_reply}")
+            return None
+        except Exception as e:
+            logger.error(f"Error proc_media (att {attempt + 1}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(1 + attempt)
+            else:
+                await reply_user_err(cmd_msg, MSG_ERROR_PROCESSING_MEDIA)
+                await notify_own(cli, MSG_CRITICAL_ERROR.format(error=str(e), error_id=uuid.uuid4().hex[:8]))
+                return None
+    return None
 
-        if failed_messages and len(failed_messages) < num_files / 2:
-            new_status_text = MSG_RETRYING_FILES.format(count=len(failed_messages))
-            if new_status_text != last_status_text:
-                try:
-                    await status_msg.edit(new_status_text)
-                    last_status_text = new_status_text
-                except MessageNotModified:
-                    pass
-            retry_results = await retry_failed_media(
-                client, command_message, failed_messages, status_msg, shortener
-            )
-            if retry_results:
-                download_links.extend(retry_results)
-                processed_count += len(retry_results)
-                failed_count -= len(retry_results)
-
-        def chunk_list(lst, n):
-            for i in range(0, len(lst), n):
-                yield lst[i:i + n]
-
-        for chunk in chunk_list(download_links, 20):
-            links_text = "\n".join(chunk)
-            group_message_content = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{links_text}`"
-            dm_prefix = MSG_DM_BATCH_PREFIX.format(chat_title=command_message.chat.title)
-            dm_message_text = f"{dm_prefix}\n{group_message_content}"
-            try:
-                await command_message.reply_text(
-                    group_message_content,
-                    quote=True,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    parse_mode=enums.ParseMode.MARKDOWN
-                )
-            except Exception as e:
-                logger.error(f"Error sending batch links to original chat {command_message.chat.id}: {e}")
-            if command_message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-                try:
-                    await client.send_message(
-                        chat_id=command_message.from_user.id,
-                        text=dm_message_text,
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                        parse_mode=enums.ParseMode.MARKDOWN
-                    )
-                except Exception as e:
-                    logger.error(f"Error sending batch links to user DM {command_message.from_user.id}: {e}")
-                    await command_message.reply_text(
-                        MSG_ERROR_DM_FAILED,
-                        quote=True
-                    )
-            if len(chunk) > 10:
-                await asyncio.sleep(0.5)
-
-        new_status_text = MSG_PROCESSING_RESULT.format(
-            processed=processed_count,
-            total=num_files,
-            failed=failed_count
+async def _reply_with_links(target_msg: Message, ld: Dict[str, Any]):
+    links_txt = MSG_LINKS.format(
+        file_name=ld['media_name'],
+        file_size=ld['media_size'],
+        download_link=ld['online_link'],
+        stream_link=ld['stream_link']
+    )
+    links_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=ld['stream_link'])],
+        [InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=ld['online_link'])]
+    ])
+    try:
+        await target_msg.reply_text(
+            text=links_txt, quote=True, parse_mode=enums.ParseMode.MARKDOWN,
+            link_preview_options=LinkPreviewOptions(is_disabled=True), reply_markup=links_markup
         )
-        if new_status_text != last_status_text:
-            try:
-                await status_msg.edit(new_status_text)
-                last_status_text = new_status_text
-            except MessageNotModified:
-                pass
+    except FloodWait as e:
+        logger.warning(f"FloodWait: _reply_with_links to {target_msg.chat.id}, sleep {e.value}s")
+        await asyncio.sleep(e.value)
+        try:
+            await target_msg.reply_text(
+                text=links_txt, quote=True, parse_mode=enums.ParseMode.MARKDOWN,
+                link_preview_options=LinkPreviewOptions(is_disabled=True), reply_markup=links_markup
+            )
+        except Exception as e_retry:
+             logger.error(f"Error on retry _reply_with_links to {target_msg.chat.id}: {e_retry}")
+             await reply_user_err(target_msg, MSG_ERROR_PROCESSING_MEDIA) # Fallback if sending link fails
     except Exception as e:
-        logger.error(f"Error in batch processing: {e}")
-        new_status_text = MSG_PROCESSING_ERROR.format(
-            error=str(e),
-            processed=processed_count,
-            total=num_files,
-            error_id=uuid.uuid4().hex[:8]
-        )
-        if new_status_text != last_status_text:
+        logger.error(f"Error in _reply_with_links to {target_msg.chat.id}: {e}")
+        await reply_user_err(target_msg, MSG_ERROR_PROCESSING_MEDIA)
+
+
+async def proc_batch(cli: Client, cmd_msg: Message, r_msg: Message, num_f: int, stat_msg: Message, shortener: bool = True): # Renamed params
+    cid = cmd_msg.chat.id # chat_id -> cid
+    start_mid = r_msg.id # start_message_id -> start_mid
+    mids = list(range(start_mid, start_mid + num_f)) # message_ids -> mids, num_files -> num_f
+
+    proc_cnt, fail_cnt = 0, 0 # processed_count, failed_count
+    dl_parts = [] # download_links_text_parts -> dl_parts
+    last_stat_txt = ""
+
+    async def upd_stat(txt: str): # update_status -> upd_stat, text -> txt
+        nonlocal last_stat_txt
+        if txt != last_stat_txt:
             try:
-                await status_msg.edit(new_status_text)
-                last_status_text = new_status_text
-            except MessageNotModified:
-                pass
+                await stat_msg.edit(txt)
+                last_stat_txt = txt
+            except MessageNotModified: pass
+            except FloodWait as e_fld:
+                logger.warning(f"FloodWait: upd_stat, sleep {e_fld.value}s")
+                await asyncio.sleep(e_fld.value)
+            except Exception as e_stat:
+                logger.error(f"Error upd_stat: {e_stat}")
+
+    for i in range(0, len(mids), 10):
+        batch_ids = mids[i:i+10]
+        await upd_stat(MSG_PROCESSING_BATCH.format(batch_number=(i//10)+1, total_batches=(len(mids)+9)//10, file_count=len(batch_ids)))
+
+        batch_msgs = [] # messages_in_batch -> batch_msgs
+        for att_fetch in range(MAX_RETRIES): # attempt_fetch -> att_fetch
+            try:
+                batch_msgs = await cli.get_messages(chat_id=cid, message_ids=batch_ids)
+                break
+            except FloodWait as e_fld:
+                logger.warning(f"FloodWait: proc_batch get_msgs (att {att_fetch+1}), sleep {e_fld.value}s")
+                await asyncio.sleep(e_fld.value)
+                if att_fetch == MAX_RETRIES -1: batch_msgs = []
+            except Exception as e_err:
+                logger.error(f"Error proc_batch get_msgs (att {att_fetch+1}): {e_err}")
+                if att_fetch < MAX_RETRIES -1: await asyncio.sleep(1+att_fetch)
+                else: batch_msgs = []
+
+        for b_msg in batch_msgs: # msg_in_batch -> b_msg
+            if b_msg and b_msg.media:
+                ld = await proc_media(cli, cmd_msg, b_msg, shortener=shortener) # links_data -> ld
+                if ld and ld.get('online_link'):
+                    dl_parts.append(ld['online_link'])
+                    proc_cnt += 1
+                else: fail_cnt += 1
+            elif b_msg: fail_cnt +=1
+
+            if (proc_cnt + fail_cnt) % 5 == 0 or (proc_cnt + fail_cnt) == num_f:
+                 await upd_stat(MSG_PROCESSING_STATUS.format(processed=proc_cnt, total=num_f, failed=fail_cnt))
+
+    def chunk_list(lst, n):
+        for i_chunk in range(0, len(lst), n): yield lst[i_chunk:i_chunk + n]
+
+    for chunk in chunk_list(dl_parts, 20):
+        fmt_dlinks_txt = "\n".join(chunk) # links_text_formatted -> fmt_dlinks_txt
+        grp_msg_txt = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{fmt_dlinks_txt}`" # group_message_content -> grp_msg_txt
+        dm_prefix = MSG_DM_BATCH_PREFIX.format(chat_title=cmd_msg.chat.title if cmd_msg.chat else "this chat")
+        dm_txt = f"{dm_prefix}\n{grp_msg_txt}" # dm_message_text -> dm_txt
+        try:
+            await cmd_msg.reply_text(grp_msg_txt, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True), parse_mode=enums.ParseMode.MARKDOWN)
+        except FloodWait as e_fld:
+            logger.warning(f"FloodWait: proc_batch send group links, sleep {e_fld.value}s")
+            await asyncio.sleep(e_fld.value)
+            try: await cmd_msg.reply_text(grp_msg_txt, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True), parse_mode=enums.ParseMode.MARKDOWN)
+            except Exception as e_inner: logger.error(f"Error proc_batch send group links retry: {e_inner}")
+        except Exception as e_err: logger.error(f"Error proc_batch send group links: {e_err}")
+
+        if cmd_msg.chat and cmd_msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] and cmd_msg.from_user:
+            try: # Using client.send_message, so _send_msg could be an option here if it were public / in this file
+                await cli.send_message(chat_id=cmd_msg.from_user.id, text=dm_txt, link_preview_options=LinkPreviewOptions(is_disabled=True), parse_mode=enums.ParseMode.MARKDOWN)
+            except FloodWait as e_fld:
+                logger.warning(f"FloodWait: proc_batch send DM, sleep {e_fld.value}s")
+                await asyncio.sleep(e_fld.value)
+                try: await cli.send_message(chat_id=cmd_msg.from_user.id, text=dm_txt, link_preview_options=LinkPreviewOptions(is_disabled=True), parse_mode=enums.ParseMode.MARKDOWN)
+                except Exception as e_inner_dm: logger.error(f"Error proc_batch send DM retry: {e_inner_dm}")
+            except Exception: await cmd_msg.reply_text(MSG_ERROR_DM_FAILED, quote=True)
+        await asyncio.sleep(0.2)
+    await upd_stat(MSG_PROCESSING_RESULT.format(processed=proc_cnt, total=num_f, failed=fail_cnt))
+
 
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 @check_banned
 @require_token
-@shorten_link
 @force_channel_check
-async def link_handler(client, message, shortener=True):
-    user_id = message.from_user.id
-    if not await db.is_user_exist(user_id):
+async def link_handler(cli: Client, msg: Message, shortener: bool = True): # client->cli, message->msg
+    uid = msg.from_user.id if msg.from_user else None # user_id -> uid
+    if not await db.is_user_exist(uid) and uid:
         try:
-            invite_link = f"https://t.me/{client.me.username}?start=start"
-            await message.reply_text(
-                MSG_ERROR_START_BOT.format(invite_link=invite_link),
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)]]),
-                quote=True
-            )
-        except Exception:
-            pass
+            inv_link = f"https://t.me/{cli.me.username}?start=start" # invite_link -> inv_link
+            await msg.reply_text(MSG_ERROR_START_BOT.format(invite_link=inv_link), link_preview_options=LinkPreviewOptions(is_disabled=True), parse_mode=enums.ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=inv_link)]]), quote=True)
+        except FloodWait as e: logger.warning(f"FloodWait: link_handler start_bot, sleep {e.value}s"); await asyncio.sleep(e.value)
+        except Exception: pass
         return
-    if await rate_limiter.is_rate_limited(user_id):
-        reset_time = await rate_limiter.get_reset_time(user_id)
-        await message.reply_text(
-            MSG_ERROR_RATE_LIMIT.format(seconds=f"{reset_time:.0f}"),
-            quote=True
-        )
-        return
-    if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        is_admin = await check_admin_privileges(client, message.chat.id)
-        if not is_admin:
-            await message.reply_text(
-                MSG_ERROR_NOT_ADMIN,
-                quote=True
-            )
+
+    if msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        admin_check = await is_admin(cli, msg.chat.id) # check_admin_privileges -> is_admin
+        if not admin_check:
+            try: await msg.reply_text(MSG_ERROR_NOT_ADMIN, quote=True)
+            except FloodWait as e: logger.warning(f"FloodWait: link_handler not_admin, sleep {e.value}s"); await asyncio.sleep(e.value)
+            except Exception as e_admin: logger.error(f"Error: link_handler not_admin: {e_admin}")
             return
-    if not message.reply_to_message:
-        await message.reply_text(
-            MSG_ERROR_REPLY_FILE,
-            quote=True
-        )
+
+    if not msg.reply_to_message:
+        try: await msg.reply_text(MSG_ERROR_REPLY_FILE, quote=True)
+        except FloodWait as e: logger.warning(f"FloodWait: link_handler reply_file, sleep {e.value}s"); await asyncio.sleep(e.value)
+        except Exception as e_reply: logger.error(f"Error: link_handler reply_file: {e_reply}")
         return
-    reply_msg = message.reply_to_message
-    if not reply_msg.media:
-        await message.reply_text(
-            MSG_ERROR_NO_FILE,
-            quote=True
-        )
+
+    r_msg = msg.reply_to_message # reply_msg -> r_msg
+    if not r_msg.media:
+        try: await msg.reply_text(MSG_ERROR_NO_FILE, quote=True)
+        except FloodWait as e: logger.warning(f"FloodWait: link_handler no_file, sleep {e.value}s"); await asyncio.sleep(e.value)
+        except Exception as e_media: logger.error(f"Error: link_handler no_file: {e_media}")
         return
-    command_parts = message.text.strip().split()
-    num_files = 1
-    if len(command_parts) > 1:
+
+    cmd_parts = msg.text.strip().split() # command_parts -> cmd_parts
+    num_f = 1 # num_files -> num_f
+    if len(cmd_parts) > 1:
         try:
-            num_files = int(command_parts[1])
-            if num_files < 1 or num_files > 100:
-                await message.reply_text(
-                    MSG_ERROR_NUMBER_RANGE,
-                    quote=True
-                )
+            num_f = int(cmd_parts[1])
+            if not (1 <= num_f <= 100):
+                try: await msg.reply_text(MSG_ERROR_NUMBER_RANGE, quote=True)
+                except FloodWait as e: logger.warning(f"FloodWait: link_handler num_range, sleep {e.value}s"); await asyncio.sleep(e.value)
                 return
         except ValueError:
-            await message.reply_text(
-                MSG_ERROR_INVALID_NUMBER,
-                quote=True
-            )
+            try: await msg.reply_text(MSG_ERROR_INVALID_NUMBER, quote=True)
+            except FloodWait as e: logger.warning(f"FloodWait: link_handler inv_num, sleep {e.value}s"); await asyncio.sleep(e.value)
             return
-    processing_msg = await message.reply_text(
-        MSG_PROCESSING_REQUEST,
-        quote=True
-    )
-    try:
-        if num_files == 1:
-            result = await process_media_message(client, message, reply_msg, shortener=shortener)
-            if result:
-                if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-                    try:
-                        cached_data = await CACHE.get(get_file_unique_id(reply_msg))
-                        if cached_data:
-                            msg_text = (
-                                MSG_LINKS.format(
-                                    file_name=cached_data['media_name'],
-                                    file_size=cached_data['media_size'],
-                                    download_link=cached_data['online_link'],
-                                    stream_link=cached_data['stream_link']
-                                )
-                            )
-                            await client.send_message(
-                                chat_id=message.from_user.id,
-                                text=MSG_LINK_FROM_GROUP.format(
-                                    chat_title=message.chat.title,
-                                    links_message=msg_text
-                                ),
-                                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                                parse_mode=enums.ParseMode.MARKDOWN,
-                                reply_markup=InlineKeyboardMarkup([
-                                    [
-                                        InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=cached_data['stream_link']),
-                                        InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=cached_data['online_link'])
-                                    ]
-                                ]),
-                            )
-                    except Exception as e:
-                        logger.debug(f"Error sending DM to user {message.from_user.id} from group: {e}")
-                        await message.reply_text(
-                            MSG_ERROR_DM_FAILED,
-                            quote=True
-                        )
-                await processing_msg.delete()
-            else:
-                try:
-                    await processing_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
-                except MessageNotModified:
-                    pass
-        else:
-            await process_multiple_messages(client, message, reply_msg, num_files, processing_msg, shortener)
-    except Exception as e:
-        logger.error(f"Error handling link command: {e}")
-        try:
-            await processing_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
-        except MessageNotModified:
-            pass
 
-@StreamBot.on_message(
-    filters.private & filters.incoming & (
-        filters.document | filters.video | filters.photo | filters.audio |
-        filters.voice | filters.animation | filters.video_note
-    ),
-    group=4
-)
+    p_msg = None # processing_msg -> p_msg
+    try:
+        p_msg = await msg.reply_text(MSG_PROCESSING_REQUEST, quote=True)
+    except FloodWait as e:
+        logger.warning(f"FloodWait: link_handler proc_req, sleep {e.value}s")
+        await asyncio.sleep(e.value)
+        try: p_msg = await msg.reply_text(MSG_PROCESSING_REQUEST, quote=True)
+        except Exception as e_proc: logger.error(f"Error: link_handler proc_req retry: {e_proc}"); return
+    except Exception as e_init_proc: logger.error(f"Error: link_handler proc_req initial: {e_init_proc}"); return
+
+    if num_f == 1:
+        try:
+            ld = await proc_media(cli, msg, r_msg, shortener=shortener) # links_data -> ld
+            if ld and ld.get('log_msg'):
+                await _reply_with_links(msg, ld) # Use new helper
+                await log_req(ld['log_msg'], msg.from_user, ld['stream_link'], ld['online_link'])
+                if p_msg: await p_msg.delete()
+            elif ld is None :
+                 if p_msg: await p_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
+        except FloodWait as e_outer:
+            logger.error(f"Overall FloodWait: link_handler single, sleep {e_outer.value}s")
+            if p_msg: await p_msg.edit(f"Service busy (FloodWait). Try after {e_outer.value}s.")
+            await asyncio.sleep(e_outer.value)
+        except Exception as e_err:
+            logger.error(f"Error link_handler single: {e_err}")
+            if p_msg:
+                try: await p_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
+                except Exception: pass
+    else:
+        await proc_batch(cli, msg, r_msg, num_f, p_msg, shortener)
+
+
+@StreamBot.on_message(filters.private & filters.incoming & (filters.document | filters.video | filters.photo | filters.audio | filters.voice | filters.animation | filters.video_note), group=4)
 @check_banned
 @require_token
-@shorten_link
 @force_channel_check
-async def private_receive_handler(client, message, shortener=True):
-    if not message.from_user:
-        return
-    if await rate_limiter.is_rate_limited(message.from_user.id):
-        reset_time = await rate_limiter.get_reset_time(message.from_user.id)
-        await message.reply_text(
-            MSG_ERROR_RATE_LIMIT.format(seconds=f"{reset_time:.0f}"),
-            quote=True
-        )
-        return
-    await log_new_user(
-        bot=client,
-        user_id=message.from_user.id,
-        first_name=message.from_user.first_name
-    )
-    processing_msg = await message.reply_text(
-        MSG_PROCESSING_FILE,
-        quote=True
-    )
-    try:
-        result = await process_media_message(client, message, message, shortener=shortener)
-        if result:
-            await processing_msg.delete()
-        else:
-            try:
-                await processing_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
-            except MessageNotModified:
-                pass
-    except Exception as e:
-        logger.error(f"Error in private handler: {e}")
-        try:
-            await processing_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
-        except MessageNotModified:
-            pass
+async def private_receive_handler(cli: Client, msg: Message, shortener: bool = True): # client->cli, message->msg
+    if not msg.from_user: return
+    await log_newusr(cli, msg.from_user.id, msg.from_user.first_name or "") # bot->cli
 
-@StreamBot.on_message(
-    filters.channel & filters.incoming & (
-        filters.document | filters.video | filters.photo | filters.audio |
-        filters.voice | filters.animation | filters.video_note
-    ) & ~filters.chat(Var.BIN_CHANNEL),
-    group=-1
-)
-@shorten_link
-async def channel_receive_handler(client, broadcast, shortener=True):
-    if hasattr(Var, 'BANNED_CHANNELS') and int(broadcast.chat.id) in Var.BANNED_CHANNELS:
-        await client.leave_chat(broadcast.chat.id)
+    p_msg = None # processing_msg -> p_msg
+    try:
+        p_msg = await msg.reply_text(MSG_PROCESSING_FILE, quote=True)
+    except FloodWait as e:
+        logger.warning(f"FloodWait: private_handler proc_file, sleep {e.value}s"); await asyncio.sleep(e.value)
+        try: p_msg = await msg.reply_text(MSG_PROCESSING_FILE, quote=True)
+        except Exception as e_proc: logger.error(f"Error: private_handler proc_file retry: {e_proc}"); return
+    except Exception as e_init_proc: logger.error(f"Error: private_handler proc_file initial: {e_init_proc}"); return
+
+    try:
+        ld = await proc_media(cli, msg, msg, shortener=shortener) # links_data -> ld
+        if ld and ld.get('log_msg'):
+            await _reply_with_links(msg, ld) # Use new helper
+            await log_req(ld['log_msg'], msg.from_user, ld['stream_link'], ld['online_link'])
+            if p_msg: await p_msg.delete()
+        elif ld is None:
+            if p_msg: await p_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
+    except FloodWait as e_outer:
+        logger.error(f"Overall FloodWait: private_handler, sleep {e_outer.value}s")
+        if p_msg: await p_msg.edit(f"Service busy (FloodWait). Try after {e_outer.value}s.")
+        await asyncio.sleep(e_outer.value)
+    except Exception as e_err:
+        logger.error(f"Error private_handler: {e_err}")
+        if p_msg:
+            try: await p_msg.edit(MSG_ERROR_PROCESSING_MEDIA)
+            except Exception: pass
+
+
+@StreamBot.on_message(filters.channel & filters.incoming & (filters.document | filters.video | filters.photo | filters.audio | filters.voice | filters.animation | filters.video_note) & ~filters.chat(Var.BIN_CHANNEL), group=-1)
+async def channel_receive_handler(cli: Client, bcst: Message, shortener: bool = True): # client->cli, broadcast->bcst
+    if hasattr(Var, 'BANNED_CHANNELS') and bcst.chat.id in Var.BANNED_CHANNELS:
+        try: await cli.leave_chat(bcst.chat.id)
+        except Exception as e: logger.warning(f"Failed leave banned ch {bcst.chat.id}: {e}")
         return
+
     can_edit = False
     try:
-        member = await client.get_chat_member(broadcast.chat.id, client.me.id)
-        can_edit = member.status in [
-            enums.ChatMemberStatus.ADMINISTRATOR,
-            enums.ChatMemberStatus.OWNER
-        ]
-    except Exception:
-        can_edit = False
-    retries = 0
-    max_retries = 3
-    while retries < max_retries:
-        try:
-            log_msg = await forward_media(broadcast)
-            stream_link, online_link, media_name, media_size = await generate_media_links(log_msg, shortener=shortener)
-            await log_request(log_msg, broadcast.chat, stream_link, online_link)
+        member = await cli.get_chat_member(bcst.chat.id, cli.me.id)
+        can_edit = member.status in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
+    except Exception: pass
+
+    try:
+        ld = await proc_media(cli, bcst, bcst, shortener=shortener) # links_data -> ld
+        if ld and ld.get('log_msg'):
+            await log_req(ld['log_msg'], bcst.chat, ld['stream_link'], ld['online_link'])
             if can_edit:
+                btns_markup = InlineKeyboardMarkup([ # reply_markup_buttons -> btns_markup
+                    [InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=ld['stream_link'])],
+                    [InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=ld['online_link'])]
+                ])
                 try:
-                    await client.edit_message_reply_markup(
-                        chat_id=broadcast.chat.id,
-                        message_id=broadcast.id,
-                        reply_markup=InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=stream_link),
-                                InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=online_link)
-                            ]
-                        ])
+                    await cli.edit_message_reply_markup(
+                        chat_id=bcst.chat.id, message_id=bcst.id, reply_markup=btns_markup
                     )
-                except Exception:
-                    pass
-            break
-        except FloodWait as e:
-            await handle_flood_wait(e)
-            retries += 1
-            continue
-        except (FileReferenceExpired, FileReferenceInvalid):
-            retries += 1
-            await asyncio.sleep(0.5)
-            continue
-        except Exception as e:
-            logger.error(f"Error handling channel message: {e}")
-            if retries < max_retries - 1:
-                retries += 1
-                await asyncio.sleep(0.5)
-                continue
-            await notify_owner(
-                client,
-                MSG_CRITICAL_ERROR.format(error=e, error_id=uuid.uuid4().hex[:8])
-            )
-            break
-
-async def clean_cache_task():
-    while True:
-        try:
-            await asyncio.sleep(3600)
-            await CACHE.clean_expired()
-        except Exception as e:
-            logger.error(f"Error in cache cleaning task: {e}")
-
-StreamBot.loop.create_task(clean_cache_task())
+                except FloodWait as e_edit:
+                    logger.warning(f"FloodWait: channel_handler edit, sleep {e_edit.value}s")
+                    await asyncio.sleep(e_edit.value)
+                except Exception as e_err:
+                    logger.warning(f"Could not edit ch msg {bcst.id} in {bcst.chat.id}: {e_err}")
+    except FloodWait as e_outer:
+        logger.warning(f"Overall FloodWait: channel_handler for {bcst.chat.id} msg {bcst.id}, sleep {e_outer.value}s")
+        await asyncio.sleep(e_outer.value)
+        await notify_own(cli, f"Channel proc for {bcst.chat.id} msg {bcst.id} hit FloodWait: {e_outer.value}s")
+    except Exception as e_glob:
+        logger.error(f"Global error: channel_handler for {bcst.chat.id} msg {bcst.id}: {e_glob}")
+        await notify_own(cli, MSG_CRITICAL_ERROR.format(error=str(e_glob), error_id=uuid.uuid4().hex[:8]) + f" (Channel: {bcst.chat.id}, Msg: {bcst.id})")
