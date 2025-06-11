@@ -2,8 +2,8 @@ import asyncio
 from typing import Optional, Dict, Any
 from urllib.parse import quote
 
-from pyrogram import Client, enums
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, LinkPreviewOptions, ReplyParameters # CallbackQuery removed
+from pyrogram import Client # Removed enums
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, LinkPreviewOptions, ReplyParameters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import FloodWait
 
@@ -16,8 +16,11 @@ from Thunder.utils.messages import (
     MSG_NEW_USER,
     MSG_DC_UNKNOWN,
     MSG_DC_USER_INFO,
+    MSG_LINKS,
+    MSG_BUTTON_STREAM_NOW,
+    MSG_BUTTON_DOWNLOAD
 )
-from Thunder.utils.file_properties import get_fname, get_fsize, get_hash # Updated to minified names
+from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
 from Thunder.utils.shortener import shorten
 
 async def _send_msg(
@@ -28,48 +31,55 @@ async def _send_msg(
     **kwargs: Any
 ) -> Optional[Message]:
     fn_call = getattr(tgt, mthd)
-    args = {}
-    if mthd == "send_message":
-        args['chat_id'] = chat_id if chat_id is not None else tgt.id
-        args['text'] = text
-    elif mthd == "reply_text":
-        args['text'] = text
-    args.update(kwargs)
+    send_args = {}
 
-    log_tgt = "N/A"
+    log_chat_id_str = "N/A"
+    actual_chat_id = None
+
     if mthd == "send_message":
-        log_tgt = str(args.get('chat_id', getattr(tgt, 'id', "N/A")))
+        actual_chat_id = chat_id if chat_id is not None else (getattr(tgt, 'id', None) if isinstance(tgt, Client) else None)
+        if actual_chat_id is None and hasattr(tgt, 'chat') and hasattr(tgt.chat, 'id'):
+             actual_chat_id = tgt.chat.id
+        send_args['chat_id'] = actual_chat_id
+        send_args['text'] = text
+        if actual_chat_id: log_chat_id_str = str(actual_chat_id)
     elif mthd == "reply_text" and hasattr(tgt, 'chat') and hasattr(tgt.chat, 'id'):
-         log_tgt = str(tgt.chat.id)
-    elif hasattr(tgt, 'id'):
-        log_tgt = str(tgt.id)
+        actual_chat_id = tgt.chat.id
+        send_args['text'] = text
+        log_chat_id_str = str(actual_chat_id)
+    elif hasattr(tgt, 'id') and not isinstance(tgt, Client):
+        log_chat_id_str = str(tgt.id)
 
-    tgt_cls = tgt.__class__.__name__
+    send_args.update(kwargs)
+    tgt_cls_name = tgt.__class__.__name__
+
     try:
-        return await fn_call(**args)
-    except FloodWait as e:
-        logger.warning(f"FloodWait: {tgt_cls}.{mthd} to {log_tgt}. Sleep {e.value}s")
-        await asyncio.sleep(e.value)
+        return await fn_call(**send_args)
+    except FloodWait as e_fw:
+        logger.warning(f"FloodWait: {tgt_cls_name}.{mthd} to {log_chat_id_str}. Sleep {e_fw.value}s. Retrying once.")
+        await asyncio.sleep(e_fw.value)
         try:
-            return await fn_call(**args)
+            return await fn_call(**send_args)
         except FloodWait as e_fw_retry:
-            logger.error(f"FloodWait on retry: {tgt_cls}.{mthd} to {log_tgt}: {e_fw_retry}")
+            logger.error(f"FloodWait on retry: {tgt_cls_name}.{mthd} to {log_chat_id_str}: {e_fw_retry}")
         except Exception as e_retry:
-            logger.error(f"RetryFail after FloodWait: {tgt_cls}.{mthd} to {log_tgt}: {e_retry}")
+            logger.error(f"RetryFail after FloodWait: {tgt_cls_name}.{mthd} to {log_chat_id_str}: {e_retry}")
     except Exception as e:
-        logger.error(f"Error: {tgt_cls}.{mthd} to {log_tgt}: {e}")
+        logger.error(f"Error: {tgt_cls_name}.{mthd} to {log_chat_id_str}: {e}")
     return None
 
-async def notify_ch(cli: Client, text: str):
+async def notify_ch(cli: Client, txt: str):
     if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        await _send_msg(cli, "send_message", chat_id=Var.BIN_CHANNEL, text=text)
+        await _send_msg(cli, "send_message", chat_id=Var.BIN_CHANNEL, text=txt)
 
-async def notify_own(cli: Client, text: str):
+async def notify_own(cli: Client, txt: str):
     o_ids = Var.OWNER_ID
+    tasks = []
     for oid in (o_ids if isinstance(o_ids, (list, tuple, set)) else [o_ids]):
-        await _send_msg(cli, "send_message", chat_id=oid, text=text)
+        tasks.append(_send_msg(cli, "send_message", chat_id=oid, text=txt))
     if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        await _send_msg(cli, "send_message", chat_id=Var.BIN_CHANNEL, text=text)
+        tasks.append(_send_msg(cli, "send_message", chat_id=Var.BIN_CHANNEL, text=txt))
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 async def reply_user_err(msg: Message, err_txt: str):
     await _send_msg(
@@ -83,57 +93,79 @@ async def reply_user_err(msg: Message, err_txt: str):
             [[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]])
     )
 
-async def log_newusr(cli: Client, user_id: int, fname: str): # param first_name -> fname
-    if not await db.is_user_exist(user_id):
-        await db.add_user(user_id)
-        if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-            await _send_msg(
-                cli,
-                "send_message",
-                chat_id=Var.BIN_CHANNEL,
-                text=MSG_NEW_USER.format(first_name=fname, user_id=user_id) # dict key remains first_name
+async def log_newusr(cli: Client, uid: int, fname: str):
+    try:
+        user_exists = await db.is_user_exist(uid)
+        if not user_exists:
+            await db.add_user(uid)
+            # Only send log message if user was actually added (i.e., didn't exist before)
+            if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
+                await _send_msg(
+                    cli,
+                    "send_message",
+                    chat_id=Var.BIN_CHANNEL,
+                    text=MSG_NEW_USER.format(first_name=fname, user_id=uid)
+                )
+    except Exception as e:
+        logger.error(f"Database error in log_newusr for user {uid}: {e}")
+        # If DB operations fail, we simply log the error and do not proceed to send a "new user" message.
+        # The function will implicitly return None.
             )
 
-async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]: # log_msg -> fwd_msg
+async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
     base_url = Var.URL.rstrip("/")
-    fid = fwd_msg.id # file_id -> fid
-    fname = get_fname(fwd_msg) # media_name -> fname, using updated get_fname
-    if isinstance(fname, bytes):
-        fname = fname.decode('utf-8', errors='replace')
-    else:
-        fname = str(fname)
-    fsize = get_fsize(fwd_msg) # media_size -> fsize, using updated get_fsize
-    enc_fname = quote(fname) # file_name_encoded -> enc_fname
-    fhash = get_hash(fwd_msg) # hash_value -> fhash
+    fid = fwd_msg.id
 
-    slink = f"{base_url}/watch/{fhash}{fid}/{enc_fname}" # stream_link -> slink
-    olink = f"{base_url}/{fhash}{fid}/{enc_fname}" # online_link -> olink
+    m_name_raw = get_fname(fwd_msg)
+    if isinstance(m_name_raw, bytes):
+        m_name = m_name_raw.decode('utf-8', errors='replace')
+    else:
+        m_name = str(m_name_raw)
+
+    m_size_raw = get_fsize(fwd_msg)
+    m_size_hr = humanbytes(m_size_raw)
+
+    enc_fname = quote(m_name)
+    f_hash = get_hash(fwd_msg)
+
+    slink = f"{base_url}/watch/{f_hash}{fid}/{enc_fname}"
+    olink = f"{base_url}/{f_hash}{fid}/{enc_fname}"
 
     if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
-        sh_slink, sh_olink = await asyncio.gather( # shortened_stream_link -> sh_slink, etc.
-            shorten(slink),
-            shorten(olink),
-            return_exceptions=True
-        )
-        if not isinstance(sh_slink, Exception):
-            slink = sh_slink
-        if not isinstance(sh_olink, Exception):
-            olink = sh_olink
+        try:
+            s_results = await asyncio.gather(
+                shorten(slink),
+                shorten(olink),
+                return_exceptions=True
+            )
+            if not isinstance(s_results[0], Exception):
+                slink = s_results[0]
+            else:
+                logger.warning(f"Failed to shorten stream_link {slink}: {s_results[0]}")
+
+            if not isinstance(s_results[1], Exception):
+                olink = s_results[1]
+            else:
+                logger.warning(f"Failed to shorten online_link {olink}: {s_results[1]}")
+        except Exception as e:
+            logger.error(f"Error during link shortening process: {e}")
 
     return {
-        "stream_link": slink, "online_link": olink,
-        "media_name": fname, "media_size": fsize
+        "stream_link": slink,
+        "online_link": olink,
+        "media_name": m_name,
+        "media_size": m_size_hr
     }
 
-async def gen_dc_txt(usr: User) -> str: # user -> usr
-    dc = usr.dc_id if usr.dc_id is not None else MSG_DC_UNKNOWN # dc_id -> dc
+async def gen_dc_txt(usr: User) -> str:
+    dc_id_val = usr.dc_id if usr.dc_id is not None else MSG_DC_UNKNOWN
     return MSG_DC_USER_INFO.format(
-        user_name=usr.first_name or 'User', # user.first_name -> usr.first_name
-        user_id=usr.id, # user.id -> usr.id
-        dc_id=dc # dc_id -> dc
+        user_name=usr.first_name or 'User',
+        user_id=usr.id,
+        dc_id=dc_id_val
     )
 
-async def get_user(cli: Client, qry: Any) -> Optional[User]: # bot -> cli, query -> qry
+async def get_user(cli: Client, qry: Any) -> Optional[User]:
     try:
         if isinstance(qry, str):
             if qry.startswith('@'):
@@ -142,22 +174,20 @@ async def get_user(cli: Client, qry: Any) -> Optional[User]: # bot -> cli, query
                 return await cli.get_users(int(qry))
         elif isinstance(qry, int):
             return await cli.get_users(qry)
-    except FloodWait as e:
-        logger.warning(f"FloodWait: get_user for {qry}. Sleep {e.value}s")
-        await asyncio.sleep(e.value)
+    except FloodWait as e_fw:
+        logger.warning(f"FloodWait in get_user for query '{qry}': {e_fw}. Sleeping {e_fw.value}s")
+        await asyncio.sleep(e_fw.value)
     except Exception as e:
-        logger.error(f"Error: get_user for {qry}: {e}")
+        logger.error(f"Error in get_user for query '{qry}': {e}")
     return None
 
-async def is_admin(cli: Client, chat_id: int) -> bool: # client -> cli
+async def is_admin(cli: Client, chat_id_val: int) -> bool:
     try:
-        member = await cli.get_chat_member(chat_id, cli.me.id)
+        member = await cli.get_chat_member(chat_id_val, cli.me.id)
         return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
-    except FloodWait as e:
-        logger.warning(f"FloodWait: is_admin for {chat_id}. Sleep {e.value}s")
-        await asyncio.sleep(e.value)
+    except FloodWait as e_fw:
+        logger.warning(f"FloodWait in is_admin for chat {chat_id_val}: {e_fw}. Sleeping {e_fw.value}s")
+        await asyncio.sleep(e_fw.value)
     except Exception as e:
-        logger.error(f"Error: is_admin for {chat_id}: {e}")
+        logger.error(f"Error in is_admin for chat {chat_id_val}: {e}")
     return False
-
-# exec_cb_cmd function removed from here
