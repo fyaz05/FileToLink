@@ -134,7 +134,7 @@ def shorten_link(func):
 def owner_only(func):
     _cached_owner_ids = None
     @wraps(func)
-    async def wrapper(client, callback_query: Message):
+    async def wrapper(client, update):
         nonlocal _cached_owner_ids
         try:
             if _cached_owner_ids is None:
@@ -146,16 +146,26 @@ def owner_only(func):
                 else:
                     _cached_owner_ids = set()
 
-            if callback_query.from_user.id not in _cached_owner_ids:
-                await callback_query.answer(MSG_ERROR_UNAUTHORIZED, show_alert=True)
-                logger.warning(f"Unauthorized access attempt by {callback_query.from_user.id} to owner_only function {func.__name__}.")
+            # Extract user from either Message or CallbackQuery
+            user = None
+            if hasattr(update, 'from_user'): # Covers both Message and CallbackQuery
+                user = update.from_user
+            else:
+                logger.error(f"Unsupported update type or missing from_user in owner_only: {type(update)}")
                 return
 
-            return await func(client, callback_query)
+            if not user or user.id not in _cached_owner_ids:
+                if hasattr(update, 'answer'):
+                    await update.answer(MSG_ERROR_UNAUTHORIZED, show_alert=True)
+                logger.warning(f"Unauthorized access attempt by {user.id if user else 'unknown'} to owner_only function {func.__name__}.")
+                return
+
+            return await func(client, update)
         except Exception as e:
             logger.error(f"Error in owner_only decorator for {func.__name__}: {e}")
             try:
-                await callback_query.answer("An error occurred. Please try again.", show_alert=True)
+                if hasattr(update, 'answer'):
+                    await update.answer("An error occurred. Please try again.", show_alert=True)
             except Exception as inner_e:
                 logger.error(f"Failed to send error answer in owner_only: {inner_e}")
             return

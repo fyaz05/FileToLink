@@ -19,6 +19,7 @@ from Thunder.bot.clients import initialize_clients
 from Thunder.utils.logger import logger
 from Thunder.utils.database import db
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+from Thunder.utils.tokens import cleanup_expired_tokens
 
 
 # Constants
@@ -41,16 +42,16 @@ def print_banner():
 ║                  File Streaming Bot v{VERSION}                        ║
 ╚═══════════════════════════════════════════════════════════════════╝
     """
-    logger.info(banner)
+    print(banner)
 
 
 async def import_plugins():
     """Import all plugins from the plugins directory."""
-    logger.info("╔══════════════════ IMPORTING PLUGINS ═══════════════════╗")
+    print("╠════════════════════ IMPORTING PLUGINS ════════════════════╣")
     plugins = glob.glob(PLUGIN_PATH)
     
     if not plugins:
-        logger.warning("No plugins found to import!")
+        print(" ▶ No plugins found to import!")
         return 0
     
     success_count = 0
@@ -73,18 +74,16 @@ async def import_plugins():
             spec.loader.exec_module(module)
             
             success_count += 1
-            logger.info(f"▶ Successfully imported: {plugin_name}")
         except Exception as e:
             plugin_name = Path(file_path).stem
-            logger.error(f"✖ Failed to import plugin {plugin_name}: {e}")
+            logger.error(f" ✖ Failed to import plugin {plugin_name}: {e}")
             failed_plugins.append(plugin_name)
     
-    logger.info(f"▶ Total: {len(plugins)} | Success: {success_count} | Failed: {len(failed_plugins)}")
+    print(f" ▶ Total: {len(plugins)} | Success: {success_count} | Failed: {len(failed_plugins)}")
     
     if failed_plugins:
-        logger.warning(f"▶ Failed plugins: {', '.join(failed_plugins)}")
+        print(f" ▶ Failed plugins: {', '.join(failed_plugins)}")
         
-    logger.info("╚════════════════════════════════════════════════════════╝")
     return success_count
 
 
@@ -94,19 +93,18 @@ async def start_services():
     
     print_banner()
     
-    logger.info("╔══════════════ INITIALIZING BOT SERVICES ═══════════════╗")
+    print("╔════════════════ INITIALIZING BOT SERVICES ════════════════╗")
     # Initialize Telegram Bot
-    logger.info("▶ Starting Telegram Bot initialization...")
+    print(" ▶ Starting Telegram Bot initialization...")
     try:
         await StreamBot.start()
         bot_info = await StreamBot.get_me()
         StreamBot.username = bot_info.username
-        logger.info(f"✓ Bot initialized successfully as @{StreamBot.username}")
+        print(f" ✓ Bot initialized successfully as @{StreamBot.username}")
 
         # Check for restart message
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
-            logger.debug(f"Found restart message: {restart_message_data}")
             try:
                 await StreamBot.edit_message_text(
                     chat_id=restart_message_data["chat_id"],
@@ -114,58 +112,61 @@ async def start_services():
                     text=MSG_ADMIN_RESTART_DONE
                 )
                 await db.delete_restart_message(restart_message_data["message_id"])
-                logger.debug("Restart message updated and deleted from DB.")
             except Exception as e:
                 logger.error(f"Error processing restart message: {e}")
         else:
-            logger.debug("No restart message found, starting normally.")
+            pass
 
     except Exception as e:
-        logger.error(f"✖ Failed to initialize Telegram Bot: {e}")
+        logger.error(f" ✖ Failed to initialize Telegram Bot: {e}")
         return
     
     # Initialize Clients
-    logger.info("▶ Starting Client initialization...")
+    print(" ▶ Starting Client initialization...")
     try:
         await initialize_clients()
-        logger.info("✓ Clients initialized successfully")
     except Exception as e:
-        logger.error(f"✖ Failed to initialize clients: {e}")
+        logger.error(f" ✖ Failed to initialize clients: {e}")
         return
     # Import Plugins
     await import_plugins()
     
     # Initialize Web Server
-    logger.info("▶ Starting Web Server initialization...")
+    print(" ▶ Starting Web Server initialization...")
     try:
         app_runner = web.AppRunner(await web_server())
         await app_runner.setup()
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
-        logger.info(f"✓ Web Server started at {bind_address}:{Var.PORT}")
+        print(f" ✓ Web Server started at {bind_address}:{Var.PORT}")
         
-        # Start keep-alive ping service
-        logger.info("▶ Starting keep-alive service...")
+
         asyncio.create_task(ping_server())
-        logger.info("✓ Keep-alive service started")
+        print(" ✓ Keep-alive service started")
+        asyncio.create_task(schedule_token_cleanup())
     except Exception as e:
-        logger.error(f"✖ Failed to start Web Server: {e}")
+        logger.error(f" ✖ Failed to start Web Server: {e}")
         return
     
     # Print completion message
     elapsed_time = (datetime.now() - start_time).total_seconds()
-    logger.info("╠════════════════════════════════════════════════════════╣")
-    logger.info(f"▶ Bot Name: {bot_info.first_name}")
-    logger.info(f"▶ Username: @{bot_info.username}")
-    logger.info(f"▶ Server: {bind_address}:{Var.PORT}")
-    logger.info(f"▶ Owner: {Var.OWNER_USERNAME}")
-    logger.info(f"▶ Startup Time: {elapsed_time:.2f} seconds")
-    logger.info("╚════════════════════════════════════════════════════════╝")
-    logger.info("▶ Bot is now running! Press CTRL+C to stop.")
-    
+    print("╠═══════════════════════════════════════════════════════════╣")
+    print(f" ▶ Bot Name: {bot_info.first_name}")
+    print(f" ▶ Username: @{bot_info.username}")
+    print(f" ▶ Server: {bind_address}:{Var.PORT}")
+    print(f" ▶ Owner: {Var.OWNER_USERNAME}")
+    print(f" ▶ Startup Time: {elapsed_time:.2f} seconds")
+    print("╚═══════════════════════════════════════════════════════════╝")
+    print(" ▶ Bot is now running! Press CTRL+C to stop.")
+
     # Keep the bot running
     await idle()
+
+async def schedule_token_cleanup():
+    while True:
+        await asyncio.sleep(3 * 3600)
+        await cleanup_expired_tokens()
 
 
 if __name__ == '__main__':
@@ -173,9 +174,9 @@ if __name__ == '__main__':
     try:
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
-        logger.info("╔═══════════════════════════════════════════════════════╗")
-        logger.info("║              Bot stopped by user (CTRL+C)             ║")
-        logger.info("╚═══════════════════════════════════════════════════════╝")
+        print("╔═══════════════════════════════════════════════════════════╗")
+        print("║              Bot stopped by user (CTRL+C)                 ║")
+        print("╚═══════════════════════════════════════════════════════════╝")
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
     finally:

@@ -64,6 +64,9 @@ class Var:
         logger.critical("DATABASE_URL is required")
         raise ValueError("DATABASE_URL is required")
 
+    # Group configurations
+    MAX_BATCH_FILES: int = int(os.getenv("MAX_BATCH_FILES", "50"))
+
     # Channel configurations
     BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
     

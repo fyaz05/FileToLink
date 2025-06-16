@@ -28,7 +28,7 @@ class Database:
         await self.restart_message_col.create_index("message_id", unique=True)
         await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
 
-        logger.info("Database indexes ensured.")
+        logger.debug("Database indexes ensured.")
 
     @log_errors
     def new_user(self, user_id: int) -> dict:
@@ -70,12 +70,12 @@ class Database:
     @log_errors
     async def delete_user(self, user_id: int):
         await self.col.delete_one({'id': user_id})
-        logger.info(f"Deleted user {user_id}.")
+        logger.debug(f"Deleted user {user_id}.")
 
     @log_errors
     async def create_index(self):
         await self.col.create_index("id", unique=True)
-        logger.info("Created index for 'id' on users collection.")
+        logger.debug("Created index for 'id' on users collection.")
 
     @log_errors
     async def get_active_users(self, days: int = 7):
@@ -98,13 +98,13 @@ class Database:
             {"$set": ban_data},
             upsert=True
         )
-        logger.info(f"Added/Updated banned user {user_id}. Reason: {reason}")
+        logger.debug(f"Added/Updated banned user {user_id}. Reason: {reason}")
 
     @log_errors
     async def remove_banned_user(self, user_id: int) -> bool:
         result = await self.banned_users_col.delete_one({"user_id": user_id})
         if result.deleted_count > 0:
-            logger.info(f"Removed banned user {user_id}.")
+            logger.debug(f"Removed banned user {user_id}.")
             return True
         return False
 
@@ -125,7 +125,7 @@ class Database:
                 },
                 upsert=True
             )
-            logger.info(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
+            logger.debug(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
         except Exception as e:
             logger.error(f"Error saving main token for user {user_id}: {e}")
             raise
@@ -156,7 +156,7 @@ class Database:
                 "chat_id": chat_id,
                 "timestamp": datetime.datetime.utcnow()
             })
-            logger.info(f"Added restart message {message_id} for chat {chat_id}.")
+            logger.debug(f"Added restart message {message_id} for chat {chat_id}.")
         except Exception as e:
             logger.error(f"Error adding restart message {message_id}: {e}")
 
@@ -172,7 +172,7 @@ class Database:
     async def delete_restart_message(self, message_id: int) -> None:
         try:
             await self.restart_message_col.delete_one({"message_id": message_id})
-            logger.info(f"Deleted restart message {message_id}.")
+            logger.debug(f"Deleted restart message {message_id}.")
         except Exception as e:
             logger.error(f"Error deleting restart message {message_id}: {e}")
 

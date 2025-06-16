@@ -1,8 +1,10 @@
+# Thunder/utils/bot_utils.py
+
 import asyncio
 from typing import Optional, Dict, Any
 from urllib.parse import quote
 
-from pyrogram import Client # Removed enums
+from pyrogram import Client
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, LinkPreviewOptions, ReplyParameters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import FloodWait
@@ -108,9 +110,6 @@ async def log_newusr(cli: Client, uid: int, fname: str):
                 )
     except Exception as e:
         logger.error(f"Database error in log_newusr for user {uid}: {e}")
-        # If DB operations fail, we simply log the error and do not proceed to send a "new user" message.
-        # The function will implicitly return None.
-            )
 
 async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
     base_url = Var.URL.rstrip("/")
