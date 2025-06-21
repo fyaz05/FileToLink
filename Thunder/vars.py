@@ -3,7 +3,6 @@ import os
 from dotenv import load_dotenv
 from Thunder.utils.logger import logger
 
-# Load environment variables from config.env
 load_dotenv("config.env")
 
 def str_to_bool(val: str) -> bool:
@@ -28,8 +27,8 @@ class Var:
 
     # Bot identity and performance
     NAME: str = os.getenv("NAME", "ThunderF2L")
-    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "30"))
-    WORKERS: int = int(os.getenv("WORKERS", "100"))
+    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "120"))
+    WORKERS: int = int(os.getenv("WORKERS", "8"))
     TIMEOUT: int = int(os.getenv("TIMEOUT", "90"))
 
     # Channel for file storage

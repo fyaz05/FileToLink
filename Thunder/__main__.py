@@ -139,8 +139,6 @@ async def start_services():
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
-        print(f" ✓ Web Server started at {bind_address}:{Var.PORT}")
-        
 
         asyncio.create_task(ping_server())
         print(" ✓ Keep-alive service started")

@@ -1,8 +1,8 @@
 aiohttp
 cloudscraper
 Jinja2
+kurigram
 motor
 psutil
-pyrotgfork
-PyTgCrypto
 python-dotenv
+tgcrypto
