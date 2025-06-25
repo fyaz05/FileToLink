@@ -7,7 +7,7 @@ from Thunder.vars import Var
 from Thunder.bot import StreamBot
 from Thunder.utils.file_properties import get_fids, get_uniqid, get_fname
 from Thunder.server.exceptions import InvalidHash
-from Thunder.utils.error_handling import log_errors
+from Thunder.utils.logger import logger
 
 template_env = Environment(
     loader=FileSystemLoader('Thunder/template'),
@@ -17,33 +17,36 @@ template_env = Environment(
     optimized=True
 )
 
-@log_errors
 async def render_page(id: int, secure_hash: str, requested_action: str | None = None) -> str:
-    message = await StreamBot.get_messages(chat_id=int(Var.BIN_CHANNEL), message_ids=id)
-    if not message:
-        raise InvalidHash("Message not found")
-    
-    file_unique_id = get_uniqid(message)
-    file_name = get_fname(message)
-    
-    if not file_unique_id or file_unique_id[:6] != secure_hash:
-        raise InvalidHash
-    
-    quoted_filename = urllib.parse.quote(file_name.replace('/', '_'))
-    src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{id}/{quoted_filename}')
-    safe_filename = html_module.escape(file_name)
-    if requested_action == 'stream':
-        template = template_env.get_template('req.html')
-        context = {
-            'tag': "video",
-            'heading': f"View {safe_filename}",
-            'file_name': safe_filename,
-            'src': src
-        }
-    else:
-        template = template_env.get_template('dl.html')
-        context = {
-            'file_name': safe_filename,
-            'src': src
-        }
-    return await template.render_async(**context)
+    try:
+        message = await StreamBot.get_messages(chat_id=int(Var.BIN_CHANNEL), message_ids=id)
+        if not message:
+            raise InvalidHash("Message not found")
+        
+        file_unique_id = get_uniqid(message)
+        file_name = get_fname(message)
+        
+        if not file_unique_id or file_unique_id[:6] != secure_hash:
+            raise InvalidHash
+        
+        quoted_filename = urllib.parse.quote(file_name.replace('/', '_'))
+        src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{id}/{quoted_filename}')
+        safe_filename = html_module.escape(file_name)
+        if requested_action == 'stream':
+            template = template_env.get_template('req.html')
+            context = {
+                'tag': "video",
+                'heading': f"View {safe_filename}",
+                'file_name': safe_filename,
+                'src': src
+            }
+        else:
+            template = template_env.get_template('dl.html')
+            context = {
+                'file_name': safe_filename,
+                'src': src
+            }
+        return await template.render_async(**context)
+    except Exception as e:
+        logger.error(f"Error in render_page for ID {id} and hash {secure_hash}: {e}", exc_info=True)
+        raise

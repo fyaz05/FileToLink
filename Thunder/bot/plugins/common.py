@@ -34,9 +34,10 @@ async def retry(func, *args, **kwargs):
 async def reply(msg: Message, **kwargs):
     return await msg.reply_text(**kwargs, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
 
-@check_banned
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, msg: Message):
+    if not await check_banned(bot, msg):
+        return
     user = msg.from_user
     if user:
         await log_newusr(bot, user.id, user.first_name)
@@ -124,9 +125,10 @@ async def start_command(bot: Client, msg: Message):
     
     await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
-@check_banned
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, msg: Message):
+    if not await check_banned(bot, msg):
+        return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
     
@@ -140,9 +142,10 @@ async def help_command(bot: Client, msg: Message):
     btns.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
     await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
-@check_banned
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, msg: Message):
+    if not await check_banned(bot, msg):
+        return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
     
@@ -201,10 +204,12 @@ async def send_file_dc(msg: Message, file_msg: Message):
         logger.error(f"File DC error: {e}")
         await reply_user_err(msg, MSG_DC_FILE_ERROR)
 
-@check_banned
-@force_channel_check
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, msg: Message):
+    if not await check_banned(bot, msg):
+        return
+    if not await force_channel_check(bot, msg):
+        return
     if not msg.from_user and not msg.reply_to_message:
         return await reply_user_err(msg, MSG_DC_ANON_ERROR)
     
@@ -232,10 +237,12 @@ async def dc_command(bot: Client, msg: Message):
     else:
         await reply_user_err(msg, MSG_DC_ANON_ERROR)
 
-@check_banned
-@force_channel_check
 @StreamBot.on_message(filters.command("ping") & filters.private)
 async def ping_command(bot: Client, msg: Message):
+    if not await check_banned(bot, msg):
+        return
+    if not await force_channel_check(bot, msg):
+        return
     start = time.time()
     sent = await retry(reply, msg, text=MSG_PING_START)
     end = time.time()

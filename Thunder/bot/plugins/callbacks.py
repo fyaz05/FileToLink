@@ -72,8 +72,9 @@ async def about_callback(client: Client, callback_query: CallbackQuery):
         await callback_query.answer("An error occurred. Please try again.", show_alert=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^restart_broadcast$"))
-@owner_only
 async def restart_broadcast_callback(client: Client, callback_query: CallbackQuery):
+    if not await owner_only(client, callback_query):
+        return
     try:
         await callback_query.answer(MSG_ERROR_BROADCAST_RESTART, show_alert=True)
         buttons = [
