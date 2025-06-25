@@ -1,148 +1,124 @@
 # Thunder/utils/bot_utils.py
 
 import asyncio
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any, Callable
 from urllib.parse import quote
 
-from pyrogram import Client, enums
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, CallbackQuery, LinkPreviewOptions, ReplyParameters
+from pyrogram import Client
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, LinkPreviewOptions
 from pyrogram.enums import ChatMemberStatus
+from pyrogram.errors import FloodWait
 
 from Thunder.vars import Var
 from Thunder.utils.database import db
 from Thunder.utils.human_readable import humanbytes
-from Thunder.utils.retry_api import retry_send_message
 from Thunder.utils.logger import logger
-from Thunder.utils.error_handling import log_errors
 from Thunder.utils.messages import (
     MSG_BUTTON_GET_HELP,
     MSG_NEW_USER,
     MSG_DC_UNKNOWN,
-    MSG_DC_USER_INFO,
-    MSG_LINKS,
-    MSG_BUTTON_STREAM_NOW,
-    MSG_BUTTON_DOWNLOAD
+    MSG_DC_USER_INFO
 )
-from Thunder.utils.file_properties import get_name, get_media_file_size, get_hash
+from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
 from Thunder.utils.shortener import shorten
 
-@log_errors
-async def notify_channel(bot: Client, text: str):
-    if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        await bot.send_message(chat_id=Var.BIN_CHANNEL, text=text)
 
-@log_errors
-async def notify_owner(client: Client, text: str):
-    owner_ids = Var.OWNER_ID
-    tasks = [retry_send_message(client, oid, text) for oid in (owner_ids if isinstance(owner_ids, (list, tuple, set)) else [owner_ids])]
+async def handle_flood_wait(func: Callable, *args, **kwargs):
+    try:
+        return await func(*args, **kwargs)
+    except FloodWait as e:
+        logger.debug(f"FloodWait in {func.__name__}: {e.value}s. Retrying...")
+        await asyncio.sleep(e.value)
+        try:
+            return await func(*args, **kwargs)
+        except Exception as retry_error:
+            logger.error(f"Retry failed in {func.__name__}: {retry_error}")
+            return None
+    except Exception as e:
+        logger.error(f"Error in {func.__name__}: {e}")
+        return None
+
+
+async def notify_ch(cli: Client, txt: str):
+    if not (hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0):
+        return
+    await handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=txt)
+
+
+async def notify_own(cli: Client, txt: str):
+    o_ids = Var.OWNER_ID if isinstance(Var.OWNER_ID, (list, tuple, set)) else [Var.OWNER_ID]
+    tasks = [handle_flood_wait(cli.send_message, chat_id=oid, text=txt) for oid in o_ids]
     if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        tasks.append(retry_send_message(client, Var.BIN_CHANNEL, text))
+        tasks.append(handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=txt))
     await asyncio.gather(*tasks, return_exceptions=True)
 
-@log_errors
-async def handle_user_error(message: Message, error_msg: str):
-    await retry_send_message(
-        message._client,
-        message.chat.id,
-        error_msg,
-        reply_parameters=ReplyParameters(message_id=message.id),
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]
-        ])
+
+async def reply_user_err(msg: Message, err_txt: str):
+    await handle_flood_wait(
+        msg.reply_text,
+        text=err_txt,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
+        link_preview_options=LinkPreviewOptions(is_disabled=True)
     )
 
-@log_errors
-async def log_new_user(bot: Client, user_id: int, first_name: str):
-    if not await db.is_user_exist(user_id):
-        await db.add_user(user_id)
+
+async def log_newusr(cli: Client, uid: int, fname: str):
+    try:
+        if await db.is_user_exist(uid):
+            return
+        await db.add_user(uid)
         if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-            await retry_send_message(
-                bot,
-                Var.BIN_CHANNEL,
-                MSG_NEW_USER.format(first_name=first_name, user_id=user_id)
-            )
+            await handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
+    except Exception as e:
+        logger.error(f"Database error in log_newusr for user {uid}: {e}")
 
-@log_errors
-async def generate_media_links(log_msg: Message, shortener: bool = True) -> Tuple[str, str, str, str]:
+
+async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
     base_url = Var.URL.rstrip("/")
-    file_id = log_msg.id
-    media_name = get_name(log_msg)
-    if isinstance(media_name, bytes):
-        media_name = media_name.decode('utf-8', errors='replace')
-    else:
-        media_name = str(media_name)
-    media_size = humanbytes(get_media_file_size(log_msg))
-    file_name_encoded = quote(media_name)
-    hash_value = get_hash(log_msg)
-    stream_link = f"{base_url}/watch/{hash_value}{file_id}/{file_name_encoded}"
-    online_link = f"{base_url}/{hash_value}{file_id}/{file_name_encoded}"
+    fid = fwd_msg.id
+    m_name_raw = get_fname(fwd_msg)
+    m_name = m_name_raw.decode('utf-8', errors='replace') if isinstance(m_name_raw, bytes) else str(m_name_raw)
+    m_size_hr = humanbytes(get_fsize(fwd_msg))
+    enc_fname = quote(m_name)
+    f_hash = get_hash(fwd_msg)
+    slink = f"{base_url}/watch/{f_hash}{fid}/{enc_fname}"
+    olink = f"{base_url}/{f_hash}{fid}/{enc_fname}"
+    
     if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
-        shortened_results = await asyncio.gather(
-            shorten(stream_link),
-            shorten(online_link),
-            return_exceptions=True
-        )
-        if not isinstance(shortened_results[0], Exception):
-            stream_link = shortened_results[0]
-        if not isinstance(shortened_results[1], Exception):
-            online_link = shortened_results[1]
-    return stream_link, online_link, media_name, media_size
+        try:
+            s_results = await asyncio.gather(shorten(slink), shorten(olink), return_exceptions=True)
+            if not isinstance(s_results[0], Exception):
+                slink = s_results[0]
+            else:
+                logger.warning(f"Failed to shorten stream_link: {s_results[0]}")
+            if not isinstance(s_results[1], Exception):
+                olink = s_results[1]
+            else:
+                logger.warning(f"Failed to shorten online_link: {s_results[1]}")
+        except Exception as e:
+            logger.error(f"Error during link shortening: {e}")
+    
+    return {"stream_link": slink, "online_link": olink, "media_name": m_name, "media_size": m_size_hr}
 
-@log_errors
-async def send_links_to_user(client: Client, command_message: Message, media_name: str, media_size: str, stream_link: str, online_link: str):
-    msg_text = MSG_LINKS.format(
-        file_name=media_name,
-        file_size=media_size,
-        download_link=online_link,
-        stream_link=stream_link
-    )
-    await retry_send_message(
-        client,
-        command_message.chat.id,
-        msg_text,
-        reply_parameters=ReplyParameters(message_id=command_message.id),
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
-        parse_mode=enums.ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=stream_link),
-                InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=online_link)
-            ]
-        ])
-    )
 
-@log_errors
-async def generate_dc_text(user: User) -> str:
-    dc_id = user.dc_id if user.dc_id is not None else MSG_DC_UNKNOWN
-    return MSG_DC_USER_INFO.format(
-        user_name=user.first_name or 'User',
-        user_id=user.id,
-        dc_id=dc_id
-    )
+async def gen_dc_txt(usr: User) -> str:
+    dc_id_val = usr.dc_id if usr.dc_id is not None else MSG_DC_UNKNOWN
+    return MSG_DC_USER_INFO.format(user_name=usr.first_name or 'User', user_id=usr.id, dc_id=dc_id_val)
 
-@log_errors
-async def get_user_safely(bot: Client, query) -> Optional[User]:
-    if isinstance(query, str):
-        if query.startswith('@'):
-            return await bot.get_users(query)
-        elif query.isdigit():
-            return await bot.get_users(int(query))
-    elif isinstance(query, int):
-        return await bot.get_users(query)
+
+async def get_user(cli: Client, qry: Any) -> Optional[User]:
+    if isinstance(qry, str):
+        if qry.startswith('@'):
+            return await handle_flood_wait(cli.get_users, qry)
+        elif qry.isdigit():
+            return await handle_flood_wait(cli.get_users, int(qry))
+    elif isinstance(qry, int):
+        return await handle_flood_wait(cli.get_users, qry)
     return None
 
-@log_errors
-async def check_admin_privileges(client: Client, chat_id: int) -> bool:
-    member = await client.get_chat_member(chat_id, client.me.id)
-    return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
 
-@log_errors
-async def _execute_command_from_callback(client: Client, callback_query: CallbackQuery, command_name: str, command_func):
-    await callback_query.answer()
-    mock_message = callback_query.message
-    mock_message.from_user = callback_query.from_user
-    mock_message.chat = callback_query.message.chat
-    mock_message.text = f"/{command_name}"
-    mock_message.command = [command_name]
-    await command_func(client, mock_message)
+async def is_admin(cli: Client, chat_id_val: int) -> bool:
+    member = await handle_flood_wait(cli.get_chat_member, chat_id_val, cli.me.id)
+    if member is None:
+        return False
+    return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]

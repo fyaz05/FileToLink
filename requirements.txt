@@ -1,15 +1,8 @@
-aiofiles
 aiohttp
-aiocache
-apscheduler
-cachetools
 cloudscraper
-dnspython
 Jinja2
 kurigram
 motor
 psutil
-pyromod
 python-dotenv
-requests
 tgcrypto

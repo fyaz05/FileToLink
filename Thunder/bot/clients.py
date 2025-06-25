@@ -8,40 +8,35 @@ from Thunder.bot import multi_clients, work_loads, StreamBot
 from Thunder.utils.logger import logger
 
 
+async def cleanup_clients():
+    for client in multi_clients.values():
+        try:
+            await client.stop()
+        except Exception as e:
+            logger.error(f"Error stopping client: {e}")
+
 async def initialize_clients():
-    """Initializes multiple Pyrogram client instances based on tokens found in the environment."""
-    
-    logger.info("╔═══════════════ INITIALIZING PRIMARY CLIENT ═══════════════╗")
+    print("╠══════════════════ INITIALIZING CLIENTS ═══════════════════╣")
     multi_clients[0] = StreamBot
     work_loads[0] = 0
-    logger.info("✓ Primary client initialized successfully")
-    logger.info("╚═══════════════════════════════════════════════════════════╝")
-    
-    # Parse tokens from the environment
-    logger.info("╔═══════════════ PARSING ADDITIONAL TOKENS ═════════════════╗")
+    print("   ✓ Primary client initialized")
+    print("╠════════════════════ ADDITIONAL TOKENS ════════════════════╣")
     try:
         all_tokens = TokenParser().parse_from_env()
         if not all_tokens:
-            logger.info("▶ No additional clients found. Default client will be used.")
-            logger.info("╚═══════════════════════════════════════════════════════════╝")
+            print("   ◎ No additional clients found.")
             return
     except Exception as e:
-        logger.error(f"▶ Error parsing additional tokens: {e}")
-        logger.info("▶ Default client will be used.")
-        logger.info("╚═══════════════════════════════════════════════════════════╝")
+        logger.error(f"   ✖ Error parsing additional tokens: {e}")
+        print("   ▶ Primary client will be used.")
         return
 
-    logger.info(f"▶ Found {len(all_tokens)} additional tokens")
-    logger.info("╚═══════════════════════════════════════════════════════════╝")
+    print(f"   ▶ Found {len(all_tokens)} additional tokens")
 
     async def start_client(client_id, token):
-        """Starts an individual Pyrogram client."""
         try:
-            logger.info(f"▶ Initializing Client ID: {client_id}...")
             if client_id == len(all_tokens):
                 await asyncio.sleep(2)
-                logger.info("▶ This is the last client. Initialization may take a while, please wait...")
-
             client = await Client(
                 name=str(client_id),
                 api_id=Var.API_ID,
@@ -52,38 +47,27 @@ async def initialize_clients():
                 in_memory=True
             ).start()
             work_loads[client_id] = 0
-            logger.info(f"✓ Client ID {client_id} started successfully")
+            print(f"   ◎ Client ID {client_id} started")
             return client_id, client
         except Exception as e:
-            logger.error(f"✖ Failed to start Client ID {client_id}. Error: {e}")
+            logger.error(f"   ✖ Failed to start Client ID {client_id}. Error: {e}")
             return None
 
-    # Start all clients concurrently and filter out any that failed
-    logger.info("╔═════════════ STARTING ADDITIONAL CLIENTS ═════════════════╗")
     clients = await asyncio.gather(*[start_client(i, token) for i, token in all_tokens.items() if token])
-    clients = [client for client in clients if client]  # Filter out None values
+    clients = [client for client in clients if client]
 
-    # Update the global multi_clients dictionary
     multi_clients.update(dict(clients))
     
     if len(multi_clients) > 1:
         Var.MULTI_CLIENT = True
-        logger.info("╔════════════════ MULTI-CLIENT SUMMARY ══════════════════╗")
-        logger.info(f"✓ Multi-Client Mode Enabled")
-        logger.info(f"✓ Total Clients: {len(multi_clients)} (Including primary client)")
+        print("╠══════════════════════ MULTI-CLIENT ═══════════════════════╣")
+        print(f"   ◎ Total Clients: {len(multi_clients)} (Including primary client)")
         
-        # Display workload distribution
-        logger.info("▶ Initial workload distribution:")
+        print("   ▶ Initial workload distribution:")
         for client_id, load in work_loads.items():
-            logger.info(f"  • Client {client_id}: {load} tasks")
+            print(f"   • Client {client_id}: {load} tasks")
             
-        logger.info("╚════════════════════════════════════════════════════════╝")
     else:
-        logger.info("╔════════════════════════════════════════════════════════╗")
-        logger.info("▶ No additional clients were initialized")
-        logger.info("▶ Default client will handle all requests")
-        logger.info("╚════════════════════════════════════════════════════════╝")
-
-    logger.info("╔════════════════════════════════════════════════════════╗")
-    logger.info("✓ Client initialization completed successfully")
-    logger.info("╚════════════════════════════════════════════════════════╝")
+        print("╠═══════════════════════════════════════════════════════════╣")
+        print("   ▶ No additional clients were initialized")
+        print("   ▶ Primary client will handle all requests")

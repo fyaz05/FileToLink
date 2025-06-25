@@ -215,7 +215,7 @@ python -m Thunder
 | `/shell`       | Execute a shell command (Use with extreme caution!).                 |
 | `/users`       | Show total number of users.                                          |
 | `/authorize`   | Permanently authorize a user to use the bot (bypasses token system). |
-| `/unauthorize` | Remove permanent authorization from a user.                          |
+| `/deauthorize` | Remove permanent authorization from a user.                          |
 | `/listauth`    | List all permanently authorized users.                              |
 
 ### Commands for @BotFather
@@ -239,7 +239,7 @@ restart - (Admin) Restart the bot
 shell - (Admin) Execute a shell command
 users - (Admin) Show total number of users
 authorize - (Admin) Grant permanent access to a user
-unauthorize - (Admin) Remove permanent access from a user
+deauthorize - (Admin) Remove permanent access from a user
 listauth - (Admin) List all authorized users
 ```
 

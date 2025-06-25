@@ -1,10 +1,10 @@
 # Thunder/utils/shortener.py
 
+import cloudscraper
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from random import random, choice
 from urllib.parse import quote
-import cloudscraper
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
 

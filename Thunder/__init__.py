@@ -2,8 +2,5 @@
 
 import time
 
-# Record the start time of the module
 StartTime = time.time()
-
-# Define the version
-__version__ = "1.8.5"
+__version__ = "1.9.0"

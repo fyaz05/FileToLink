@@ -17,7 +17,7 @@ MSG_ERROR_START_BOT = "⚠️ You need to start the bot in private first to use 
 MSG_ERROR_REPLY_FILE = "⚠️ Please use the /link command in reply to a file."
 MSG_ERROR_NO_FILE = "⚠️ The message you're replying to does not contain any file."
 MSG_ERROR_INVALID_NUMBER = "⚠️ **Invalid number specified.**"
-MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and 100.**"
+MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and {max_files}.**"
 MSG_ERROR_DM_FAILED = "⚠️ I couldn't send you a Direct Message. Please start the bot first."
 
 # ------ File & Media Errors ------
@@ -104,7 +104,7 @@ MSG_DEAUTHORIZE_SUCCESS = (
 )
 MSG_TOKEN_ACTIVATED = "✅ Token successfully activated!\n\n⏳ This token is valid for {duration_hours} hours."
 MSG_TOKEN_VERIFIED = "🎉 **Token Verified!** You're all set to use the bot's features."
-MSG_TOKEN_INVALID = "Access to this feature requires an active token. Please click the button below to activate your access token."
+MSG_TOKEN_INVALID = "🚫 **Expired or Invalid Token.** Please click the button below to activate your access token."
 MSG_NO_AUTH_USERS = "ℹ️ **No Authorized Users Found:** The list is currently empty."
 MSG_AUTH_USER_INFO = """{i}. 👤 User ID: `{user_id}`
    • Authorized by: `{authorized_by}`
@@ -129,7 +129,7 @@ MSG_ADMIN_SHELL_STDERR_PLAIN = "[stderr]:\n{error}\n"
 MSG_SHELL_OUTPUT_FILENAME = "shell_output.txt"
 
 # ------ Admin View & Control ------
-MSG_ADMIN_RESTART_BROADCAST = "🔄 Restart Broadcast"
+MSG_ADMIN_RESTART_BROADCAST = "♻️ Restart Broadcast"
 MSG_ADMIN_CANCEL_BROADCAST = "🛑 Cancel Broadcast"
 MSG_ADMIN_CANCEL_BROADCAST_BUTTON_TEXT = "ID: {broadcast_id} | Progress: {progress} | Time: {elapsed}"
 MSG_ADMIN_BOT_WORKLOAD_HEADER = "🤖 **Bot Workload Distribution:**\n\n"
@@ -188,20 +188,19 @@ MSG_HELP = (
     "> 2. I'll instantly reply with your links! ⚡\n\n"
     "**👥 Using in Groups:**\n"
     "> • Reply to any file with `/link`.\n"
-    "> • **Batch Mode:** Reply to the *first* file with `/link <number>` (e.g., `/link 5` for 5 files, up to 100).\n"
+    "> • **Batch Mode:** Reply to the *first* file with `/link <number>` (e.g., `/link 5` for 5 files, up to {max_files}).\n"
     "> • Bot needs administrator rights in the group to function.\n"
-    "> • Links are posted in the group & sent to you privately (if you have started a chat with me).\n"
-    "> • *Optional:* If the bot is an admin with delete rights, it can be configured to auto-link new files.\n\n"
+    "> • Links are posted in the group & sent to you privately.\n\n"
     "**📢 Using in Channels:**\n"
     "> • Add me as an administrator with necessary permissions.\n"
     "> • I can be configured to auto-detect new media files.\n"
     "> • Inline stream/download buttons can be added to files automatically.\n"
     "> • Files from banned channels (owner configuration) are rejected.\n"
-    "> • Auto-posting links for new files is a configurable option.\n\n"
+    "> • Auto-posting links if the bot has admin privileges with delete rights.\n\n"
     "**⚙️ Available Commands:**\n"
     "> `/start` 👋 - Welcome message & quick start information.\n"
     "> `/help` 📖 - Shows this help message.\n"
-    "> `/link <num>` 🔗 - (Groups) Generate links. For batch processing: `/link <number>` (1-100 files).\n"
+    "> `/link <num>` 🔗 - (Groups) Generate links. For batch processing: `/link <number>` (1-{max_files} files).\n"
     "> `/about` ℹ️ - Learn more about me and my features.\n"
     "> `/ping` 📡 - Check my responsiveness and online status.\n"
     "> `/dc` 🌍 - View DC information (for yourself, another user, or a file).\n\n"
@@ -262,7 +261,7 @@ MSG_LINKS = (
     "📂 **File Size:** `{file_size}`\n\n"
     "🔗 **Download Link:**\n`{download_link}`\n\n"
     "🖥️ **Stream Link:**\n`{stream_link}`\n\n"
-    "⌛️ *Note: Links remain active while the bot is running and the file is accessible.*"
+    "⌛️ **Note: Links remain active while the bot is running and the file is accessible.**"
 )
 
 # =====================================================================================
@@ -300,7 +299,7 @@ MSG_NEW_FILE_REQUEST = (
 )
 
 # ------ Batch Processing ------
-MSG_PROCESSING_BATCH = "🔄 **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
+MSG_PROCESSING_BATCH = "♻️ **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_PROCESSING_WARNING = "⚠️ **Warning:** Too many files failed processing. Please try again with fewer files or contact support."
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
@@ -308,7 +307,7 @@ MSG_DM_BATCH_PREFIX = "📬 **Batch Links from {chat_title}**\n"
 MSG_LINK_FROM_GROUP = "📬 **Links from {chat_title}**\n\n{links_message}"
 MSG_PROCESSING_RESULT = "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
 MSG_PROCESSING_ERROR = "❌ **Error Processing Files:** {error}\n\n{processed}/{total} files were processed (ID: {error_id})"
-MSG_RETRYING_FILES = "🔄 **Retrying {count} Failed Files...**"
+MSG_RETRYING_FILES = "♻️ **Retrying {count} Failed Files...**"
 
 # =====================================================================================
 # ====== BROADCAST MESSAGES ======
@@ -347,7 +346,7 @@ MSG_BROADCAST_FAILED = (
 MSG_INVALID_BROADCAST_CMD = "Please reply to the message you want to broadcast."
 MSG_NO_ACTIVE_BROADCASTS = "ℹ️ **No Active Broadcasts:** Nothing to cancel at the moment."
 MSG_BROADCAST_NOT_FOUND = "⚠️ **Broadcast Not Found:** This broadcast is no longer active or has finished."
-MSG_MULTIPLE_BROADCASTS = "🔄 **Multiple Broadcasts Active:** Select one to cancel:"
+MSG_MULTIPLE_BROADCASTS = "♻️ **Multiple Broadcasts Active:** Select one to cancel:"
 MSG_CANCELLING_BROADCAST = "🛑 **Cancelling Broadcast:** `{broadcast_id}`\n\n> ⏳ Stopping operations... Please wait."
 
 # =====================================================================================
@@ -383,7 +382,7 @@ MSG_FILE_TYPE_UNKNOWN = "❓ Unknown File Type"
 # ====== SYSTEM & STATUS MESSAGES (Bot Health, Logs, Stats) ======
 # =====================================================================================
 
-MSG_RESTARTING = "🔄 **Restarting Bot...**\n\n> ⏳ Please wait a moment."
+MSG_RESTARTING = "♻️ **Restarting Bot...**\n\n> ⏳ Please wait a moment."
 MSG_LOG_FILE_CAPTION = "📄 **System Logs**\n\n> ℹ️ Latest log file"
 MSG_LOG_FILE_EMPTY = "ℹ️ **Log File Empty:** No data found in the log file."
 MSG_LOG_FILE_MISSING = "⚠️ **Log File Missing:** Could not find the log file."
@@ -396,21 +395,26 @@ MSG_SYSTEM_STATUS = (
 )
 MSG_SYSTEM_STATS = (
     "📊 **System Statistics**\n\n"
-    "> 🕒 **Uptime:** `{uptime}`\n\n"
-    "💾 **Storage (Server):**\n"
-    "> 📀 Total: `{total}`\n"
-    "> 📝 Used: `{used}`\n"
-    "> 📭 Free: `{free}`\n\n"
-    "📶 **Network (Server):**\n"
+    "> System Uptime: {sys_uptime}\n"
+    "> Bot Uptime: {bot_uptime}\n\n"
+    "⚙️ **Performance:**\n"
+    "> CPU: {cpu_percent}%\n"
+    "> CPU Core: {cpu_cores}\n"
+    "> Frequency: {cpu_freq} GHz\n\n"
+    "💾 **RAM**\n"
+    "> Total: {ram_total}\n"
+    "> Used: {ram_used}\n"
+    "> Free: {ram_free}\n\n"
+    "💽 **Storage:**\n"
+    "> Disk: `{disk_percent}%`\n"
+    "> Total: `{total}`\n"
+    "> Used: `{used}`\n"
+    "> Free: `{free}`\n\n"
+    "📶 **Network:**\n"
     "> 🔺 Upload: `{upload}`\n"
-    "> 🔻 Download: `{download}`\n\n"
+    "> 🔻 Download: `{download}`\n"
 )
-MSG_PERFORMANCE_STATS = (
-    "⚙️ **Performance (Server):**\n"
-    "> 🖥️ CPU: `{cpu_percent}%`\n"
-    "> 🧠 RAM: `{ram_percent}%`\n"
-    "> 📦 Disk: `{disk_percent}%`"
-)
+
 MSG_DB_STATS = "📊 **Database Statistics**\n\n> 👥 **Total Users:** `{total_users}`"
 MSG_BOT_WORKLOAD_ITEM = "🔹 Bot {num}: {load}"
 MSG_BOT_WORKLOAD_TEXT = "   {bot_name}: {load}\n"

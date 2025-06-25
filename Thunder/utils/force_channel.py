@@ -1,34 +1,38 @@
-from typing import Any, Callable, Coroutine
+# Thunder/utils/force_channel.py
+
 from pyrogram import Client
-from pyrogram.enums import ChatMemberStatus
-from pyrogram.errors import UserNotParticipant, ChatAdminRequired, PeerIdInvalid
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from Thunder.vars import Var
-from Thunder.utils.error_handling import log_errors
+from Thunder.utils.logger import logger
+from Thunder.utils.messages import MSG_COMMUNITY_CHANNEL
 
-def force_channel_check(
-    func: Callable[[Client, Message], Coroutine[Any, Any, Any]]
-) -> Callable[[Client, Message], Coroutine[Any, Any, Any]]:
+async def get_force_info(bot: Client):
+    if not Var.FORCE_CHANNEL_ID:
+        return None, None
+    try:
+        chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
+        link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
+        return link, chat.title or "Channel"
+    except Exception as e:
+        logger.error(f"Force channel error: {e}")
+        return None, None
+
+async def force_channel_check(client: Client, message: Message):
+    if not Var.FORCE_CHANNEL_ID:
+        return True
     
-    @log_errors
-    async def wrapper(client: Client, message: Message, *args, **kwargs) -> None:
-        if not Var.FORCE_CHANNEL_ID or message.chat.id == Var.FORCE_CHANNEL_ID:
-            return await func(client, message, *args, **kwargs)
-        try:
-            member = await client.get_chat_member(Var.FORCE_CHANNEL_ID, message.from_user.id)
-            if member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]:
-                return await func(client, message, *args, **kwargs)
-        except UserNotParticipant:
-            pass
-        except (ChatAdminRequired, PeerIdInvalid):
-            return await func(client, message, *args, **kwargs)
-        chat = await client.get_chat(Var.FORCE_CHANNEL_ID)
-        invite_link = f"https://t.me/{chat.username}" if chat.username else chat.invite_link
-        if invite_link:
-            await message.reply(
-                f"Please join {chat.title} to use this bot.",
+    try:
+        await client.get_chat_member(Var.FORCE_CHANNEL_ID, message.from_user.id)
+        return True
+    except:
+        link, title = await get_force_info(client)
+        if link and title:
+            await message.reply_text(
+                MSG_COMMUNITY_CHANNEL.format(channel_title=title),
                 reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Join Channel", url=invite_link)
+                    InlineKeyboardButton("Join", url=link)
                 ]])
             )
-    return wrapper
+        else:
+            await message.reply_text("You must join the channel to use this bot.")
+        return False

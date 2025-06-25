@@ -5,7 +5,6 @@ from typing import Optional, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
-from Thunder.utils.error_handling import log_errors
 
 class Database:
     def __init__(self, uri: str, database_name: str, *args, **kwargs):
@@ -17,102 +16,143 @@ class Database:
         self.authorized_users_col: AsyncIOMotorCollection = self.db.authorized_users
         self.restart_message_col: AsyncIOMotorCollection = self.db.restart_message
 
-    @log_errors
     async def ensure_indexes(self):
-        await self.banned_users_col.create_index("user_id", unique=True)
-        await self.token_col.create_index("token", unique=True)
-        await self.authorized_users_col.create_index("user_id", unique=True)
-        await self.col.create_index("id", unique=True)
-        await self.token_col.create_index("expires_at", expireAfterSeconds=0)
-        await self.token_col.create_index("activated")
-        await self.restart_message_col.create_index("message_id", unique=True)
-        await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
+        try:
+            await self.banned_users_col.create_index("user_id", unique=True)
+            await self.token_col.create_index("token", unique=True)
+            await self.authorized_users_col.create_index("user_id", unique=True)
+            await self.col.create_index("id", unique=True)
+            await self.token_col.create_index("expires_at", expireAfterSeconds=0)
+            await self.token_col.create_index("activated")
+            await self.restart_message_col.create_index("message_id", unique=True)
+            await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
 
-        logger.info("Database indexes ensured.")
+            logger.debug("Database indexes ensured.")
+        except Exception as e:
+            logger.error(f"Error in ensure_indexes: {e}", exc_info=True)
+            raise
 
-    @log_errors
     def new_user(self, user_id: int) -> dict:
-        return {
-            'id': user_id,
-            'join_date': datetime.datetime.utcnow()
-        }
+        try:
+            return {
+                'id': user_id,
+                'join_date': datetime.datetime.utcnow()
+            }
+        except Exception as e:
+            logger.error(f"Error in new_user for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def add_user(self, user_id: int):
-        if not await self.is_user_exist(user_id):
-            await self.col.insert_one(self.new_user(user_id))
-            logger.debug(f"Added new user {user_id} to database.")
+        try:
+            if not await self.is_user_exist(user_id):
+                await self.col.insert_one(self.new_user(user_id))
+                logger.debug(f"Added new user {user_id} to database.")
+        except Exception as e:
+            logger.error(f"Error in add_user for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def add_user_pass(self, user_id: int, ag_pass: str):
-        await self.add_user(user_id)
-        await self.col.update_one({'id': user_id}, {'$set': {'ag_p': ag_pass}})
-        logger.debug(f"Updated password for user {user_id}.")
+        try:
+            await self.add_user(user_id)
+            await self.col.update_one({'id': user_id}, {'$set': {'ag_p': ag_pass}})
+            logger.debug(f"Updated password for user {user_id}.")
+        except Exception as e:
+            logger.error(f"Error in add_user_pass for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def get_user_pass(self, user_id: int) -> Optional[str]:
-        user_data = await self.col.find_one({'id': user_id}, {'ag_p': 1})
-        return user_data.get('ag_p') if user_data else None
+        try:
+            user_data = await self.col.find_one({'id': user_id}, {'ag_p': 1})
+            return user_data.get('ag_p') if user_data else None
+        except Exception as e:
+            logger.error(f"Error in get_user_pass for user {user_id}: {e}", exc_info=True)
+            return None
 
-    @log_errors
     async def is_user_exist(self, user_id: int) -> bool:
-        user = await self.col.find_one({'id': user_id}, {'_id': 1})
-        return bool(user)
+        try:
+            user = await self.col.find_one({'id': user_id}, {'_id': 1})
+            return bool(user)
+        except Exception as e:
+            logger.error(f"Error in is_user_exist for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def total_users_count(self) -> int:
-        return await self.col.count_documents({})
+        try:
+            return await self.col.count_documents({})
+        except Exception as e:
+            logger.error(f"Error in total_users_count: {e}", exc_info=True)
+            return 0
 
-    @log_errors
     async def get_all_users(self):
-        return self.col.find({})
+        try:
+            return self.col.find({})
+        except Exception as e:
+            logger.error(f"Error in get_all_users: {e}", exc_info=True)
+            return []
 
-    @log_errors
     async def delete_user(self, user_id: int):
-        await self.col.delete_one({'id': user_id})
-        logger.info(f"Deleted user {user_id}.")
+        try:
+            await self.col.delete_one({'id': user_id})
+            logger.debug(f"Deleted user {user_id}.")
+        except Exception as e:
+            logger.error(f"Error in delete_user for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def create_index(self):
-        await self.col.create_index("id", unique=True)
-        logger.info("Created index for 'id' on users collection.")
+        try:
+            await self.col.create_index("id", unique=True)
+            logger.debug("Created index for 'id' on users collection.")
+        except Exception as e:
+            logger.error(f"Error in create_index: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def get_active_users(self, days: int = 7):
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-        return self.col.find({'join_date': {'$gte': cutoff}})
+        try:
+            cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+            return self.col.find({'join_date': {'$gte': cutoff}})
+        except Exception as e:
+            logger.error(f"Error in get_active_users: {e}", exc_info=True)
+            return []
 
-    @log_errors
     async def add_banned_user(
         self, user_id: int, banned_by: Optional[int] = None,
         reason: Optional[str] = None, ban_time: Optional[str] = None
     ):
-        ban_data = {
-            "user_id": user_id,
-            "banned_at": datetime.datetime.utcnow(),
-            "banned_by": banned_by,
-            "reason": reason
-        }
-        await self.banned_users_col.update_one(
-            {"user_id": user_id},
-            {"$set": ban_data},
-            upsert=True
-        )
-        logger.info(f"Added/Updated banned user {user_id}. Reason: {reason}")
+        try:
+            ban_data = {
+                "user_id": user_id,
+                "banned_at": datetime.datetime.utcnow(),
+                "banned_by": banned_by,
+                "reason": reason
+            }
+            await self.banned_users_col.update_one(
+                {"user_id": user_id},
+                {"$set": ban_data},
+                upsert=True
+            )
+            logger.debug(f"Added/Updated banned user {user_id}. Reason: {reason}")
+        except Exception as e:
+            logger.error(f"Error in add_banned_user for user {user_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def remove_banned_user(self, user_id: int) -> bool:
-        result = await self.banned_users_col.delete_one({"user_id": user_id})
-        if result.deleted_count > 0:
-            logger.info(f"Removed banned user {user_id}.")
-            return True
-        return False
+        try:
+            result = await self.banned_users_col.delete_one({"user_id": user_id})
+            if result.deleted_count > 0:
+                logger.debug(f"Removed banned user {user_id}.")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error in remove_banned_user for user {user_id}: {e}", exc_info=True)
+            return False
 
-    @log_errors
     async def is_user_banned(self, user_id: int) -> Optional[Dict[str, Any]]:
-        return await self.banned_users_col.find_one({"user_id": user_id})
+        try:
+            return await self.banned_users_col.find_one({"user_id": user_id})
+        except Exception as e:
+            logger.error(f"Error in is_user_banned for user {user_id}: {e}", exc_info=True)
+            return None
 
-    @log_errors
     async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime, activated: bool) -> None:
         try:
             await self.token_col.update_one(
@@ -125,30 +165,38 @@ class Database:
                 },
                 upsert=True
             )
-            logger.info(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
+            logger.debug(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
         except Exception as e:
-            logger.error(f"Error saving main token for user {user_id}: {e}")
+            logger.error(f"Error saving main token for user {user_id}: {e}", exc_info=True)
             raise
 
-    @log_errors
     async def save_broadcast_state(self, broadcast_id, state_data):
-        await self.db.broadcasts.update_one(
-            {"_id": broadcast_id},
-            {"$set": state_data},
-            upsert=True
-        )
-        logger.debug(f"Saved broadcast state for ID {broadcast_id}.")
+        try:
+            await self.db.broadcasts.update_one(
+                {"_id": broadcast_id},
+                {"$set": state_data},
+                upsert=True
+            )
+            logger.debug(f"Saved broadcast state for ID {broadcast_id}.")
+        except Exception as e:
+            logger.error(f"Error in save_broadcast_state for broadcast {broadcast_id}: {e}", exc_info=True)
+            raise
 
-    @log_errors
     async def get_broadcast_state(self, broadcast_id):
-        return await self.db.broadcasts.find_one({"_id": broadcast_id})
+        try:
+            return await self.db.broadcasts.find_one({"_id": broadcast_id})
+        except Exception as e:
+            logger.error(f"Error in get_broadcast_state for broadcast {broadcast_id}: {e}", exc_info=True)
+            return None
 
-    @log_errors
     async def list_active_broadcasts(self):
-        cursor = self.db.broadcasts.find({"is_cancelled": False})
-        return await cursor.to_list(length=None)
+        try:
+            cursor = self.db.broadcasts.find({"is_cancelled": False})
+            return await cursor.to_list(length=None)
+        except Exception as e:
+            logger.error(f"Error in list_active_broadcasts: {e}", exc_info=True)
+            return []
 
-    @log_errors
     async def add_restart_message(self, message_id: int, chat_id: int) -> None:
         try:
             await self.restart_message_col.insert_one({
@@ -156,25 +204,23 @@ class Database:
                 "chat_id": chat_id,
                 "timestamp": datetime.datetime.utcnow()
             })
-            logger.info(f"Added restart message {message_id} for chat {chat_id}.")
+            logger.debug(f"Added restart message {message_id} for chat {chat_id}.")
         except Exception as e:
-            logger.error(f"Error adding restart message {message_id}: {e}")
+            logger.error(f"Error adding restart message {message_id}: {e}", exc_info=True)
 
-    @log_errors
     async def get_restart_message(self) -> Optional[Dict[str, Any]]:
         try:
             return await self.restart_message_col.find_one(sort=[("timestamp", -1)])
         except Exception as e:
-            logger.error(f"Error getting restart message: {e}")
+            logger.error(f"Error getting restart message: {e}", exc_info=True)
             return None
 
-    @log_errors
     async def delete_restart_message(self, message_id: int) -> None:
         try:
             await self.restart_message_col.delete_one({"message_id": message_id})
-            logger.info(f"Deleted restart message {message_id}.")
+            logger.debug(f"Deleted restart message {message_id}.")
         except Exception as e:
-            logger.error(f"Error deleting restart message {message_id}: {e}")
+            logger.error(f"Error deleting restart message {message_id}: {e}", exc_info=True)
 
     async def close(self):
         if self._client:
