@@ -6,7 +6,6 @@ import os
 import queue
 import atexit
 
-# Setup paths
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, 'bot.txt')

@@ -1,8 +1,10 @@
+# Thunder/utils/tokens.py
+
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-import asyncio # Moved from inside generate
-import random # Moved from inside generate
+import asyncio
+import random
 import pyrogram.errors
 from Thunder.utils.database import db
 from Thunder.vars import Var
@@ -26,7 +28,6 @@ async def check(user_id: int) -> bool:
         if user_id in _get_owner_ids():
             logger.debug("Owner access granted")
             return True
-            
         current_time = datetime.utcnow()
         auth_result = await db.authorized_users_col.find_one(
             {"user_id": user_id},
@@ -34,12 +35,10 @@ async def check(user_id: int) -> bool:
         )
         if auth_result:
             return True
-            
         token_result = await db.token_col.find_one(
             {"user_id": user_id, "expires_at": {"$gt": current_time}, "activated": True},
             {"_id": 1}
         )
-        
         access_granted = bool(token_result)
         logger.debug(f"Token validation {'SUCCESS' if access_granted else 'FAILURE'} for user: {user_id}")
         return access_granted
@@ -50,8 +49,6 @@ async def check(user_id: int) -> bool:
 async def generate(user_id: int) -> str:
     try:
         logger.debug(f"Token generation started for user: {user_id}")
-    
-        # Check for an existing unactivated token for this user
         existing_token_doc = await db.token_col.find_one(
             {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.utcnow()}},
             {"token": 1}
@@ -59,19 +56,16 @@ async def generate(user_id: int) -> str:
         if existing_token_doc:
             logger.debug(f"Returning existing unactivated token for user: {user_id}")
             return existing_token_doc["token"]
-
         token_str = secrets.token_urlsafe(32)
         masked_token = f"{token_str[:4]}...{token_str[-4:]}"
         logger.debug(f"Generated new token: {masked_token}")
-        
         max_retries = 3
-        base_delay = 0.5  # seconds
+        base_delay = 0.5
         for attempt in range(max_retries):
             try:
                 ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
                 created_at = datetime.utcnow()
                 expires_at = created_at + timedelta(hours=ttl_hours)
-
                 await db.save_main_token(
                     user_id=user_id,
                     token_value=token_str,
@@ -86,7 +80,6 @@ async def generate(user_id: int) -> str:
                 raise
             except Exception as e:
                 if attempt < max_retries - 1:
-                    # Exponential backoff with jitter
                     delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
                     logger.warning(f"Database error (attempt {attempt+1}/{max_retries}) while saving new token: {e}. Retrying in {delay:.2f} seconds.", exc_info=True)
                     await asyncio.sleep(delay)

@@ -131,9 +131,8 @@ async def owner_only(client, update):
             else:
                 _cached_owner_ids = set()
 
-        # Extract user from either Message or CallbackQuery
         user = None
-        if hasattr(update, 'from_user'): # Covers both Message and CallbackQuery
+        if hasattr(update, 'from_user'):
             user = update.from_user
         else:
             logger.error(f"Unsupported update type or missing from_user in owner_only: {type(update)}")
