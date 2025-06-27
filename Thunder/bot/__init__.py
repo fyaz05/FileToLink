@@ -2,7 +2,6 @@
 
 from pyrogram import Client
 from Thunder.vars import Var
-from os import getcwd
 from Thunder.utils.logger import logger
 
 StreamBot = Client(

@@ -21,7 +21,7 @@ class ByteStreamer:
                 raise FileNotFound(f"Message {message_id} not found")
             return message
         except Exception as e:
-            logger.debug(f"Error fetching message {message_id}: {e}")
+            logger.debug(f"Error fetching message {message_id}: {e}", exc_info=True)
             raise FileNotFound(f"Message {message_id} not found") from e
 
     async def stream_file(self, message_id: int, offset: int = 0, limit: int = 0) -> AsyncGenerator[bytes, None]:
@@ -56,5 +56,5 @@ class ByteStreamer:
             message = await self.get_message(message_id)
             return self.get_file_info_sync(message)
         except Exception as e:
-            logger.debug(f"Error getting file info for {message_id}: {e}")
+            logger.debug(f"Error getting file info for {message_id}: {e}", exc_info=True)
             return {"message_id": message_id, "error": str(e)}

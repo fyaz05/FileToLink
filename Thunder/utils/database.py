@@ -51,22 +51,6 @@ class Database:
             logger.error(f"Error in add_user for user {user_id}: {e}", exc_info=True)
             raise
 
-    async def add_user_pass(self, user_id: int, ag_pass: str):
-        try:
-            await self.add_user(user_id)
-            await self.col.update_one({'id': user_id}, {'$set': {'ag_p': ag_pass}})
-            logger.debug(f"Updated password for user {user_id}.")
-        except Exception as e:
-            logger.error(f"Error in add_user_pass for user {user_id}: {e}", exc_info=True)
-            raise
-
-    async def get_user_pass(self, user_id: int) -> Optional[str]:
-        try:
-            user_data = await self.col.find_one({'id': user_id}, {'ag_p': 1})
-            return user_data.get('ag_p') if user_data else None
-        except Exception as e:
-            logger.error(f"Error in get_user_pass for user {user_id}: {e}", exc_info=True)
-            return None
 
     async def is_user_exist(self, user_id: int) -> bool:
         try:
@@ -98,21 +82,6 @@ class Database:
             logger.error(f"Error in delete_user for user {user_id}: {e}", exc_info=True)
             raise
 
-    async def create_index(self):
-        try:
-            await self.col.create_index("id", unique=True)
-            logger.debug("Created index for 'id' on users collection.")
-        except Exception as e:
-            logger.error(f"Error in create_index: {e}", exc_info=True)
-            raise
-
-    async def get_active_users(self, days: int = 7):
-        try:
-            cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-            return self.col.find({'join_date': {'$gte': cutoff}})
-        except Exception as e:
-            logger.error(f"Error in get_active_users: {e}", exc_info=True)
-            return []
 
     async def add_banned_user(
         self, user_id: int, banned_by: Optional[int] = None,
@@ -170,32 +139,6 @@ class Database:
             logger.error(f"Error saving main token for user {user_id}: {e}", exc_info=True)
             raise
 
-    async def save_broadcast_state(self, broadcast_id, state_data):
-        try:
-            await self.db.broadcasts.update_one(
-                {"_id": broadcast_id},
-                {"$set": state_data},
-                upsert=True
-            )
-            logger.debug(f"Saved broadcast state for ID {broadcast_id}.")
-        except Exception as e:
-            logger.error(f"Error in save_broadcast_state for broadcast {broadcast_id}: {e}", exc_info=True)
-            raise
-
-    async def get_broadcast_state(self, broadcast_id):
-        try:
-            return await self.db.broadcasts.find_one({"_id": broadcast_id})
-        except Exception as e:
-            logger.error(f"Error in get_broadcast_state for broadcast {broadcast_id}: {e}", exc_info=True)
-            return None
-
-    async def list_active_broadcasts(self):
-        try:
-            cursor = self.db.broadcasts.find({"is_cancelled": False})
-            return await cursor.to_list(length=None)
-        except Exception as e:
-            logger.error(f"Error in list_active_broadcasts: {e}", exc_info=True)
-            return []
 
     async def add_restart_message(self, message_id: int, chat_id: int) -> None:
         try:

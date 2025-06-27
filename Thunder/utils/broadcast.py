@@ -18,7 +18,6 @@ from pyrogram.errors import (
     ChatWriteForbidden
 )
 from Thunder.utils.database import db
-from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import *
@@ -56,12 +55,15 @@ async def broadcast_message(client: Client, message: Message):
                 try:
                     await message.reply_to_message.copy(user['id'])
                     stats["success"] += 1
-                except:
+                except Exception as e:
+                    logger.error(f"Error copying message to user {user['id']} after FloodWait: {e}", exc_info=True)
                     stats["failed"] += 1
-            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden):
+            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden) as e:
+                logger.warning(f"User {user['id']} removed due to: {type(e).__name__}", exc_info=True)
                 await db.delete_user(user['id'])
                 stats["deleted"] += 1
-            except:
+            except Exception as e:
+                logger.error(f"Error copying message to user {user['id']}: {e}", exc_info=True)
                 stats["failed"] += 1
         
         await status_msg.delete()

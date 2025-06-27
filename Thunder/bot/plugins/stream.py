@@ -38,7 +38,7 @@ async def fwd_media(m_msg: Message) -> Optional[Message]:
         try:
             return await m_msg.copy(chat_id=Var.BIN_CHANNEL)
         except Exception as retry_e:
-            logger.error(f"Error fwd_media copy on retry after FloodWait: {retry_e}")
+            logger.error(f"Error fwd_media copy on retry after FloodWait: {retry_e}", exc_info=True)
             return None
     except RPCError as e:
         if "MEDIA_CAPTION_TOO_LONG" in str(e):
@@ -46,13 +46,13 @@ async def fwd_media(m_msg: Message) -> Optional[Message]:
             try:
                 return await m_msg.copy(chat_id=Var.BIN_CHANNEL, caption=None)
             except Exception as retry_e:
-                logger.error(f"Error fwd_media copy on retry without caption: {retry_e}")
+                logger.error(f"Error fwd_media copy on retry without caption: {retry_e}", exc_info=True)
                 return None
         else:
-            logger.error(f"Error fwd_media copy: {e}")
+            logger.error(f"Error fwd_media copy: {e}", exc_info=True)
             return None
     except Exception as e:
-        logger.error(f"Error fwd_media copy: {e}")
+        logger.error(f"Error fwd_media copy: {e}", exc_info=True)
         return None
 
 def get_link_buttons(links):
@@ -194,7 +194,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
             )
 
     except Exception as e:
-        logger.error(f"Error in channel_receive_handler: {e}")
+        logger.error(f"Error in channel_receive_handler: {e}", exc_info=True)
         pass
 
 async def process_single(bot: Client, msg: Message, file_msg: Message, status_msg: Message, shortener_val: bool, original_request_msg: Optional[Message] = None):
@@ -285,7 +285,7 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             await asyncio.sleep(e.value + 1)
             messages = await bot.get_messages(msg.chat.id, batch_ids)
         except Exception as e:
-            logger.error(f"Error getting messages in batch: {e}")
+            logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             messages = []
 
         for m in messages:
@@ -330,7 +330,7 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
                     parse_mode=enums.ParseMode.MARKDOWN
                 )
             except Exception as e:
-                logger.error(f"Error sending DM in batch: {e}")
+                logger.error(f"Error sending DM in batch: {e}", exc_info=True)
                 await reply_user_err(msg, MSG_ERROR_DM_FAILED)
 
         if i + 20 < len(links_list):

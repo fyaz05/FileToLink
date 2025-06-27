@@ -43,7 +43,7 @@ class Var:
     NO_PORT: bool = str_to_bool(os.getenv("NO_PORT", "True"))
     CACHE_SIZE: int = int(os.getenv("CACHE_SIZE", "100"))
 
-    OWNER_ID: List[int] = str_to_int_list(os.getenv("OWNER_ID", ""))
+    OWNER_ID: int = int(os.getenv("OWNER_ID", ""))
 
     if not OWNER_ID:
         logger.warning("WARNING: OWNER_ID is empty. No user will have admin access.")

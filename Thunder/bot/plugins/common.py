@@ -24,12 +24,15 @@ from Thunder.utils.messages import *
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.file_properties import get_fsize, get_fname, parse_fid
 
-async def retry(func, *args, **kwargs):
-    try:
-        return await func(*args, **kwargs)
-    except FloodWait as e:
-        await asyncio.sleep(float(e.value) if isinstance(e.value, (int, float)) else 10.0)
-        return await func(*args, **kwargs)
+async def retry(func, *args, max_retries=2, **kwargs):
+    for attempt in range(max_retries):
+        try:
+            return await func(*args, **kwargs)
+        except FloodWait as e:
+            wait_time = float(e.value) if isinstance(e.value, (int, float)) else 10.0
+            logger.debug(f"FloodWait: Retrying in {wait_time}s (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(wait_time)
+    return await func(*args, **kwargs)
 
 async def reply(msg: Message, **kwargs):
     return await msg.reply_text(**kwargs, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
@@ -105,7 +108,7 @@ async def start_command(bot: Client, msg: Message):
             except ValueError:
                 return await retry(reply, msg, text=MSG_START_INVALID_PAYLOAD.format(error_id=str(int(time.time()))[-8:]))
             except Exception as e:
-                logger.error(f"Start error: {e}")
+                logger.error(f"Start error: {e}", exc_info=True)
                 return await reply_user_err(msg, MSG_FILE_ACCESS_ERROR)
     
     txt = MSG_WELCOME.format(user_name=user.first_name if user else "Guest")
@@ -201,7 +204,7 @@ async def send_file_dc(msg: Message, file_msg: Message):
         await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
         
     except Exception as e:
-        logger.error(f"File DC error: {e}")
+        logger.error(f"File DC error: {e}", exc_info=True)
         await reply_user_err(msg, MSG_DC_FILE_ERROR)
 
 @StreamBot.on_message(filters.command("dc"))
