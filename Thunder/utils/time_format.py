@@ -9,8 +9,8 @@ def get_readable_time(seconds: int) -> str:
         result = []
         for suffix, period in _TIME_PERIODS:
             if seconds >= period:
-                value, seconds = divmod(seconds, period)
-                result.append(f"{value}{suffix}")
+                value, seconds = divmod(int(seconds), period)
+                result.append(f"{int(value)}{suffix}")
         return ' '.join(result) if result else '0s'
     except Exception as e:
         logger.error(f"Error in get_readable_time: {e}", exc_info=True)

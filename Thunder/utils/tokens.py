@@ -10,22 +10,13 @@ from Thunder.utils.database import db
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
 
-_OWNER_IDS_CACHE = None
-
-def _get_owner_ids():
-    global _OWNER_IDS_CACHE
-    if _OWNER_IDS_CACHE is None:
-        owner_id = Var.OWNER_ID
-        _OWNER_IDS_CACHE = set(owner_id if isinstance(owner_id, (list, tuple, set)) else [owner_id])
-    return _OWNER_IDS_CACHE
-
 async def check(user_id: int) -> bool:
     try:
         logger.debug(f"Token validation started for user: {user_id}")
         if not getattr(Var, "TOKEN_ENABLED", False):
             logger.debug("Token system disabled - access granted")
             return True
-        if user_id in _get_owner_ids():
+        if user_id == Var.OWNER_ID:
             logger.debug("Owner access granted")
             return True
         current_time = datetime.utcnow()

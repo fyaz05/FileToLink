@@ -125,7 +125,7 @@ class ShortenerSystem:
             self.ready = True
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize ShortenerSystem: {e}")
+            logger.error(f"Failed to initialize ShortenerSystem: {e}", exc_info=True)
             return False
     
     async def short_url(self, url: str) -> str:
@@ -135,7 +135,7 @@ class ShortenerSystem:
         try:
             return await self.plugin.shorten(url, Var.URL_SHORTENER_API_KEY)
         except Exception as e:
-            logger.error(f"Error shortening URL {url}: {e}")
+            logger.error(f"Error shortening URL {url}: {e}", exc_info=True)
             return url
 
 _system = ShortenerSystem()

@@ -1,7 +1,10 @@
 # Thunder/bot/clients.py
 
 import asyncio
+
 from pyrogram import Client
+from pyrogram.errors import FloodWait
+
 from Thunder.vars import Var
 from Thunder.utils.config_parser import TokenParser
 from Thunder.bot import multi_clients, work_loads, StreamBot
@@ -13,7 +16,7 @@ async def cleanup_clients():
         try:
             await client.stop()
         except Exception as e:
-            logger.error(f"Error stopping client: {e}")
+            logger.error(f"Error stopping client: {e}", exc_info=True)
 
 async def initialize_clients():
     print("╠══════════════════ INITIALIZING CLIENTS ═══════════════════╣")
@@ -27,7 +30,7 @@ async def initialize_clients():
             print("   ◎ No additional clients found.")
             return
     except Exception as e:
-        logger.error(f"   ✖ Error parsing additional tokens: {e}")
+        logger.error(f"   ✖ Error parsing additional tokens: {e}", exc_info=True)
         print("   ▶ Primary client will be used.")
         return
 
@@ -37,20 +40,24 @@ async def initialize_clients():
         try:
             if client_id == len(all_tokens):
                 await asyncio.sleep(2)
-            client = await Client(
+            client = Client(
                 name=str(client_id),
                 api_id=Var.API_ID,
                 api_hash=Var.API_HASH,
                 bot_token=token,
                 sleep_threshold=Var.SLEEP_THRESHOLD,
-                no_updates=True,
                 in_memory=True
-            ).start()
+            )
+            try:
+                await client.start()
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.start()
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client
         except Exception as e:
-            logger.error(f"   ✖ Failed to start Client ID {client_id}. Error: {e}")
+            logger.error(f"   ✖ Failed to start Client ID {client_id}. Error: {e}", exc_info=True)
             return None
 
     clients = await asyncio.gather(*[start_client(i, token) for i, token in all_tokens.items() if token])

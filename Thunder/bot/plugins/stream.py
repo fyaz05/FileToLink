@@ -3,17 +3,8 @@
 import asyncio
 from typing import Optional, Dict, Any
 from pyrogram import Client, filters, enums
-from pyrogram.errors import (
-    FloodWait,
-    MessageNotModified,
-    RPCError
-)
-from pyrogram.types import (
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    Message,
-    LinkPreviewOptions
-)
+from pyrogram.errors import FloodWait, MessageNotModified, RPCError
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, LinkPreviewOptions
 from Thunder.bot import StreamBot
 from Thunder.utils.database import db
 from Thunder.utils.messages import *
@@ -21,13 +12,7 @@ from Thunder.utils.logger import logger
 from Thunder.vars import Var
 from Thunder.utils.decorators import check_banned, require_token, get_shortener_status
 from Thunder.utils.force_channel import force_channel_check
-from Thunder.utils.bot_utils import (
-    notify_own,
-    reply_user_err,
-    log_newusr,
-    gen_links,
-    is_admin
-)
+from Thunder.utils.bot_utils import notify_own, reply_user_err, log_newusr, gen_links, is_admin, handle_flood_wait
 
 async def fwd_media(m_msg: Message) -> Optional[Message]:
     try:
@@ -38,7 +23,7 @@ async def fwd_media(m_msg: Message) -> Optional[Message]:
         try:
             return await m_msg.copy(chat_id=Var.BIN_CHANNEL)
         except Exception as retry_e:
-            logger.error(f"Error fwd_media copy on retry after FloodWait: {retry_e}")
+            logger.error(f"Error fwd_media copy on retry after FloodWait: {retry_e}", exc_info=True)
             return None
     except RPCError as e:
         if "MEDIA_CAPTION_TOO_LONG" in str(e):
@@ -46,13 +31,13 @@ async def fwd_media(m_msg: Message) -> Optional[Message]:
             try:
                 return await m_msg.copy(chat_id=Var.BIN_CHANNEL, caption=None)
             except Exception as retry_e:
-                logger.error(f"Error fwd_media copy on retry without caption: {retry_e}")
+                logger.error(f"Error fwd_media copy on retry without caption: {retry_e}", exc_info=True)
                 return None
         else:
-            logger.error(f"Error fwd_media copy: {e}")
+            logger.error(f"Error fwd_media copy: {e}", exc_info=True)
             return None
     except Exception as e:
-        logger.error(f"Error fwd_media copy: {e}")
+        logger.error(f"Error fwd_media copy: {e}", exc_info=True)
         return None
 
 def get_link_buttons(links):
@@ -60,6 +45,21 @@ def get_link_buttons(links):
         InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=links['stream_link']),
         InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=links['online_link'])
     ]])
+
+async def send_link(msg: Message, links: Dict[str, Any]):
+    await handle_flood_wait(
+        msg.reply_text,
+        MSG_LINKS.format(
+            file_name=links['media_name'],
+            file_size=links['media_size'],
+            download_link=links['online_link'],
+            stream_link=links['stream_link']
+        ),
+        quote=True,
+        parse_mode=enums.ParseMode.MARKDOWN,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        reply_markup=get_link_buttons(links)
+    )
 
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
@@ -72,7 +72,8 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
     shortener_val = await get_shortener_status(bot, msg)
     if msg.from_user and not await db.is_user_exist(msg.from_user.id):
         invite_link = f"https://t.me/{bot.me.username}?start=start"
-        await msg.reply_text(
+        await handle_flood_wait(
+            msg.reply_text,
             MSG_ERROR_START_BOT.format(invite_link=invite_link),
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             parse_mode=enums.ParseMode.MARKDOWN,
@@ -82,20 +83,16 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
             quote=True
         )
         return
-
     if msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         if not await is_admin(bot, msg.chat.id):
             await reply_user_err(msg, MSG_ERROR_NOT_ADMIN)
             return
-
     if not msg.reply_to_message:
         await reply_user_err(msg, MSG_ERROR_REPLY_FILE)
         return
-
     if not msg.reply_to_message.media:
         await reply_user_err(msg, MSG_ERROR_NO_FILE)
         return
-
     parts = msg.text.split()
     num_files = 1
     if len(parts) > 1:
@@ -107,8 +104,7 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         except ValueError:
             await reply_user_err(msg, MSG_ERROR_INVALID_NUMBER)
             return
-
-    status_msg = await msg.reply_text(MSG_PROCESSING_REQUEST, quote=True)
+    status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_REQUEST, quote=True)
     shortener_val = kwargs.get('shortener', Var.SHORTEN_MEDIA_LINKS)
     if num_files == 1:
         await process_single(bot, msg, msg.reply_to_message, status_msg, shortener_val)
@@ -133,7 +129,7 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
     if not msg.from_user:
         return
     await log_newusr(bot, msg.from_user.id, msg.from_user.first_name or "")
-    status_msg = await msg.reply_text(MSG_PROCESSING_FILE, quote=True)
+    status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_FILE, quote=True)
     await process_single(bot, msg, msg, status_msg, shortener_val)
 
 @StreamBot.on_message(
@@ -146,27 +142,23 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
 async def channel_receive_handler(bot: Client, msg: Message):
     if hasattr(Var, 'BANNED_CHANNELS') and msg.chat.id in Var.BANNED_CHANNELS:
         try:
-            await bot.leave_chat(msg.chat.id)
+            await handle_flood_wait(bot.leave_chat, msg.chat.id)
         except Exception as e:
             logger.error(f"Error leaving banned channel {msg.chat.id}: {e}")
-            pass
         return
-
     if not await is_admin(bot, msg.chat.id):
         logger.debug(f"Bot is not admin in channel {msg.chat.id} ({msg.chat.title or 'Unknown'}). Ignoring message.")
         return
-
     try:
         stored_msg = await fwd_media(msg)
         if not stored_msg:
             logger.error(f"Failed to forward media from channel {msg.chat.id}. Ignoring.")
             return
-
         shortener_val = await get_shortener_status(bot, msg)
         links = await gen_links(stored_msg, shortener=shortener_val)
-
         source_info = msg.chat.title or "Unknown Channel"
-        await stored_msg.reply_text(
+        await handle_flood_wait(
+            stored_msg.reply_text,
             MSG_NEW_FILE_REQUEST.format(
                 source_info=source_info,
                 id_=msg.chat.id,
@@ -176,26 +168,12 @@ async def channel_receive_handler(bot: Client, msg: Message):
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             quote=True
         )
-
         try:
-            await msg.edit_reply_markup(reply_markup=get_link_buttons(links))
-        except (MessageNotModified, Exception) as edit_e:
-            await msg.reply_text(
-                MSG_LINKS.format(
-                    file_name=links['media_name'],
-                    file_size=links['media_size'],
-                    download_link=links['online_link'],
-                    stream_link=links['stream_link']
-                ),
-                quote=True,
-                parse_mode=enums.ParseMode.MARKDOWN,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                reply_markup=get_link_buttons(links)
-            )
-
+            await handle_flood_wait(msg.edit_reply_markup, reply_markup=get_link_buttons(links))
+        except (MessageNotModified, Exception):
+            await send_link(msg, links)
     except Exception as e:
-        logger.error(f"Error in channel_receive_handler: {e}")
-        pass
+        logger.error(f"Error in channel_receive_handler: {e}", exc_info=True)
 
 async def process_single(bot: Client, msg: Message, file_msg: Message, status_msg: Message, shortener_val: bool, original_request_msg: Optional[Message] = None):
     try:
@@ -203,27 +181,32 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
         if not stored_msg:
             logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
             return None
-
         links = await gen_links(stored_msg, shortener=shortener_val)
-
         if not original_request_msg:
-            await msg.reply_text(
-                MSG_LINKS.format(
-                    file_name=links['media_name'],
-                    file_size=links['media_size'],
-                    download_link=links['online_link'],
-                    stream_link=links['stream_link']
-                ),
-                quote=True,
-                parse_mode=enums.ParseMode.MARKDOWN,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-                reply_markup=get_link_buttons(links)
-            )
-
+            await send_link(msg, links)
+        if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
+            try:
+                single_dm_text = MSG_DM_SINGLE_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + \
+                                MSG_LINKS.format(
+                                    file_name=links['media_name'],
+                                    file_size=links['media_size'],
+                                    download_link=links['online_link'],
+                                    stream_link=links['stream_link']
+                                )
+                await handle_flood_wait(
+                    bot.send_message,
+                    chat_id=msg.from_user.id,
+                    text=single_dm_text,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                    reply_markup=get_link_buttons(links)
+                )
+            except Exception as e:
+                logger.error(f"Error sending DM for single file: {e}", exc_info=True)
+                await reply_user_err(msg, MSG_ERROR_DM_FAILED)
         source_msg = original_request_msg if original_request_msg else msg
         source_info = ""
         source_id = 0
-
         if source_msg.from_user:
             source_info = source_msg.from_user.full_name
             if not source_info:
@@ -232,9 +215,9 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
         elif source_msg.chat.type == enums.ChatType.CHANNEL:
             source_info = source_msg.chat.title or "Unknown Channel"
             source_id = source_msg.chat.id
-        
         if source_info and source_id:
-            await stored_msg.reply_text(
+            await handle_flood_wait(
+                stored_msg.reply_text,
                 MSG_NEW_FILE_REQUEST.format(
                     source_info=source_info,
                     id_=source_id,
@@ -244,9 +227,8 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
                 quote=True
             )
-        
         if status_msg:
-            await status_msg.delete()
+            await handle_flood_wait(status_msg.delete)
         return links
     except Exception as e:
         if status_msg:
@@ -262,13 +244,12 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
     processed = 0
     failed = 0
     links_list = []
-
     for batch_start in range(0, count, 10):
         batch_size = min(10, count - batch_start)
         batch_ids = list(range(start_id + batch_start, start_id + batch_start + batch_size))
-
         try:
-            await status_msg.edit_text(
+            await handle_flood_wait(
+                status_msg.edit_text,
                 MSG_PROCESSING_BATCH.format(
                     batch_number=(batch_start // 10) + 1,
                     total_batches=(count + 9) // 10,
@@ -277,7 +258,6 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             )
         except MessageNotModified:
             pass
-
         try:
             messages = await bot.get_messages(msg.chat.id, batch_ids)
         except FloodWait as e:
@@ -285,9 +265,8 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             await asyncio.sleep(e.value + 1)
             messages = await bot.get_messages(msg.chat.id, batch_ids)
         except Exception as e:
-            logger.error(f"Error getting messages in batch: {e}")
+            logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             messages = []
-
         for m in messages:
             if m and m.media:
                 links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg)
@@ -298,10 +277,10 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
                     failed += 1
             else:
                 failed += 1
-
         if (processed + failed) % 5 == 0 or (processed + failed) == count:
             try:
-                await status_msg.edit_text(
+                await handle_flood_wait(
+                    status_msg.edit_text,
                     MSG_PROCESSING_STATUS.format(
                         processed=processed,
                         total=count,
@@ -310,33 +289,32 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
                 )
             except MessageNotModified:
                 pass
-
     for i in range(0, len(links_list), 20):
         chunk = links_list[i:i+20]
         chunk_text = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{chr(10).join(chunk)}`"
-        await msg.reply_text(
+        await handle_flood_wait(
+            msg.reply_text,
             chunk_text,
             quote=True,
             link_preview_options=LinkPreviewOptions(is_disabled=True),
             parse_mode=enums.ParseMode.MARKDOWN
         )
-
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
             try:
-                await bot.send_message(
+                await handle_flood_wait(
+                    bot.send_message,
                     chat_id=msg.from_user.id,
                     text=MSG_DM_BATCH_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + chunk_text,
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                     parse_mode=enums.ParseMode.MARKDOWN
                 )
             except Exception as e:
-                logger.error(f"Error sending DM in batch: {e}")
+                logger.error(f"Error sending DM in batch: {e}", exc_info=True)
                 await reply_user_err(msg, MSG_ERROR_DM_FAILED)
-
         if i + 20 < len(links_list):
-            await asyncio.sleep(0.3)
-
-    await status_msg.edit_text(
+            await asyncio.sleep(0.5)
+    await handle_flood_wait(
+        status_msg.edit_text,
         MSG_PROCESSING_RESULT.format(
             processed=processed,
             total=count,

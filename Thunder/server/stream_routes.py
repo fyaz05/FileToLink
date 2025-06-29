@@ -123,11 +123,11 @@ async def media_preview(request: web.Request):
         return web.Response(text=rendered_page, content_type='text/html')
         
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error in preview: {type(e).__name__}")
-        raise web.HTTPNotFound(text="Resource not found")
+        logger.debug(f"Client error in preview: {type(e).__name__}", exc_info=True)
+        raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
-        logger.error(f"Preview error {error_id}: {e}")
+        logger.error(f"Preview error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(text="Server error") from e
 
 @routes.get(r"/{path:.+}", allow_head=True)
@@ -215,9 +215,9 @@ async def media_delivery(request: web.Request):
             raise web.HTTPInternalServerError(text="Server error") from e
         
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error: {type(e).__name__}")
-        raise web.HTTPNotFound(text="Resource not found")
+        logger.debug(f"Client error: {type(e).__name__}", exc_info=True)
+        raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
-        logger.error(f"Server error {error_id}: {e}")
+        logger.error(f"Server error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(text="Server error") from e

@@ -1,10 +1,12 @@
 # Thunder/utils/file_properties.py
 
-import time
+import asyncio
+
 from datetime import datetime as dt
 from typing import Any, Optional
 
 from pyrogram.client import Client
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 from pyrogram.file_id import FileId
 
@@ -42,7 +44,6 @@ def parse_fid(message: Message) -> Optional[FileId]:
     return None
 
 def get_fname(msg: Message) -> str:
-    start_time = time.time()
     media = get_media(msg)
     fname = None
     if media:
@@ -70,12 +71,16 @@ def get_fname(msg: Message) -> str:
                 ext = "bin"
         timestamp = dt.now().strftime("%Y%m%d%H%M%S")
         fname = f"Thunder File To Link_{timestamp}.{ext}"
-    latency = time.time() - start_time
     return fname
 
 async def get_fids(client: Client, chat_id: int, message_id: int) -> FileId:
     try:
-        msg = await client.get_messages(chat_id, message_id)
+        try:
+            msg = await client.get_messages(chat_id, message_id)
+        except FloodWait as e:
+            logger.debug(f"FloodWait: get_fids, sleep {e.value}s")
+            await asyncio.sleep(e.value)
+            msg = await client.get_messages(chat_id, message_id)
         if not msg or getattr(msg, 'empty', False):
             raise FileNotFound("Message not found")
         media = get_media(msg)
@@ -85,5 +90,5 @@ async def get_fids(client: Client, chat_id: int, message_id: int) -> FileId:
             return FileId.decode(media.file_id)
         raise FileNotFound("No media in message")
     except Exception as e:
-        logger.error(f"Error in get_fids: {e}")
+        logger.error(f"Error in get_fids: {e}", exc_info=True)
         raise FileNotFound(str(e))

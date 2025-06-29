@@ -9,7 +9,10 @@ import importlib.util
 from aiohttp import web
 from datetime import datetime
 from pathlib import Path
+
 from pyrogram import idle
+from pyrogram.errors import FloodWait
+
 from Thunder import __version__
 from Thunder.bot import StreamBot
 from Thunder.bot.clients import initialize_clients, cleanup_clients
@@ -85,34 +88,48 @@ async def start_services():
 
     print("   ▶ Starting Telegram Bot initialization...")
     try:
-        await StreamBot.start()
-        bot_info = await StreamBot.get_me()
+        try:
+            await StreamBot.start()
+            bot_info = await StreamBot.get_me()
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await StreamBot.start()
+            bot_info = await StreamBot.get_me()
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
             try:
-                await StreamBot.edit_message_text(
-                    chat_id=restart_message_data["chat_id"],
-                    message_id=restart_message_data["message_id"],
-                    text=MSG_ADMIN_RESTART_DONE
-                )
+                try:
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE
+                    )
+                except FloodWait as e:
+                    logger.debug(f"FloodWait in restart message: sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE
+                    )
                 await db.delete_restart_message(restart_message_data["message_id"])
             except Exception as e:
-                logger.error(f"Error processing restart message: {e}")
+                logger.error(f"Error processing restart message: {e}", exc_info=True)
         else:
             pass
 
     except Exception as e:
-        logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}")
+        logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
         return
 
     print("   ▶ Starting Client initialization...")
     try:
         await initialize_clients()
     except Exception as e:
-        logger.error(f"   ✖ Failed to initialize clients: {e}")
+        logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         return
 
     await import_plugins()
@@ -130,7 +147,7 @@ async def start_services():
         token_cleanup_task = asyncio.create_task(schedule_token_cleanup())
 
     except Exception as e:
-        logger.error(f"   ✖ Failed to start Web Server: {e}")
+        logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -147,7 +164,7 @@ async def start_services():
         await idle()
     finally:
         for task in [locals().get("keepalive_task"), locals().get("token_cleanup_task")]:
-            if task is not None:
+            if task:
                 task.cancel()
                 try:
                     await task
@@ -166,12 +183,15 @@ async def start_services():
                 logger.error(f"Error during web server cleanup: {e}")
 
 async def schedule_token_cleanup():
-    try:
-        while True:
+    while True:
+        try:
             await asyncio.sleep(3 * 3600)
             await cleanup_expired_tokens()
-    except asyncio.CancelledError:
-        logger.debug("schedule_token_cleanup cancelled cleanly.")
+        except asyncio.CancelledError:
+            logger.debug("schedule_token_cleanup cancelled cleanly.")
+            break
+        except Exception as e:
+            logger.error(f"Token cleanup error: {e}", exc_info=True)
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
