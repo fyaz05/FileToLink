@@ -17,6 +17,9 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/github/license/fyaz05/FileToLink.svg?color=brightgreen" alt="License">
   </a>
+  <a href="https://t.me/Thunder_Updates">
+    <img src="https://img.shields.io/badge/Telegram-Channel-blue?logo=telegram" alt="Telegram Channel">
+  </a>
 </p>
 
 <hr>
@@ -109,7 +112,7 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `BOT_TOKEN`      | Bot token from @BotFather                   | `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`  |
 | `BIN_CHANNEL`    | Channel ID for storing files (add bot as admin) | `-1001234567890`                    |
 | `OWNER_ID`       | Your Telegram user ID(s) (space-separated)   | `12345678 87654321`                     |
-| `DATABASE_URL`       | MongoDB connection string                | *(empty)* | `mongodb+srv://user:pass@host/db` |
+| `DATABASE_URL`       | MongoDB connection string                | `mongodb+srv://user:pass@host/db` |
 | `OWNER_USERNAME` | Your Telegram username (without @)           | `yourusername`                          |
 | `FQDN`           | Your domain name or server IP                | `files.yourdomain.com`                  |
 | `HAS_SSL`        | Set to "True" if using HTTPS                | `True` or `False`                       |
