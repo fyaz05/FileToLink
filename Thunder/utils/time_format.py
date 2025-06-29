@@ -1,5 +1,7 @@
 # Thunder/utils/time_format.py
 
+from Thunder.utils.logger import logger
+
 _TIME_PERIODS = (('d', 86400), ('h', 3600), ('m', 60), ('s', 1))
 
 def get_readable_time(seconds: int) -> str:

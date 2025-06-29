@@ -78,40 +78,7 @@ async def start_command(bot: Client, msg: Message):
             else:
                 return await retry(reply, msg, text=MSG_TOKEN_INVALID)
             
-            try:
-                mid = int(payload)
-                file_msg = await bot.get_messages(chat_id=Var.BIN_CHANNEL, message_ids=mid)
-                
-                if not file_msg:
-                    return await reply_user_err(msg, MSG_ERROR_FILE_INVALID)
-                
-                file_msg = file_msg[0] if isinstance(file_msg, list) else file_msg
-                if not file_msg:
-                    return await reply_user_err(msg, MSG_ERROR_FILE_INVALID)
-                
-                links = await gen_links(file_msg)
-                btns = [[
-                    InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=links['stream_link']),
-                    InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=links['online_link'])
-                ]]
-                
-                return await retry(reply, msg,
-                    text=MSG_LINKS.format(
-                        file_name=links['media_name'],
-                        file_size=links['media_size'],
-                        download_link=links['online_link'],
-                        stream_link=links['stream_link']
-                    ),
-                    reply_markup=InlineKeyboardMarkup(btns + [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]])
-                )
-                
-            except ValueError:
-                return await retry(reply, msg, text=MSG_START_INVALID_PAYLOAD.format(error_id=str(int(time.time()))[-8:]))
-            except Exception as e:
-                logger.error(f"Start error: {e}", exc_info=True)
-                return await reply_user_err(msg, MSG_FILE_ACCESS_ERROR)
-    
-    txt = MSG_WELCOME.format(user_name=user.first_name if user else "Guest")
+    txt = MSG_WELCOME.format(user_name=user.first_name if user else "Unknown")
     link, title = await get_force_info(bot)
     if link:
         txt += f"\n\n{MSG_COMMUNITY_CHANNEL.format(channel_title=title)}"

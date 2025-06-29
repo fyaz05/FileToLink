@@ -123,7 +123,7 @@ MSG_LOG_FILE_MISSING = "⚠️ **Log File Missing:** Could not find the log file
 # =====================================================================================
 
 MSG_BUTTON_STREAM_NOW = "🖥️ Stream"
-MSG_BUTTON_DOWNLOAD = "📥 Download"
+MSG_BUTTON_DOWNLOAD = "🚀 Download"
 MSG_BUTTON_GET_HELP = "📖 Get Help"
 MSG_BUTTON_CANCEL_BROADCAST = "🛑 Cancel Broadcast"
 MSG_BUTTON_VIEW_PROFILE = "👤 View User Profile"
@@ -200,9 +200,9 @@ MSG_ABOUT = (
 # ------ Ping ------
 MSG_PING_START = "🛰️ **Pinging...** Please wait."
 MSG_PING_RESPONSE = (
-    "🚀 **PONG! Bot is Online!** ⚡\n"
-    "> ⏱️ **Response Time:** {time_taken_ms:.2f} ms\n"
-    "> 🤖 **Bot Status:** `Active & Ready`"
+    "☁️ **PONG! Bot is Online!** ⚡\n\n"
+    "> ⏱️ **Ping:** {time_taken_ms:.2f} ms\n"
+    "> 🤖 **Bot Status:** `Active`"
 )
 
 # ------ DC Info ------
@@ -224,11 +224,12 @@ MSG_DC_FILE_INFO = (
 MSG_DC_UNKNOWN = "Unknown"
 
 # ------ File Link Generation ------
+MSG_DM_SINGLE_PREFIX = "📬 **From {chat_title}**\n"
 MSG_LINKS = (
     "✨ **Your Links are Ready!** ✨\n\n"
     "> `{file_name}`\n\n"
     "📂 **File Size:** `{file_size}`\n\n"
-    "🔗 **Download Link:**\n`{download_link}`\n\n"
+    "🚀 **Download Link:**\n`{download_link}`\n\n"
     "🖥️ **Stream Link:**\n`{stream_link}`\n\n"
     "⌛️ **Note: Links remain active while the bot is running and the file is accessible.**"
 )
@@ -255,7 +256,7 @@ MSG_DEFAULT_FILENAME = "Untitled File"
 MSG_NEW_FILE_REQUEST = (
     "> 👤 **Source:** [{source_info}](tg://user?id={id_})\n"
     "> 🆔 **ID:** `{id_}`\n\n"
-    "🔗 **Download:** `{online_link}`\n\n"
+    "🚀 **Download:** `{online_link}`\n\n"
     "🖥️ **Stream:** `{stream_link}`"
 )
 

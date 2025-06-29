@@ -101,11 +101,20 @@ async def start_services():
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
             try:
-                await StreamBot.edit_message_text(
-                    chat_id=restart_message_data["chat_id"],
-                    message_id=restart_message_data["message_id"],
-                    text=MSG_ADMIN_RESTART_DONE
-                )
+                try:
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE
+                    )
+                except FloodWait as e:
+                    logger.debug(f"FloodWait in restart message: sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE
+                    )
                 await db.delete_restart_message(restart_message_data["message_id"])
             except Exception as e:
                 logger.error(f"Error processing restart message: {e}", exc_info=True)

@@ -10,13 +10,23 @@ from Thunder.vars import Var
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_COMMUNITY_CHANNEL
 
+_force_link = None
+_force_title = None
+
 async def get_force_info(bot: Client):
+    global _force_link, _force_title
+    
     if not Var.FORCE_CHANNEL_ID:
         return None, None
+    
+    if _force_link is not None and _force_title is not None:
+        return _force_link, _force_title
+    
     try:
         chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
-        link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
-        return link, chat.title or "Channel"
+        _force_link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
+        _force_title = chat.title or "Channel"
+        return _force_link, _force_title
     except Exception as e:
         logger.error(f"Force channel error: {e}", exc_info=True)
         return None, None
@@ -24,7 +34,6 @@ async def get_force_info(bot: Client):
 async def force_channel_check(client: Client, message: Message):
     if not Var.FORCE_CHANNEL_ID:
         return True
-    
     try:
         await client.get_chat_member(Var.FORCE_CHANNEL_ID, message.from_user.id)
         return True
