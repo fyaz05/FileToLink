@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg?text=Thunder" alt="Thunder Logo" width="120">
+  <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg" alt="Thunder Logo" width="120">
   <h1 align="center">⚡ Thunder</h1>
 </p>
 
@@ -25,19 +25,19 @@
 <hr>
 
 <p align="center">
-  <a href="#about-the-project">ℹ️ About</a> •
+  <a href="#about-the-project">About</a> •
   <a href="#-features">✨ Features</a> •
   <a href="#-how-it-works">🔍 How It Works</a> •
   <a href="#-prerequisites">📋 Prerequisites</a> •
-  <a href="#-configuration">⚙️ Configuration</a> •
+  <a href="#configuration">Configuration</a> •
   <a href="#-deployment">📦 Deployment</a> •
   <a href="#-usage">📱 Usage</a> •
-  <a href="#-commands">⌨️ Commands</a>
+  <a href="#commands">⌨️ Commands</a>
 </p>
 
 <hr>
 
-## ℹ️ About The Project
+## About The Project
 
 > **Thunder** is a powerful, high-performance Telegram bot that transforms media files into streamable direct links. Share and access files via HTTP(S) links instead of downloading from Telegram, for a seamless media experience.
 
@@ -99,7 +99,7 @@
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Rename `config_sample.env` to `config.env` and edit the following variables:
 
@@ -188,7 +188,7 @@ python -m Thunder
 
 ---
 
-## ⌨️ Commands
+## Commands
 
 ### User Commands
 
