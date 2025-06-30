@@ -15,18 +15,23 @@ from Thunder.utils.broadcast import broadcast_ids
 async def get_force_channel_button(client: Client):
     if not Var.FORCE_CHANNEL_ID:
         return None
-    try:
-        chat = await client.get_chat(Var.FORCE_CHANNEL_ID)
-        invite_link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
-        if invite_link:
-            return [InlineKeyboardButton(
-                MSG_BUTTON_JOIN_CHANNEL.format(channel_title=chat.title or "Channel"),
-                url=invite_link
-            )]
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except Exception as e:
-        logger.error(f"Error getting force channel button: {e}")
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            chat = await client.get_chat(Var.FORCE_CHANNEL_ID)
+            invite_link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
+            if invite_link:
+                return [InlineKeyboardButton(
+                    MSG_BUTTON_JOIN_CHANNEL.format(channel_title=chat.title or "Channel"),
+                    url=invite_link
+                )]
+            break
+        except FloodWait as e:
+            logger.debug(f"FloodWait: Waiting {e.value} seconds (attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(e.value)
+        except Exception as e:
+            logger.error(f"Error getting force channel button: {e}", exc_info=True)
+            break
     return None
 
 @StreamBot.on_callback_query(filters.regex(r"^help_command$"))
@@ -46,7 +51,7 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
     except MessageNotModified:
         pass
     except Exception as e:
-        logger.error(f"Error in help callback: {e}")
+        logger.error(f"Error in help callback: {e}", exc_info=True)
         await callback_query.answer("An error occurred. Please try again.", show_alert=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^about_command$"))
@@ -68,7 +73,7 @@ async def about_callback(client: Client, callback_query: CallbackQuery):
     except MessageNotModified:
         pass
     except Exception as e:
-        logger.error(f"Error in about callback: {e}")
+        logger.error(f"Error in about callback: {e}", exc_info=True)
         await callback_query.answer("An error occurred. Please try again.", show_alert=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^restart_broadcast$"))
@@ -89,7 +94,7 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
             link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
     except Exception as e:
-        logger.error(f"Error in restart broadcast callback: {e}")
+        logger.error(f"Error in restart broadcast callback: {e}", exc_info=True)
         await callback_query.answer("An error occurred. Please try again.", show_alert=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^close_panel$"))
@@ -104,7 +109,7 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
             except Exception:
                 pass
     except Exception as e:
-        logger.error(f"Error in close panel callback: {e}")
+        logger.error(f"Error in close panel callback: {e}", exc_info=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^cancel_"))
 async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
@@ -121,7 +126,7 @@ async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
                 show_alert=True
             )
     except Exception as e:
-        logger.error(f"Error in cancel broadcast callback: {e}")
+        logger.error(f"Error in cancel broadcast callback: {e}", exc_info=True)
         await callback_query.answer("An error occurred. Please try again.", show_alert=True)
 
 @StreamBot.on_callback_query()
@@ -129,4 +134,4 @@ async def fallback_callback(client: Client, callback_query: CallbackQuery):
     try:
         await callback_query.answer(MSG_ERROR_CALLBACK_UNSUPPORTED, show_alert=True)
     except Exception as e:
-        logger.error(f"Error in fallback callback: {e}")
+        logger.error(f"Error in fallback callback: {e}", exc_info=True)

@@ -8,16 +8,12 @@ class TokenParser:
     def __init__(self, config_file: Optional[str] = None):
         self.tokens: Dict[int, str] = {}
         self.config_file = config_file
-        self._env_cache = None
 
     def parse_from_env(self) -> Dict[int, str]:
         try:
-            if self._env_cache is None:
-                self._env_cache = dict(os.environ)
-            
             multi_tokens = {
                 key: value.strip()
-                for key, value in self._env_cache.items()
+                for key, value in os.environ.items()
                 if key.startswith("MULTI_TOKEN") and value.strip()
             }
             

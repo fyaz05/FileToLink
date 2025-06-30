@@ -18,9 +18,7 @@ async def check_banned(client, message: Message):
         if not message.from_user:
             return True
         user_id = message.from_user.id
-        if isinstance(Var.OWNER_ID, int) and user_id == Var.OWNER_ID:
-             return True
-        elif isinstance(Var.OWNER_ID, (list, tuple, set)) and user_id in Var.OWNER_ID:
+        if user_id == Var.OWNER_ID:
              return True
 
         ban_details = await db.is_user_banned(user_id)
@@ -42,7 +40,7 @@ async def check_banned(client, message: Message):
             return False
         return True
     except Exception as e:
-        logger.error(f"Error in check_banned: {e}")
+        logger.error(f"Error in check_banned: {e}", exc_info=True)
         return True
 
 async def require_token(client, message: Message):
@@ -54,22 +52,19 @@ async def require_token(client, message: Message):
             return True
 
         user_id = message.from_user.id
-        is_owner = (isinstance(Var.OWNER_ID, int) and user_id == Var.OWNER_ID) or \
-                   (isinstance(Var.OWNER_ID, (list, tuple, set)) and user_id in Var.OWNER_ID)
-
-        if is_owner or await allowed(user_id) or await check(user_id):
+        if user_id == Var.OWNER_ID or await allowed(user_id) or await check(user_id):
             return True
 
         temp_token_string = None
         try:
             temp_token_string = await generate(user_id)
         except Exception as e:
-            logger.error(f"Failed to generate temporary token for user {user_id} in require_token: {e}")
+            logger.error(f"Failed to generate temporary token for user {user_id} in require_token: {e}", exc_info=True)
             await message.reply_text("Sorry, could not generate an access token link. Please try again later.", quote=True)
             return False
 
         if not temp_token_string:
-            logger.error(f"Temporary token generation returned empty for user {user_id} in require_token.")
+            logger.error(f"Temporary token generation returned empty for user {user_id} in require_token.", exc_info=True)
             await message.reply_text("Sorry, could not generate an access token link. Please try again later.", quote=True)
             return False
 
@@ -82,7 +77,7 @@ async def require_token(client, message: Message):
             if short_url_result:
                 short_url = short_url_result
         except Exception as e:
-            logger.warning(f"Failed to shorten token link for user {user_id}: {e}. Using full link.")
+            logger.warning(f"Failed to shorten token link for user {user_id}: {e}. Using full link.", exc_info=True)
 
         await message.reply_text(
             MSG_TOKEN_INVALID,
@@ -94,11 +89,11 @@ async def require_token(client, message: Message):
         logger.debug(f"Sent temporary token activation link to user {user_id}.")
         return False
     except Exception as e:
-        logger.error(f"Error in require_token: {e}")
+        logger.error(f"Error in require_token: {e}", exc_info=True)
         try:
             await message.reply_text("An error occurred while checking your authorization. Please try again.", quote=True)
         except Exception as inner_e:
-            logger.error(f"Failed to send error message to user in require_token: {inner_e}")
+            logger.error(f"Failed to send error message to user in require_token: {inner_e}", exc_info=True)
         return False
 
 async def get_shortener_status(client, message: Message):
@@ -107,38 +102,25 @@ async def get_shortener_status(client, message: Message):
         use_shortener = getattr(Var, "SHORTEN_MEDIA_LINKS", False)
         if user_id:
             try:
-                is_owner = (isinstance(Var.OWNER_ID, int) and user_id == Var.OWNER_ID) or \
-                           (isinstance(Var.OWNER_ID, (list, tuple, set)) and user_id in Var.OWNER_ID)
-                if is_owner or await allowed(user_id):
+                if user_id == Var.OWNER_ID or await allowed(user_id):
                     use_shortener = False
             except Exception as e:
-                logger.warning(f"Error checking allowed status for user {user_id} in get_shortener_status: {e}. Defaulting shortener behavior.")
+                logger.warning(f"Error checking allowed status for user {user_id} in get_shortener_status: {e}. Defaulting shortener behavior.", exc_info=True)
         return use_shortener
     except Exception as e:
-        logger.error(f"Error in get_shortener_status: {e}")
+        logger.error(f"Error in get_shortener_status: {e}", exc_info=True)
         return getattr(Var, "SHORTEN_MEDIA_LINKS", False)
 
-_cached_owner_ids = None
 async def owner_only(client, update):
-    global _cached_owner_ids
     try:
-        if _cached_owner_ids is None:
-            owner_ids_config = getattr(Var, 'OWNER_ID', [])
-            if isinstance(owner_ids_config, int):
-                _cached_owner_ids = {owner_ids_config}
-            elif isinstance(owner_ids_config, (list, tuple, set)):
-                _cached_owner_ids = set(owner_ids_config)
-            else:
-                _cached_owner_ids = set()
-
         user = None
         if hasattr(update, 'from_user'):
             user = update.from_user
         else:
-            logger.error(f"Unsupported update type or missing from_user in owner_only: {type(update)}")
+            logger.error(f"Unsupported update type or missing from_user in owner_only: {type(update)}", exc_info=True)
             return False
 
-        if not user or user.id not in _cached_owner_ids:
+        if not user or user.id != Var.OWNER_ID:
             if hasattr(update, 'answer'):
                 await update.answer(MSG_ERROR_UNAUTHORIZED, show_alert=True)
             logger.warning(f"Unauthorized access attempt by {user.id if user else 'unknown'} to owner_only function.")
@@ -146,10 +128,10 @@ async def owner_only(client, update):
 
         return True
     except Exception as e:
-        logger.error(f"Error in owner_only: {e}")
+        logger.error(f"Error in owner_only: {e}", exc_info=True)
         try:
             if hasattr(update, 'answer'):
                 await update.answer("An error occurred. Please try again.", show_alert=True)
         except Exception as inner_e:
-            logger.error(f"Failed to send error answer in owner_only: {inner_e}")
+            logger.error(f"Failed to send error answer in owner_only: {inner_e}", exc_info=True)
         return False
