@@ -56,6 +56,8 @@ class Var:
     PORT_SEGMENT: str = "" if NO_PORT else f":{PORT}"
     URL: str = f"{PROTOCOL}://{FQDN}{PORT_SEGMENT}/"
 
+    SET_COMMANDS: bool = str_to_bool(os.getenv("SET_COMMANDS", "True"))
+
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     if not DATABASE_URL:

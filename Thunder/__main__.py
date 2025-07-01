@@ -23,6 +23,7 @@ from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.server import web_server
 from Thunder.vars import Var
+from Thunder.utils.commands import set_commands
 
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
 VERSION = __version__
@@ -97,6 +98,9 @@ async def start_services():
             bot_info = await StreamBot.get_me()
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
+
+        await set_commands()
+        print("   ✓ Bot commands set successfully.")
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:

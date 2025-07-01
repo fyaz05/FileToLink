@@ -230,20 +230,20 @@ Paste the following into the BotFather "Edit Commands" section for your bot:
 
 ```text
 start - Start the bot and get a welcome message
-link - Generate a direct link for a file (supports batch in groups)
-dc - Get the data center (DC) of a user or file
-ping - Check if the bot is online
+link - (Group) Generate a direct link for a file or batch
+dc - Retrieve the data center (DC) information of a user or file
+ping - Check the bot's status and response time
 about - Get information about the bot
 help - Show help and usage instructions
-status - (Admin) Check bot status, uptime, and resource usage
+status - (Admin) View bot details and current workload
+stats - (Admin) View usage statistics and resource consumption
 broadcast - (Admin) Send a message to all users
-stats - (Admin) View usage statistics and analytics
 ban - (Admin) Ban a user
 unban - (Admin) Unban a user
 log - (Admin) Send bot logs
 restart - (Admin) Restart the bot
 shell - (Admin) Execute a shell command
-users - (Admin) Show total number of users
+users - (Admin) Show the total number of users
 authorize - (Admin) Grant permanent access to a user
 deauthorize - (Admin) Remove permanent access from a user
 listauth - (Admin) List all authorized users
