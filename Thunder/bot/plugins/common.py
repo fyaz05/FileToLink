@@ -1,41 +1,24 @@
 # Thunder/bot/plugins/common.py
 
-import asyncio
 import time
 from datetime import datetime, timedelta
+
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait
-from pyrogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    LinkPreviewOptions,
-    Message,
-    User,
-)
+from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                            LinkPreviewOptions, Message, User)
 
 from Thunder.bot import StreamBot
-from Thunder.vars import Var
+from Thunder.utils.bot_utils import (gen_dc_txt, get_user, log_newusr, reply,
+                                     reply_user_err)
 from Thunder.utils.database import db
 from Thunder.utils.decorators import check_banned
+from Thunder.utils.file_properties import get_fname, get_fsize, parse_fid
 from Thunder.utils.force_channel import force_channel_check, get_force_info
-from Thunder.utils.bot_utils import gen_links, log_newusr, reply_user_err, gen_dc_txt, get_user
+from Thunder.utils.handler import handle_flood_wait
+from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import *
-from Thunder.utils.human_readable import humanbytes
-from Thunder.utils.file_properties import get_fsize, get_fname, parse_fid
-
-async def retry(func, *args, max_retries=2, **kwargs):
-    for attempt in range(max_retries):
-        try:
-            return await func(*args, **kwargs)
-        except FloodWait as e:
-            wait_time = float(e.value) if isinstance(e.value, (int, float)) else 10.0
-            logger.debug(f"FloodWait: Retrying in {wait_time}s (attempt {attempt+1}/{max_retries})")
-            await asyncio.sleep(wait_time)
-    return await func(*args, **kwargs)
-
-async def reply(msg: Message, **kwargs):
-    return await msg.reply_text(**kwargs, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
+from Thunder.vars import Var
 
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, msg: Message):
@@ -54,13 +37,13 @@ async def start_command(bot: Client, msg: Message):
             token = await db.token_col.find_one({"token": payload})
             if token:
                 if token["user_id"] != user.id:
-                    return await retry(reply, msg, text=MSG_TOKEN_FAILED.format(
+                    return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_FAILED.format(
                         reason="This activation link is not for your account.",
                         error_id=str(int(time.time()))[-8:]
                     ))
                 
                 if token.get("activated"):
-                    return await retry(reply, msg, text=MSG_TOKEN_FAILED.format(
+                    return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_FAILED.format(
                         reason="Token has already been activated.",
                         error_id=str(int(time.time()))[-8:]
                     ))
@@ -74,9 +57,9 @@ async def start_command(bot: Client, msg: Message):
                 )
                 
                 hrs = round((exp - now).total_seconds() / 3600, 1)
-                return await retry(reply, msg, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hrs))
+                return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hrs))
             else:
-                return await retry(reply, msg, text=MSG_TOKEN_INVALID)
+                return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_INVALID)
             
     txt = MSG_WELCOME.format(user_name=user.first_name if user else "Unknown")
     link, title = await get_force_info(bot)
@@ -93,7 +76,7 @@ async def start_command(bot: Client, msg: Message):
     if link:
         btns.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title), url=link)])
     
-    await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, msg: Message):
@@ -110,7 +93,7 @@ async def help_command(bot: Client, msg: Message):
         btns.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title), url=link)])
     
     btns.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, msg: Message):
@@ -125,7 +108,7 @@ async def about_command(bot: Client, msg: Message):
          InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
     
-    await retry(reply, msg, text=MSG_ABOUT, reply_markup=InlineKeyboardMarkup(btns))
+    await handle_flood_wait(msg.reply_text, text=MSG_ABOUT, reply_markup=InlineKeyboardMarkup(btns))
 
 async def send_user_dc(msg: Message, user: User):
     txt = await gen_dc_txt(user)
@@ -134,7 +117,7 @@ async def send_user_dc(msg: Message, user: User):
         [InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=url)],
         [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
-    await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 async def send_file_dc(msg: Message, file_msg: Message):
     try:
@@ -168,7 +151,7 @@ async def send_file_dc(msg: Message, file_msg: Message):
         )
         
         btns = [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
-        await retry(reply, msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+        await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
         
     except Exception as e:
         logger.error(f"File DC error: {e}", exc_info=True)
@@ -214,7 +197,7 @@ async def ping_command(bot: Client, msg: Message):
     if not await force_channel_check(bot, msg):
         return
     start = time.time()
-    sent = await retry(reply, msg, text=MSG_PING_START)
+    sent = await handle_flood_wait(msg.reply_text, text=MSG_PING_START)
     end = time.time()
     ms = (end - start) * 1000
     
@@ -223,7 +206,7 @@ async def ping_command(bot: Client, msg: Message):
          InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
     
-    await retry(sent.edit_text,
+    await handle_flood_wait(sent.edit_text,
         MSG_PING_RESPONSE.format(time_taken_ms=ms),
         reply_markup=InlineKeyboardMarkup(btns),
         link_preview_options=LinkPreviewOptions(is_disabled=True)

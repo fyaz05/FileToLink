@@ -2,7 +2,6 @@
 
 import asyncio
 import html
-import psutil
 import os
 import shutil
 import sys
@@ -10,17 +9,18 @@ import time
 from datetime import datetime
 from io import BytesIO
 
+import psutil
 from pyrogram import filters
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait
-from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.bot.plugins.common import retry, reply
+from Thunder.utils.bot_utils import reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
+from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import LOG_FILE, logger
 from Thunder.utils.messages import *
@@ -34,13 +34,13 @@ owner_filter = filters.private & filters.user(Var.OWNER_ID)
 async def get_total_users(client: Client, message: Message):
     try:
         total = await db.total_users_count()
-        await retry(reply, message,
+        await reply(message,
                    text=MSG_DB_STATS.format(total_users=total),
                    parse_mode=ParseMode.MARKDOWN,
                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
     except Exception as e:
         logger.error(f"Error in get_total_users: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_DB_ERROR)
+        await reply(message, text=MSG_DB_ERROR)
 
 @StreamBot.on_message(filters.command("broadcast") & owner_filter & filters.reply)
 async def broadcast_handler(client: Client, message: Message):
@@ -57,13 +57,13 @@ async def show_status(client: Client, message: Message):
         
         total_workload = sum(work_loads.values())
         status_text_str = MSG_SYSTEM_STATUS.format(uptime=uptime_str, active_bots=len(multi_clients), total_workload=total_workload, workload_items=workload_items, version=__version__)
-        await retry(reply, message,
+        await reply(message,
                    text=status_text_str,
                    parse_mode=ParseMode.MARKDOWN,
                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
     except Exception as e:
         logger.error(f"Error in show_status: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_STATUS_ERROR)
+        await reply(message, text=MSG_STATUS_ERROR)
 
 @StreamBot.on_message(filters.command("stats") & owner_filter)
 async def show_stats(client: Client, message: Message):
@@ -99,72 +99,69 @@ async def show_stats(client: Client, message: Message):
             download=humanbytes(net_io_counters.bytes_recv)
         )
 
-        await retry(reply, message,
+        await reply(message,
                    text=stats_text_val,
                    parse_mode=ParseMode.MARKDOWN,
                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
     except Exception as e:
         logger.error(f"Error in show_stats: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_STATUS_ERROR)
+        await reply(message, text=MSG_STATUS_ERROR)
 
 @StreamBot.on_message(filters.command("restart") & owner_filter)
 async def restart_bot(client: Client, message: Message):
-    msg = await retry(reply, message, text=MSG_RESTARTING)
+    msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
     os.execv(sys.executable, [sys.executable, "-m", "Thunder"])
 
 @StreamBot.on_message(filters.command("log") & owner_filter)
 async def send_logs(client: Client, message: Message):
     if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
-        await retry(reply, message, text=MSG_LOG_FILE_MISSING if not os.path.exists(LOG_FILE) else MSG_LOG_FILE_EMPTY)
+        await reply(message, text=MSG_LOG_FILE_MISSING if not os.path.exists(LOG_FILE) else MSG_LOG_FILE_EMPTY)
         return
     
     try:
-        await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
+        await handle_flood_wait(message.reply_document, LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
     except Exception as e:
         logger.error(f"Error sending log file: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_ERROR_GENERIC)
+        await reply(message, text=MSG_ERROR_GENERIC)
 
 @StreamBot.on_message(filters.command("authorize") & owner_filter)
 async def authorize_command(client: Client, message: Message):
     if len(message.command) != 2:
-        return await retry(reply, message, text=MSG_AUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
+        return await reply(message, text=MSG_AUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
     
     try:
         user_id = int(message.command[1])
         success = await authorize(user_id, message.from_user.id)
-        await retry(reply, message,
+        await reply(message,
                    text=MSG_AUTHORIZE_SUCCESS.format(user_id=user_id) if success else MSG_AUTHORIZE_FAILED.format(user_id=user_id))
     except ValueError:
-        await retry(reply, message, text=MSG_INVALID_USER_ID)
+        await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
         logger.error(f"Error in authorize_command: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_ERROR_GENERIC)
+        await reply(message, text=MSG_ERROR_GENERIC)
 
 @StreamBot.on_message(filters.command("deauthorize") & owner_filter)
 async def deauthorize_command(client: Client, message: Message):
     if len(message.command) != 2:
-        return await retry(reply, message, text=MSG_DEAUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
+        return await reply(message, text=MSG_DEAUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
     
     try:
         user_id = int(message.command[1])
         success = await deauthorize(user_id)
-        await retry(reply, message,
+        await reply(message,
                    text=MSG_DEAUTHORIZE_SUCCESS.format(user_id=user_id) if success else MSG_DEAUTHORIZE_FAILED.format(user_id=user_id))
     except ValueError:
-        await retry(reply, message, text=MSG_INVALID_USER_ID)
+        await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
         logger.error(f"Error in deauthorize_command: {e}", exc_info=True)
-        await retry(reply, message, text=MSG_ERROR_GENERIC)
+        await reply(message, text=MSG_ERROR_GENERIC)
 
 @StreamBot.on_message(filters.command("listauth") & owner_filter)
 async def list_authorized_command(client: Client, message: Message):
     users = await list_allowed()
     if not users:
-        return await retry(reply, message, text=MSG_NO_AUTH_USERS)
+        return await reply(message, text=MSG_NO_AUTH_USERS)
     
     text = MSG_ADMIN_AUTH_LIST_HEADER
     for i, user in enumerate(users, 1):
@@ -174,7 +171,7 @@ async def list_authorized_command(client: Client, message: Message):
             auth_time=user['authorized_at']
         )
     
-    await retry(reply, message,
+    await reply(message,
                text=text,
                parse_mode=ParseMode.MARKDOWN,
                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
@@ -182,12 +179,12 @@ async def list_authorized_command(client: Client, message: Message):
 @StreamBot.on_message(filters.command("ban") & owner_filter)
 async def ban_user_command(client: Client, message: Message):
     if len(message.command) < 2:
-        return await retry(reply, message, text=MSG_BAN_USAGE)
+        return await reply(message, text=MSG_BAN_USAGE)
     
     try:
         user_id = int(message.command[1])
         if user_id == Var.OWNER_ID:
-            return await retry(reply, message, text=MSG_CANNOT_BAN_OWNER)
+            return await reply(message, text=MSG_CANNOT_BAN_OWNER)
         
         reason = " ".join(message.command[2:]) or MSG_ADMIN_NO_BAN_REASON
         await db.add_banned_user(
@@ -201,47 +198,41 @@ async def ban_user_command(client: Client, message: Message):
         if reason != MSG_ADMIN_NO_BAN_REASON:
             text += MSG_BAN_REASON_SUFFIX.format(reason=reason)
         
-        await retry(reply, message, text=text)
+        await reply(message, text=text)
         
         try:
-            await client.send_message(user_id, MSG_USER_BANNED_NOTIFICATION)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.send_message(user_id, MSG_USER_BANNED_NOTIFICATION)
+            await handle_flood_wait(client.send_message, user_id, MSG_USER_BANNED_NOTIFICATION)
         except Exception as e:
             logger.warning(f"Could not notify banned user {user_id}: {e}", exc_info=True)
             
     except ValueError:
-        await retry(reply, message, text=MSG_INVALID_USER_ID)
+        await reply(message, text=MSG_INVALID_USER_ID)
 
 @StreamBot.on_message(filters.command("unban") & owner_filter)
 async def unban_user_command(client: Client, message: Message):
     if len(message.command) != 2:
-        return await retry(reply, message, text=MSG_UNBAN_USAGE)
+        return await reply(message, text=MSG_UNBAN_USAGE)
     
     try:
         user_id = int(message.command[1])
         if await db.remove_banned_user(user_id=user_id):
-            await retry(reply, message, text=MSG_ADMIN_USER_UNBANNED.format(user_id=user_id))
+            await reply(message, text=MSG_ADMIN_USER_UNBANNED.format(user_id=user_id))
             try:
-                await client.send_message(user_id, MSG_USER_UNBANNED_NOTIFICATION)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.send_message(user_id, MSG_USER_UNBANNED_NOTIFICATION)
+                await handle_flood_wait(client.send_message, user_id, MSG_USER_UNBANNED_NOTIFICATION)
             except Exception as e:
                 logger.warning(f"Could not notify unbanned user {user_id}: {e}", exc_info=True)
         else:
-            await retry(reply, message, text=MSG_USER_NOT_IN_BAN_LIST.format(user_id=user_id))
+            await reply(message, text=MSG_USER_NOT_IN_BAN_LIST.format(user_id=user_id))
     except ValueError:
-        await retry(reply, message, text=MSG_INVALID_USER_ID)
+        await reply(message, text=MSG_INVALID_USER_ID)
 
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
     if len(message.command) < 2:
-        return await retry(reply, message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
+        return await reply(message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
     
     command = " ".join(message.command[1:])
-    status_msg = await retry(reply, message,
+    status_msg = await reply(message,
                             text=MSG_SHELL_EXECUTING.format(command=html.escape(command)),
                             parse_mode=ParseMode.HTML)
     
@@ -262,26 +253,14 @@ async def run_shell_command(client: Client, message: Message):
         
         output = output.strip() or MSG_SHELL_NO_OUTPUT
         
-        try:
-            await status_msg.delete()
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await status_msg.delete()
+        await handle_flood_wait(status_msg.delete)
         
         if len(output) > 4096:
             file = BytesIO(output.encode())
             file.name = "shell_output.txt"
-            try:
-                await message.reply_document(file, caption=MSG_SHELL_OUTPUT.format(command=html.escape(command)))
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await message.reply_document(file, caption=MSG_SHELL_OUTPUT.format(command=html.escape(command)))
+            await handle_flood_wait(message.reply_document, file, caption=MSG_SHELL_OUTPUT.format(command=html.escape(command)))
         else:
-            try:
-                await retry(reply, message, text=output, parse_mode=ParseMode.HTML)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await retry(reply, message, text=output, parse_mode=ParseMode.HTML)
+            await reply(message, text=output, parse_mode=ParseMode.HTML)
             
     except Exception as e:
-        await status_msg.edit_text(MSG_SHELL_ERROR.format(error=html.escape(str(e))), parse_mode=ParseMode.HTML)
+        await handle_flood_wait(status_msg.edit_text, MSG_SHELL_ERROR.format(error=html.escape(str(e))), parse_mode=ParseMode.HTML)
