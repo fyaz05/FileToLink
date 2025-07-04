@@ -1,39 +1,36 @@
 # Thunder/utils/broadcast.py
 
+import asyncio
 import os
 import time
-import asyncio
+
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
-from pyrogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message
-)
-from pyrogram.errors import (
-    FloodWait,
-    UserDeactivated,
-    UserIsBlocked,
-    PeerIdInvalid,
-    ChatWriteForbidden
-)
+from pyrogram.errors import (ChatWriteForbidden, PeerIdInvalid, UserDeactivated,
+                             UserIsBlocked)
+from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                            Message)
+
 from Thunder.utils.database import db
-from Thunder.utils.time_format import get_readable_time
+from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import *
+from Thunder.utils.time_format import get_readable_time
+
 
 broadcast_ids = {}
 
 async def broadcast_message(client: Client, message: Message):
     if not message.reply_to_message:
-        await message.reply_text(MSG_INVALID_BROADCAST_CMD)
+        await handle_flood_wait(message.reply_text, MSG_INVALID_BROADCAST_CMD)
         return
     
     broadcast_id = os.urandom(3).hex()
     stats = {"total": 0, "success": 0, "failed": 0, "deleted": 0, "cancelled": False}
     broadcast_ids[broadcast_id] = stats
     
-    status_msg = await message.reply_text(
+    status_msg = await handle_flood_wait(
+        message.reply_text,
         MSG_BROADCAST_START,
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton(MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}")
@@ -48,15 +45,9 @@ async def broadcast_message(client: Client, message: Message):
             if stats["cancelled"]:
                 break
             try:
-                await message.reply_to_message.copy(user['id'])
-                stats["success"] += 1
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                try:
-                    await message.reply_to_message.copy(user['id'])
+                if await handle_flood_wait(message.reply_to_message.copy, user['id']):
                     stats["success"] += 1
-                except Exception as e:
-                    logger.error(f"Error copying message to user {user['id']} after FloodWait: {e}", exc_info=True)
+                else:
                     stats["failed"] += 1
             except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden) as e:
                 logger.warning(f"User {user['id']} removed due to: {type(e).__name__}", exc_info=True)
@@ -66,8 +57,9 @@ async def broadcast_message(client: Client, message: Message):
                 logger.error(f"Error copying message to user {user['id']}: {e}", exc_info=True)
                 stats["failed"] += 1
         
-        await status_msg.delete()
-        await message.reply_text(
+        await handle_flood_wait(status_msg.delete)
+        await handle_flood_wait(
+            message.reply_text,
             MSG_BROADCAST_COMPLETE.format(
                 elapsed_time=get_readable_time(int(time.time() - start_time)),
                 total_users=stats["total"],

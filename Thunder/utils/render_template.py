@@ -1,12 +1,14 @@
 # Thunder/utils/render_template.py
 
-import urllib.parse
 import html as html_module
+import urllib.parse
 
 from jinja2 import Environment, FileSystemLoader
+
 from Thunder.bot import StreamBot
 from Thunder.server.exceptions import InvalidHash
-from Thunder.utils.file_properties import get_uniqid, get_fname
+from Thunder.utils.file_properties import get_fname, get_uniqid
+from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
 
@@ -20,7 +22,7 @@ template_env = Environment(
 
 async def render_page(id: int, secure_hash: str, requested_action: str | None = None) -> str:
     try:
-        message = await StreamBot.get_messages(chat_id=int(Var.BIN_CHANNEL), message_ids=id)
+        message = await handle_flood_wait(StreamBot.get_messages, chat_id=int(Var.BIN_CHANNEL), message_ids=id)
         if not message:
             raise InvalidHash("Message not found")
         

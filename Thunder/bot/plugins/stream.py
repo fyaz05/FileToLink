@@ -1,42 +1,33 @@
 # Thunder/bot/plugins/stream.py
 
 import asyncio
-from typing import Optional, Dict, Any
-from pyrogram import Client, filters, enums
-from pyrogram.errors import FloodWait, MessageNotModified, RPCError
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, LinkPreviewOptions
+from typing import Any, Dict, Optional
+
+from pyrogram import Client, enums, filters
+from pyrogram.errors import MessageNotModified
+from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                            LinkPreviewOptions, Message)
+
 from Thunder.bot import StreamBot
+from Thunder.utils.bot_utils import (gen_links, is_admin, log_newusr, notify_own,
+                                     reply_user_err)
 from Thunder.utils.database import db
-from Thunder.utils.messages import *
-from Thunder.utils.logger import logger
-from Thunder.vars import Var
-from Thunder.utils.decorators import check_banned, require_token, get_shortener_status
+from Thunder.utils.decorators import (check_banned, get_shortener_status,
+                                      require_token)
 from Thunder.utils.force_channel import force_channel_check
-from Thunder.utils.bot_utils import notify_own, reply_user_err, log_newusr, gen_links, is_admin, handle_flood_wait
+from Thunder.utils.handler import handle_flood_wait
+from Thunder.utils.logger import logger
+from Thunder.utils.messages import *
+from Thunder.vars import Var
+
 
 async def fwd_media(m_msg: Message) -> Optional[Message]:
     try:
-        return await m_msg.copy(chat_id=Var.BIN_CHANNEL)
-    except FloodWait as e:
-        logger.debug(f"FloodWait: fwd_media copy, sleep {e.value}s")
-        await asyncio.sleep(e.value + 1)
-        try:
-            return await m_msg.copy(chat_id=Var.BIN_CHANNEL)
-        except Exception as retry_e:
-            logger.error(f"Error fwd_media copy on retry after FloodWait: {retry_e}", exc_info=True)
-            return None
-    except RPCError as e:
+        return await handle_flood_wait(m_msg.copy, chat_id=Var.BIN_CHANNEL)
+    except Exception as e:
         if "MEDIA_CAPTION_TOO_LONG" in str(e):
             logger.debug(f"MEDIA_CAPTION_TOO_LONG error, retrying without caption: {e}")
-            try:
-                return await m_msg.copy(chat_id=Var.BIN_CHANNEL, caption=None)
-            except Exception as retry_e:
-                logger.error(f"Error fwd_media copy on retry without caption: {retry_e}", exc_info=True)
-                return None
-        else:
-            logger.error(f"Error fwd_media copy: {e}", exc_info=True)
-            return None
-    except Exception as e:
+            return await handle_flood_wait(m_msg.copy, chat_id=Var.BIN_CHANNEL, caption=None)
         logger.error(f"Error fwd_media copy: {e}", exc_info=True)
         return None
 
@@ -232,7 +223,7 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
         return links
     except Exception as e:
         if status_msg:
-            await status_msg.edit_text(MSG_ERROR_PROCESSING_MEDIA)
+            await handle_flood_wait(status_msg.edit_text, MSG_ERROR_PROCESSING_MEDIA)
         if str(e):
             await notify_own(bot, MSG_CRITICAL_ERROR.format(
                 error=str(e),
@@ -259,11 +250,9 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
         except MessageNotModified:
             pass
         try:
-            messages = await bot.get_messages(msg.chat.id, batch_ids)
-        except FloodWait as e:
-            logger.warning(f"FloodWait: process_batch get_messages, sleep {e.value}s")
-            await asyncio.sleep(e.value + 1)
-            messages = await bot.get_messages(msg.chat.id, batch_ids)
+            messages = await handle_flood_wait(bot.get_messages, msg.chat.id, batch_ids)
+            if messages is None:
+                messages = []
         except Exception as e:
             logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             messages = []

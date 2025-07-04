@@ -1,42 +1,25 @@
 # Thunder/utils/bot_utils.py
 
 import asyncio
-from typing import Optional, Dict, Any, Callable
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import quote
 
 from pyrogram import Client
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, User, LinkPreviewOptions
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import FloodWait
+from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
+                            LinkPreviewOptions, Message, User)
 
-from Thunder.vars import Var
 from Thunder.utils.database import db
+from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
+from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import (
-    MSG_BUTTON_GET_HELP,
-    MSG_NEW_USER,
-    MSG_DC_UNKNOWN,
-    MSG_DC_USER_INFO
-)
-from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
+from Thunder.utils.messages import (MSG_BUTTON_GET_HELP, MSG_DC_UNKNOWN,
+                                    MSG_DC_USER_INFO, MSG_NEW_USER)
 from Thunder.utils.shortener import shorten
+from Thunder.vars import Var
 
-
-async def handle_flood_wait(func: Callable, *args, **kwargs):
-    try:
-        return await func(*args, **kwargs)
-    except FloodWait as e:
-        logger.debug(f"FloodWait in {func.__name__}: {e.value}s. Retrying...")
-        await asyncio.sleep(e.value)
-        try:
-            return await func(*args, **kwargs)
-        except Exception as retry_error:
-            logger.error(f"Retry failed in {func.__name__}: {retry_error}")
-            return None
-    except Exception as e:
-        logger.error(f"Error in {func.__name__}: {e}")
-        return None
 
 
 async def notify_ch(cli: Client, txt: str):
@@ -122,3 +105,7 @@ async def is_admin(cli: Client, chat_id_val: int) -> bool:
     if member is None:
         return False
     return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+
+
+async def reply(msg: Message, **kwargs):
+    return await handle_flood_wait(msg.reply_text, **kwargs, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
