@@ -27,7 +27,7 @@ class Var:
         raise ValueError("Missing required Telegram API configuration")
 
     NAME: str = os.getenv("NAME", "ThunderF2L")
-    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "120"))
+    SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "300"))
     WORKERS: int = int(os.getenv("WORKERS", "8"))
     TIMEOUT: int = int(os.getenv("TIMEOUT", "90"))
 
@@ -46,7 +46,7 @@ class Var:
     OWNER_ID: int = int(os.getenv("OWNER_ID", ""))
 
     if not OWNER_ID:
-        logger.warning("WARNING: OWNER_ID is empty. No user will have admin access.")
+        logger.warning("WARNING: OWNER_ID is not set. No user will be granted owner access.")
 
     OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "")
 

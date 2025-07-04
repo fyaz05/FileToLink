@@ -40,12 +40,13 @@ async def initialize_clients():
             if client_id == len(all_tokens):
                 await asyncio.sleep(2)
             client = Client(
-                name=str(client_id),
-                api_id=Var.API_ID,
                 api_hash=Var.API_HASH,
+                api_id=Var.API_ID,
                 bot_token=token,
-                sleep_threshold=Var.SLEEP_THRESHOLD,
-                in_memory=True
+                in_memory=True,
+                name=str(client_id),
+                no_updates=True,
+                sleep_threshold=Var.SLEEP_THRESHOLD
             )
             await handle_flood_wait(client.start)
             work_loads[client_id] = 0

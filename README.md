@@ -43,7 +43,8 @@
 
 **Perfect for:**
 
-- 📤 Download Telegram media at high speed.
+- 🚀 Download Telegram media at high speed.
+- ☁️ Leveraging free unlimited cloud storage with high-speed links.
 - 🎬 Content creators sharing media files.
 - 👥 Communities distributing resources.
 - 🎓 Educational platforms sharing materials.
@@ -53,7 +54,7 @@
 
 ## ✨ Features
 
-### 🚀 Core Functionality
+### 🧠 Core Functionality
 
 - **Generate Direct Links:** Convert Telegram media files into direct streaming links.
 - **Permanent Links:** Links remain active as long as the file exists in the storage channel.
@@ -63,6 +64,7 @@
 - **Channel and Group Support:** Works in private chats, groups, and channels.
 - **MongoDB Integration:** Store user data and info with advanced database capabilities.
 - **HTTP/HTTPS Streaming:** Stream media with custom player support for all devices and browsers.
+- **Flood Wait Handling:** Centralized handling for Telegram flood waits.
 
 ### 🧩 Advanced Features
 
@@ -74,6 +76,7 @@
 - **Custom Domain Support:** Use your own domain for streaming links.
 - **Customizable Templates:** Personalize HTML templates for download pages.
 - **Data Center Info:** Get data center information for users and files.
+- **Auto Set Commands:** Automatically set bot commands on startup.
 
 ### ⚙️ Technical Capabilities
 
@@ -132,7 +135,7 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `MULTI_BOT_TOKENS`   | Additional bot tokens for load balancing | *(empty)* | `MULTI_TOKEN1=`              |
 | `FORCE_CHANNEL_ID`   | Channel ID users must join               | *(empty)* | `-1001234567890`              |
 | `BANNED_CHANNELS`    | Space-separated banned channel IDs       | *(empty)* | `-1001234567890 -100987654321`|
-| `SLEEP_THRESHOLD`    | Threshold for client switching           | `120`      | `30`                          |
+| `SLEEP_THRESHOLD`    | Threshold for client switching           | `300`      | `600`                          |
 | `WORKERS`            | Number of async workers                  | `8`     | `200`                         |
 | `NAME`               | Bot application name                     | `ThunderF2L` | `MyFileBot`                |
 | `BIND_ADDRESS`       | Address to bind web server               | `0.0.0.0` | `127.0.0.1`                   |
@@ -143,6 +146,7 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `SHORTEN_MEDIA_LINKS`| Enable URL shortening for media links   | `False`   | `True`                         |
 | `URL_SHORTENER_API_KEY` | API key for URL shortening service    | `""`      | `"abc123def456"`               |
 | `URL_SHORTENER_SITE` | URL shortening service to use           | `""`      | `"example.com"`                  |
+| `SET_COMMANDS`       | Automatically set bot commands on startup | `True`   | `False`                           |
 
 > ℹ️ For all options, see `config_sample.env`.
 
@@ -226,7 +230,9 @@ python -m Thunder
 
 ### Commands for @BotFather
 
-Paste the following into the BotFather "Edit Commands" section for your bot:
+> If `SET_COMMANDS` is set to `True` in your configuration, the bot will automatically configure these commands.
+
+Paste the following into the BotFather "Edit Commands" section for your bot.
 
 ```text
 start - Start the bot and get a welcome message
