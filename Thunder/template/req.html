@@ -1,164 +1,102 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ heading }}</title>
-
-    <meta name="description" content="Easily share and distribute files">
-    <meta property="og:title" content="Thunder FileToLink">
-    <meta property="og:description" content="File Streamer">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
-    <meta name="theme-color" content="#1a1a2e">
-    <meta name="msapplication-navbutton-color" content="#1a1a2e">
-    <meta name="apple-mobile-web-app-status-bar-style" content="#1a1a2e">
-    <meta name="color-scheme" content="dark light">
-    <meta name="application-name" content="Thunder FileToLink">
-    
-    <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
-    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
-
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
-
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/reqstyle.css">
+  <meta charset="UTF-8" />
+  <title>{{file_name}}</title>
+  <meta name="description" content="Stream high-quality videos and movies in 1080p. Experience seamless playback with multiple player options." />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <!-- External CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css?family=Poppins:400,500,600,700" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.6.12/plyr.css" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://developer-six-dusky.vercel.app/548/551/play.css" rel="stylesheet" />
 </head>
-<body>
-    <div class="loading-overlay" id="loading-overlay">
-        <div class="loading-spinner">
-            <div></div>
-            <div></div>
+
+<body class="bg-dark text-light">
+  <div class="d-flex flex-column min-vh-100">
+    <!-- Header -->
+    <header class="bg-primary text-white py-2 shadow" style="background-color: {{ jisshu_colours.header.background }} !important; color: {{ jisshu_colours.header.color }} !important;">
+      <div class="d-flex justify-content-between align-items-center container">
+        <h1 class="h4 mb-0 fw-bold">{{template_ne}}</h1>
+        <button id="theme-toggle-btn" class="btn btn-light theme-toggle-btn">
+          <i class="fa-solid fa-sun"></i> Light Mode
+        </button>
+      </div>
+    </header>
+    
+    <!-- Main content -->
+    <main class="flex-grow-1 container py-3">
+      <div class="player-wrapper mb-3">
+        <video id="myVideo" src="{{file_url}}" class="w-100" controls>
+          Your browser does not support the video tag.
+        </video>
+        <script src="https://cdn.plyr.io/3.6.12/plyr.js"></script>
+      </div>
+      
+      <div class="d-flex justify-content-between mb-2 flex-wrap gap-2">
+        <a onclick="mx_player()" class="btn btn-primary flex-fill" style="border: none; background-color: {{ jisshu_colours.mx_player.background }}; color: {{ jisshu_colours.mx_player.color }};">
+          <i class="fa fa-play"></i> <b>MX Player</b>
+        </a>
+        <a onclick="vlc_player()" class="btn btn-primary flex-fill" style="border: none; background-color: {{ jisshu_colours.vlc_player.background }}; color: {{ jisshu_colours.vlc_player.color }};">
+          <i class="fa fa-play"></i> <b>VLC Player</b>
+        </a>
+        <a onclick="playit_player()" class="btn btn-primary flex-fill" style="border: none; background-color: {{ jisshu_colours.playit_player.background }}; color: {{ jisshu_colours.playit_player.color }};">
+          <i class="fa fa-play"></i> <b>Play it</b>
+        </a>
+      </div>
+      
+      <div class="row g-3 mb-2">
+        <div class="col-md-6">
+          <a onclick="streamDownload()" class="btn btn-success w-100" style="border: none; background-color: {{ jisshu_colours.download.background }}; color: {{ jisshu_colours.download.color }};">
+            <i class="fa-solid fa-download me-2"></i> Download
+          </a>
         </div>
-    </div>
-    <button class="toggle-dark-mode" onclick="app.toggleDarkMode()" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode"><i class="fas fa-moon"></i></button>
-    <div class="bg-animation"><div class="bg-gradient"></div></div>
-
-    <div class="container">
-        <header class="header">
-            <div class="file-info">
-                <h1 id="file-name">{{ file_name }}</h1>
-                <div class="file-meta"></div>
+      </div>
+      
+      <a id="demo4" onclick="showLinkModal('{{tg_button}}')" class="btn btn-warning w-100 mb-2" style="border: none; background-color: {{ jisshu_colours.create_link.background }}; color: {{ jisshu_colours.create_link.color }};">
+        <i class="fa-brands fa-telegram"></i> Create Like This Link
+      </a>
+      
+      <a onclick="shareButton()" class="btn btn-danger w-100 mb-3" style="border: none; background-color: {{ jisshu_colours.share.background }}; color: {{ jisshu_colours.share.color }};">
+        <i class="fa fa-share-alt"></i> Share Now
+      </a>
+      
+      <div class="card bg-dark text-light border-secondary mb-4" style="background-color: {{ jisshu_colours.file_information.background }}  !important; color: {{ jisshu_colours.file_information.color }}  !important;">
+        <div class="card-header border-secondary">
+          <h5 class="mb-0"><i class="fa-solid fa-circle-info me-2"></i> File Information</h5>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <p><strong>Name: </strong>{{file_name}}</p>
+              <p><strong>Size: </strong>{{file_size}}</p>
             </div>
-        </header>
-
-        <main id="main-content" role="main" aria-label="Main content">
-            <div class="player-container">
-                <{{ tag }} id="player" playsinline controls preload="metadata" controlsList="nodownload">
-                <source src="{{ src }}" type="{{ tag }}/mp4">
-                    Your browser does not support the {{ tag }} tag.
-                </{{ tag }}>
-            </div>
-
-            <section class="controls-section" aria-label="File options">
-                <div class="dropdown-container" id="stream-dropdown-container">
-                    <button type="button" class="action-button secondary-button stream-btn" onclick="app.toggleStreamMenu(event)" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
-                        <i class="fas fa-play-circle" aria-hidden="true"></i><span>Stream</span>
-                    </button>
-                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label">
-                        <div class="stream-menu-header">
-                            <h3>Open with external player</h3>
-                            <button type="button" aria-label="Close menu" onclick="app.closeStreamMenu()" class="stream-menu-close">
-                                <i class="fas fa-times" aria-hidden="true"></i>
-                            </button>
-                        </div>
-                        <div class="stream-menu-content" role="menu">
-                            <div class="stream-category">
-                                <div class="category-heading" role="presentation">
-                                    <i class="fas fa-desktop" aria-hidden="true"></i>
-                                    <span>Desktop Players</span>
-                                </div>
-                                <div class="player-grid">
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('vlc-pc')" title="Open in VLC Player (PC)">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">VLC Player</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('potplayer')" title="Open in PotPlayer">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/pot.png" alt="PotPlayer icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">PotPlayer</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mpc')" title="Open in MPC-HC">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/classic.png" alt="MPC-HC icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MPC-HC</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('kmpc')" title="Open in KM Player (PC)">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">KM Player</span>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="stream-category">
-                                <div class="category-heading" role="presentation">
-                                    <i class="fas fa-mobile-alt" aria-hidden="true"></i>
-                                    <span>Mobile Players</span>
-                                </div>
-                                <div class="player-grid">
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('vlc')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">VLC Mobile</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mxpro')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Pro icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MX Pro</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mx')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MX Player</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('nplayer')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">nPlayer</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('splayer')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">S Player</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('km')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player Mobile icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">KM Player</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <button type="button" class="action-button secondary-button" onclick="app.download()" title="Download the video"><i class="fas fa-cloud-download-alt" aria-hidden="true"></i><span>Download</span></button>
-                <button type="button" class="action-button secondary-button" onclick="app.copyLink()" title="Copy video link"><i class="fas fa-link" aria-hidden="true"></i><span>Copy Link</span></button>
-            </section>
-        </main>
-    </div>
-
-    <footer>
-        <p>Made by AI © 2025 | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer"><i class="fab fa-github" aria-hidden="true"></i> GitHub</a></p>
-    </footer>
-
-    <div class="toast" id="toast" role="alert" aria-live="polite" aria-hidden="true">
-        <div class="toast-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></div>
-        <div class="toast-message">Action completed.</div>
-    </div>
-
-    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/reqscript.js"></script>
+          </div>
+        </div>
+      </div>
+      
+      <div class="alert alert-warning" style="background-color: {{ jisshu_colours.description.background }}; color: {{ jisshu_colours.description.color }};">
+        <h6 class="fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i> Disclaimer</h6>
+        <p class="mb-0">{{jisshu_disclaimer}}</p>
+        <div class="button-container">
+          <a href="{{jisshu_report_link}}" class="report">Report</a>
+        </div>
+      </div>
+  </div>
+  </main>
+  <!-- Footer is now generated via JavaScript -->
+  </div>
+  
+  <!-- External JS -->
+  <script src="https://developer-six-dusky.vercel.app/548/551/play.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      console.log("JS Loaded Successfully");
+    });
+  </script>
 </body>
+
 </html>
