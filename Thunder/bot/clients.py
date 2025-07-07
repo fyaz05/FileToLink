@@ -46,6 +46,7 @@ async def initialize_clients():
                 in_memory=True,
                 name=str(client_id),
                 no_updates=True,
+                max_concurrent_transmissions=1000,
                 sleep_threshold=Var.SLEEP_THRESHOLD
             )
             await handle_flood_wait(client.start)

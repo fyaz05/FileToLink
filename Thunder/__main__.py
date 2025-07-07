@@ -3,10 +3,13 @@
 import asyncio
 import glob
 import importlib.util
-import os
 import sys
 from datetime import datetime
+
+from uvloop import install
 from pathlib import Path
+
+install()
 
 from aiohttp import web
 from pyrogram import idle
