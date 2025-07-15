@@ -6,3 +6,4 @@ motor
 psutil
 python-dotenv
 tgcrypto
+uvloop
