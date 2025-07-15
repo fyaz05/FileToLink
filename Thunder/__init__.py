@@ -3,4 +3,4 @@
 import time
 
 StartTime = time.time()
-__version__ = "1.9.2"
+__version__ = "1.9.3"
