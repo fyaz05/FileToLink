@@ -1,7 +1,7 @@
 # Thunder/server/exceptions.py
 
 class InvalidHash(Exception):
-    message = "Invalid hash"
+    pass
 
 class FileNotFound(Exception):
-    message = "File not found"
+    pass
