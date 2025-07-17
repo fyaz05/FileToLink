@@ -128,7 +128,7 @@ async def media_preview(request: web.Request):
         
     except (InvalidHash, FileNotFound) as e:
         logger.debug(f"Client error in preview: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text=f"Resource not found: {e}") from e
+        raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Preview error {error_id}: {e}", exc_info=True)
@@ -220,7 +220,7 @@ async def media_delivery(request: web.Request):
         
     except (InvalidHash, FileNotFound) as e:
         logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text=f"Resource not found: {e}") from e
+        raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}", exc_info=True)
