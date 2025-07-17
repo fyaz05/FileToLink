@@ -1,10 +1,11 @@
 # Thunder/bot/plugins/stream.py
 
 import asyncio
+import secrets
 from typing import Any, Dict, Optional
 
 from pyrogram import Client, enums, filters
-from pyrogram.errors import MessageNotModified
+from pyrogram.errors import MessageNotModified, MessageDeleteForbidden
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             LinkPreviewOptions, Message)
 
@@ -161,10 +162,16 @@ async def channel_receive_handler(bot: Client, msg: Message):
         )
         try:
             await handle_flood_wait(msg.edit_reply_markup, reply_markup=get_link_buttons(links))
-        except (MessageNotModified, Exception):
+        except MessageNotModified:
+            pass
+        except MessageDeleteForbidden:
+            logger.debug(f"Failed to edit reply markup for message {msg.id} due to permissions. Sending new link instead.")
+            await send_link(msg, links)
+        except Exception as e:
+            logger.error(f"Error editing reply markup for message {msg.id}: {e}", exc_info=True)
             await send_link(msg, links)
     except Exception as e:
-        logger.error(f"Error in channel_receive_handler: {e}", exc_info=True)
+        logger.error(f"Error in channel_receive_handler for message {msg.id}: {e}", exc_info=True)
 
 async def process_single(bot: Client, msg: Message, file_msg: Message, status_msg: Message, shortener_val: bool, original_request_msg: Optional[Message] = None):
     try:
@@ -219,16 +226,29 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
                 quote=True
             )
         if status_msg:
-            await handle_flood_wait(status_msg.delete)
+            try:
+                await handle_flood_wait(status_msg.delete)
+            except MessageDeleteForbidden:
+                logger.debug(f"Failed to delete status message {status_msg.id} due to permissions.")
+            except Exception as e:
+                logger.error(f"Error deleting status message {status_msg.id}: {e}", exc_info=True)
         return links
     except Exception as e:
+        logger.error(f"Error processing single file for message {file_msg.id}: {e}", exc_info=True)
         if status_msg:
-            await handle_flood_wait(status_msg.edit_text, MSG_ERROR_PROCESSING_MEDIA)
-        if str(e):
-            await notify_own(bot, MSG_CRITICAL_ERROR.format(
-                error=str(e),
-                error_id=str(id(e))[:8]
-            ))
+            try:
+                await handle_flood_wait(status_msg.edit_text, MSG_ERROR_PROCESSING_MEDIA)
+            except MessageNotModified:
+                pass
+            except MessageDeleteForbidden:
+                logger.debug(f"Failed to edit status message {status_msg.id} due to permissions.")
+            except Exception as edit_err:
+                logger.error(f"Error editing status message {status_msg.id} after processing error: {edit_err}", exc_info=True)
+        
+        await notify_own(bot, MSG_CRITICAL_ERROR.format(
+            error=str(e),
+            error_id=secrets.token_hex(6)
+        ))
         return None
 
 async def process_batch(bot: Client, msg: Message, start_id: int, count: int, status_msg: Message, shortener_val: bool):

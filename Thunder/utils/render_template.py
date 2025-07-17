@@ -30,7 +30,7 @@ async def render_page(id: int, secure_hash: str, requested_action: str | None = 
         file_name = get_fname(message)
         
         if not file_unique_id or file_unique_id[:6] != secure_hash:
-            raise InvalidHash
+            raise InvalidHash("File unique ID or secure hash mismatch during rendering.")
         
         quoted_filename = urllib.parse.quote(file_name.replace('/', '_'))
         src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{id}/{quoted_filename}')
@@ -38,7 +38,6 @@ async def render_page(id: int, secure_hash: str, requested_action: str | None = 
         if requested_action == 'stream':
             template = template_env.get_template('req.html')
             context = {
-                'tag': "video",
                 'heading': f"View {safe_filename}",
                 'file_name': safe_filename,
                 'src': src

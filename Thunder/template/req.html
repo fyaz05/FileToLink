@@ -5,137 +5,117 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ heading }}</title>
 
+    <!-- Social Meta Tags -->
     <meta name="description" content="Easily share and distribute files">
     <meta property="og:title" content="Thunder FileToLink">
     <meta property="og:description" content="File Streamer">
     <meta property="og:type" content="website">
     <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
+    
+    <!-- Configuration -->
     <meta name="theme-color" content="#1a1a2e">
     <meta name="msapplication-navbutton-color" content="#1a1a2e">
     <meta name="apple-mobile-web-app-status-bar-style" content="#1a1a2e">
     <meta name="color-scheme" content="dark light">
     <meta name="application-name" content="Thunder FileToLink">
     
+    <!-- Icons -->
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
 
+    <!-- External Resources -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
 
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/reqstyle.css">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
 </head>
 <body>
-    <div class="loading-overlay" id="loading-overlay">
-        <div class="loading-spinner">
-            <div></div>
-            <div></div>
-        </div>
+    <button class="theme-toggle button-base" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode">
+        <i class="fas fa-moon" aria-hidden="true"></i>
+    </button>
+
+    <div class="background-animation" aria-hidden="true">
+        <div class="bg-gradient"></div>
     </div>
-    <button class="toggle-dark-mode" onclick="app.toggleDarkMode()" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode"><i class="fas fa-moon"></i></button>
-    <div class="bg-animation"><div class="bg-gradient"></div></div>
 
     <div class="container">
         <header class="header">
             <div class="file-info">
                 <h1 id="file-name">{{ file_name }}</h1>
-                <div class="file-meta"></div>
+                <div class="file-meta" role="group" aria-label="File metadata"></div>
             </div>
         </header>
 
-        <main id="main-content" role="main" aria-label="Main content">
-            <div class="player-container">
-                <{{ tag }} id="player" playsinline controls preload="metadata" controlsList="nodownload">
-                <source src="{{ src }}" type="{{ tag }}/mp4">
-                    Your browser does not support the {{ tag }} tag.
-                </{{ tag }}>
-            </div>
+        <main id="main-content">
+            <section class="player-container" aria-label="Video Player">
+                <video id="player" playsinline preload="metadata" controlsList="nodownload" aria-label="Video player">
+                    <source src="{{ src }}" type="video/mp4" />
+                    <p>Your browser does not support the video tag. Please <a href="{{ src }}" download>download the video</a> instead.</p>
+                </video>
+            </section>
 
-            <section class="controls-section" aria-label="File options">
+            <nav class="controls-section" aria-label="File options">
                 <div class="dropdown-container" id="stream-dropdown-container">
-                    <button type="button" class="action-button secondary-button stream-btn" onclick="app.toggleStreamMenu(event)" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
-                        <i class="fas fa-play-circle" aria-hidden="true"></i><span>Stream</span>
+                    <button type="button" class="action-button button-base secondary-button stream-btn" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
+                        <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+                        <span>Stream</span>
                     </button>
-                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label">
+                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label" role="menu">
                         <div class="stream-menu-header">
                             <h3>Open with external player</h3>
-                            <button type="button" aria-label="Close menu" onclick="app.closeStreamMenu()" class="stream-menu-close">
+                            <button type="button" aria-label="Close menu" class="stream-menu-close button-base">
                                 <i class="fas fa-times" aria-hidden="true"></i>
                             </button>
                         </div>
-                        <div class="stream-menu-content" role="menu">
+                        <div class="stream-menu-content">
                             <div class="stream-category">
-                                <div class="category-heading" role="presentation">
-                                    <i class="fas fa-desktop" aria-hidden="true"></i>
-                                    <span>Desktop Players</span>
-                                </div>
-                                <div class="player-grid">
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('vlc-pc')" title="Open in VLC Player (PC)">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">VLC Player</span>
+                                <h4 class="category-heading"><i class="fas fa-mobile-screen-button" aria-hidden="true"></i> Mobile Players</h4>
+                                <div class="player-grid" role="group" aria-label="Mobile video players">
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="vlc">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">VLC Mobile</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('potplayer')" title="Open in PotPlayer">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/pot.png" alt="PotPlayer icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">PotPlayer</span>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mxpro">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player Pro" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MX Pro</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mpc')" title="Open in MPC-HC">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/classic.png" alt="MPC-HC icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MPC-HC</span>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mx">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MX Player</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('kmpc')" title="Open in KM Player (PC)">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player icon" loading="lazy" width="32" height="32">
-                                        </div>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="nplayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">nPlayer</span>
+                                    </button>
+                                     <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="splayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">S Player</span>
+                                    </button>
+                                     <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="km">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" loading="lazy" width="32" height="32" class="player-icon">
                                         <span class="player-name">KM Player</span>
                                     </button>
                                 </div>
                             </div>
                             <div class="stream-category">
-                                <div class="category-heading" role="presentation">
-                                    <i class="fas fa-mobile-alt" aria-hidden="true"></i>
-                                    <span>Mobile Players</span>
-                                </div>
-                                <div class="player-grid">
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('vlc')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">VLC Mobile</span>
+                                <h4 class="category-heading"><i class="fas fa-desktop" aria-hidden="true"></i> Desktop Players</h4>
+                                <div class="player-grid" role="group" aria-label="Desktop video players">
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="vlc-pc" title="Open in VLC Player (PC)">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">VLC Player</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mxpro')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Pro icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MX Pro</span>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="potplayer" title="Open in PotPlayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/pot.png" alt="PotPlayer" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">PotPlayer</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('mx')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">MX Player</span>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mpc" title="Open in MPC-HC">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/classic.png" alt="MPC-HC" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MPC-HC</span>
                                     </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('nplayer')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">nPlayer</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('splayer')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player icon" loading="lazy" width="32" height="32">
-                                        </div>
-                                        <span class="player-name">S Player</span>
-                                    </button>
-                                    <button type="button" class="player-card dropdown-item" tabindex="0" role="menuitem" onclick="app.playOnline('km')">
-                                        <div class="player-icon">
-                                            <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player Mobile icon" loading="lazy" width="32" height="32">
-                                        </div>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="kmpc" title="Open in KM Player (PC)">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" loading="lazy" width="32" height="32" class="player-icon">
                                         <span class="player-name">KM Player</span>
                                     </button>
                                 </div>
@@ -143,22 +123,31 @@
                         </div>
                     </div>
                 </div>
-                <button type="button" class="action-button secondary-button" onclick="app.download()" title="Download the video"><i class="fas fa-cloud-download-alt" aria-hidden="true"></i><span>Download</span></button>
-                <button type="button" class="action-button secondary-button" onclick="app.copyLink()" title="Copy video link"><i class="fas fa-link" aria-hidden="true"></i><span>Copy Link</span></button>
-            </section>
+                <button type="button" class="action-button button-base secondary-button" title="Download the video" aria-label="Download video file">
+                    <i class="fas fa-cloud-download-alt" aria-hidden="true"></i>
+                    <span>Download</span>
+                </button>
+                <button type="button" class="action-button button-base secondary-button" title="Copy video link" aria-label="Copy video link to clipboard">
+                    <i class="fas fa-copy" aria-hidden="true"></i>
+                    <span>Copy Link</span>
+                </button>
+            </nav>
         </main>
     </div>
 
     <footer>
-        <p>Made by AI © 2025 | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer"><i class="fab fa-github" aria-hidden="true"></i> GitHub</a></p>
+        <p><span id="thunder-text">⚡ Thunder</span> © <span id="current-year"></span> | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer" aria-label="View source code on GitHub"><i class="fab fa-github" aria-hidden="true"></i> <span>GitHub</span></a></p>
     </footer>
 
-    <div class="toast" id="toast" role="alert" aria-live="polite" aria-hidden="true">
-        <div class="toast-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></div>
+    <div class="toast" id="toast" role="alert" aria-live="polite" aria-atomic="true" aria-hidden="true">
+        <div class="toast-icon" aria-hidden="true">
+            <i class="fas fa-info-circle"></i>
+        </div>
         <div class="toast-message">Action completed.</div>
     </div>
 
-    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/reqscript.js"></script>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js" defer></script>
 </body>
 </html>
+

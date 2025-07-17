@@ -36,6 +36,10 @@ async def get_force_info(bot: Client):
 async def force_channel_check(client: Client, message: Message):
     if not Var.FORCE_CHANNEL_ID:
         return True
+    
+    if message.from_user is None:
+        return True
+
     try:
         while True:
             try:

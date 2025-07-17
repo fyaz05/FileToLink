@@ -7,7 +7,7 @@ import time
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
 from pyrogram.errors import (ChatWriteForbidden, PeerIdInvalid, UserDeactivated,
-                             UserIsBlocked)
+                             UserIsBlocked, ChannelInvalid, InputUserDeactivated)
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             Message)
 
@@ -49,8 +49,31 @@ async def broadcast_message(client: Client, message: Message):
                     stats["success"] += 1
                 else:
                     stats["failed"] += 1
-            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden) as e:
-                logger.warning(f"User {user['id']} removed due to: {type(e).__name__}", exc_info=True)
+            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden, ChannelInvalid, InputUserDeactivated) as e:
+                if isinstance(e, ChannelInvalid):
+                    recipient_type = "Channel"
+                    reason = "invalid channel"
+                elif isinstance(e, InputUserDeactivated):
+                    recipient_type = "User"
+                    reason = "deactivated account"
+                elif isinstance(e, UserIsBlocked):
+                    recipient_type = "User"
+                    reason = "blocked the bot"
+                elif isinstance(e, UserDeactivated):
+                    recipient_type = "User"
+                    reason = "deactivated account"
+                elif isinstance(e, PeerIdInvalid):
+                    recipient_type = "Recipient"
+                    reason = "invalid ID"
+                elif isinstance(e, ChatWriteForbidden):
+                    recipient_type = "Chat"
+                    reason = "write forbidden"
+                else:
+                    recipient_type = "Recipient"
+                    reason = f"error: {type(e).__name__}"
+                
+                logger.warning(f"{recipient_type} {user['id']} removed due to {reason}", exc_info=True)
+                
                 await db.delete_user(user['id'])
                 stats["deleted"] += 1
             except Exception as e:

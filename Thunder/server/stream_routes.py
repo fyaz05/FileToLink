@@ -43,7 +43,7 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
             if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
                 return message_id, secure_hash
         except ValueError as e:
-            raise InvalidHash("Invalid message ID format") from e
+            raise InvalidHash(f"Invalid message ID format in path: {e}") from e
     
     match = PATTERN_ID_FIRST.match(clean_path)
     if match:
@@ -52,14 +52,16 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
             secure_hash = query.get("hash", "").strip()
             if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
                 return message_id, secure_hash
+            else:
+                raise InvalidHash("Invalid or missing hash in query parameter")
         except ValueError as e:
-            raise InvalidHash("Invalid message ID format") from e
+            raise InvalidHash(f"Invalid message ID format in path: {e}") from e
     
-    raise InvalidHash("Invalid URL structure")
+    raise InvalidHash("Invalid URL structure or missing hash")
 
 def select_optimal_client() -> tuple[int, ByteStreamer]:
     if not work_loads:
-        raise web.HTTPInternalServerError(text="No available clients")
+        raise web.HTTPInternalServerError(text="No available clients to handle the request. Please try again later.")
     
     available_clients = [(cid, load) for cid, load in work_loads.items() if load < MAX_CONCURRENT_PER_CLIENT]
     
@@ -76,7 +78,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     
     match = RANGE_REGEX.match(range_header)
     if not match:
-        raise web.HTTPBadRequest(text="Invalid range")
+        raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
     
     start = int(match.group("start")) if match.group("start") else 0
     end = int(match.group("end")) if match.group("end") else file_size - 1
@@ -125,12 +127,12 @@ async def media_preview(request: web.Request):
         return web.Response(text=rendered_page, content_type='text/html')
         
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error in preview: {type(e).__name__}", exc_info=True)
+        logger.debug(f"Client error in preview: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Preview error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(text="Server error") from e
+        raise web.HTTPInternalServerError(text=f"Server error occurred: {error_id}") from e
 
 @routes.get(r"/{path:.+}", allow_head=True)
 async def media_delivery(request: web.Request):
@@ -145,14 +147,14 @@ async def media_delivery(request: web.Request):
         try:
             file_info = await streamer.get_file_info(message_id)
             if not file_info.get('unique_id'):
-                raise FileNotFound("File not found")
+                raise FileNotFound("File unique ID not found in info.")
             
             if file_info['unique_id'][:SECURE_HASH_LENGTH] != secure_hash:
-                raise InvalidHash("Invalid hash")
+                raise InvalidHash("Provided hash does not match file's unique ID.")
             
             file_size = file_info.get('file_size', 0)
             if file_size == 0:
-                raise FileNotFound("File size unavailable")
+                raise FileNotFound("File size is reported as zero or unavailable.")
             
             range_header = request.headers.get("Range", "")
             start, end = parse_range_header(range_header, file_size)
@@ -213,13 +215,13 @@ async def media_delivery(request: web.Request):
         except Exception as e:
             work_loads[client_id] -= 1
             error_id = secrets.token_hex(6)
-            logger.error(f"Stream error {error_id}: {e}")
-            raise web.HTTPInternalServerError(text="Server error") from e
+            logger.error(f"Stream error {error_id}: {e}", exc_info=True) # Ensure exc_info is true
+            raise web.HTTPInternalServerError(text=f"Server error during streaming: {error_id}") from e
         
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error: {type(e).__name__}", exc_info=True)
+        logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(text="Server error") from e
+        raise web.HTTPInternalServerError(text=f"An unexpected server error occurred: {error_id}") from e

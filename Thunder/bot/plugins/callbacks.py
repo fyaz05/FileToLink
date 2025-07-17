@@ -1,7 +1,7 @@
 # Thunder/bot/plugins/callbacks.py
 
 from pyrogram import Client, filters
-from pyrogram.errors import MessageNotModified
+from pyrogram.errors import MessageNotModified, MessageDeleteForbidden
 from pyrogram.types import (CallbackQuery, InlineKeyboardButton,
                             InlineKeyboardMarkup, LinkPreviewOptions)
 
@@ -99,15 +99,23 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
 async def close_panel_callback(client: Client, callback_query: CallbackQuery):
     try:
         await handle_flood_wait(callback_query.answer)
-        await handle_flood_wait(callback_query.message.delete)
+        try:
+            await handle_flood_wait(callback_query.message.delete)
+        except MessageDeleteForbidden:
+            logger.debug(f"Failed to delete callback query message due to permissions. Message ID: {callback_query.message.id}")
+        except Exception as e:
+            logger.error(f"Error deleting callback query message: {e}", exc_info=True)
+
         if callback_query.message.reply_to_message:
             try:
                 reply_msg = callback_query.message.reply_to_message
                 await handle_flood_wait(reply_msg.delete)
-            except Exception:
-                pass
+            except MessageDeleteForbidden:
+                logger.debug(f"Failed to delete replied message due to permissions. Message ID: {reply_msg.id}")
+            except Exception as e:
+                logger.error(f"Error deleting replied message: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"Error in close panel callback: {e}", exc_info=True)
+        logger.error(f"General error in close panel callback: {e}", exc_info=True)
 
 @StreamBot.on_callback_query(filters.regex(r"^cancel_"))
 async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
