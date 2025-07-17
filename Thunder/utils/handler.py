@@ -9,8 +9,8 @@ from Thunder.utils.logger import logger
 
 
 async def handle_flood_wait(func: Callable, *args, **kwargs):
-    retries = kwargs.pop('retries', 5)
-    delay = kwargs.pop('delay', 5)
+    retries = kwargs.pop('retries', 3)
+    delay = kwargs.pop('delay', 3)
     
     for i in range(retries):
         try:
