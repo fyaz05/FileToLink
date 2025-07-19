@@ -42,7 +42,7 @@ async def get_total_users(client: Client, message: Message):
         logger.error(f"Error in get_total_users: {e}", exc_info=True)
         await reply(message, text=MSG_DB_ERROR)
 
-@StreamBot.on_message(filters.command("broadcast") & owner_filter & filters.reply)
+@StreamBot.on_message(filters.command("broadcast") & owner_filter)
 async def broadcast_handler(client: Client, message: Message):
     await broadcast_message(client, message)
 

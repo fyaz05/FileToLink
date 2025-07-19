@@ -22,7 +22,6 @@ async def initialize_clients():
     multi_clients[0] = StreamBot
     work_loads[0] = 0
     print("   ✓ Primary client initialized")
-    print("╠════════════════════ ADDITIONAL TOKENS ════════════════════╣")
     try:
         all_tokens = TokenParser().parse_from_env()
         if not all_tokens:
@@ -32,8 +31,6 @@ async def initialize_clients():
         logger.error(f"   ✖ Error parsing additional tokens: {e}", exc_info=True)
         print("   ▶ Primary client will be used.")
         return
-
-    print(f"   ▶ Found {len(all_tokens)} additional tokens")
 
     async def start_client(client_id, token):
         try:
