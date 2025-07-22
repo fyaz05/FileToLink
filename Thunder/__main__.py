@@ -24,6 +24,7 @@ from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.keepalive import ping_server
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+from Thunder.utils.rate_limiter import rate_limiter
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
 
@@ -127,6 +128,14 @@ async def start_services():
 
     await import_plugins()
 
+    print("   ▶ Starting Rate Limiter initialization...")
+    try:
+        await rate_limiter.start_queue_processor()
+        print("   ✓ Rate limiter and queue processor started")
+    except Exception as e:
+        logger.error(f"   ✖ Failed to start rate limiter: {e}", exc_info=True)
+        return
+
     print("   ▶ Starting Web Server initialization...")
     try:
         app_runner = web.AppRunner(await web_server())
@@ -156,6 +165,8 @@ async def start_services():
     try:
         await idle()
     finally:
+        print("   ▶ Shutting down services...")
+        
         for task in [locals().get("keepalive_task"), locals().get("token_cleanup_task")]:
             if task:
                 task.cancel()
@@ -163,6 +174,11 @@ async def start_services():
                     await task
                 except asyncio.CancelledError:
                     pass
+
+        try:
+            await rate_limiter.shutdown()
+        except Exception as e:
+            logger.error(f"Error during rate limiter cleanup: {e}")
 
         try:
             await cleanup_clients()

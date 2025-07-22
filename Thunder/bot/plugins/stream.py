@@ -19,6 +19,7 @@ from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import *
+from Thunder.utils.rate_limiter import rate_limiter, handle_rate_limited_request
 from Thunder.vars import Var
 
 
@@ -85,6 +86,23 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
     if not msg.reply_to_message.media:
         await reply_user_err(msg, MSG_ERROR_NO_FILE)
         return
+    
+    skip_rate_limit = kwargs.get('skip_rate_limit', False)
+    if not skip_rate_limit and msg.from_user:
+        try:
+            if msg.from_user.id == Var.OWNER_ID:
+                logger.debug(f"Owner {msg.from_user.id} bypassing rate limit for link command")
+            else:
+                if not await rate_limiter.check_rate_limit(msg.from_user.id):
+                    is_authorized = await rate_limiter.is_authorized_user(msg.from_user.id)
+                    if await handle_rate_limited_request(bot, msg, 'link', priority=is_authorized, **kwargs):
+                        logger.debug(f"Rate limited link request queued for user {msg.from_user.id} (priority: {is_authorized})")
+                    else:
+                        logger.warning(f"Failed to queue rate limited link request for user {msg.from_user.id}")
+                    return
+        except Exception as e:
+            logger.error(f"Rate limiter failed for user {msg.from_user.id} in link handler: {e}. Falling back to normal processing.")
+    
     parts = msg.text.split()
     num_files = 1
     if len(parts) > 1:
@@ -120,6 +138,21 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
     shortener_val = await get_shortener_status(bot, msg)
     if not msg.from_user:
         return
+    
+    try:
+        if msg.from_user.id == Var.OWNER_ID:
+            logger.debug(f"Owner {msg.from_user.id} bypassing rate limit")
+        else:
+            if not await rate_limiter.check_rate_limit(msg.from_user.id):
+                is_authorized = await rate_limiter.is_authorized_user(msg.from_user.id)
+                if await handle_rate_limited_request(bot, msg, 'private', priority=is_authorized, **kwargs):
+                    logger.debug(f"Rate limited request queued for user {msg.from_user.id} (priority: {is_authorized})")
+                else:
+                    logger.warning(f"Failed to queue rate limited request for user {msg.from_user.id}")
+                return
+    except Exception as e:
+        logger.error(f"Rate limiter failed for user {msg.from_user.id}: {e}. Falling back to normal processing.")
+    
     await log_newusr(bot, msg.from_user.id, msg.from_user.first_name or "")
     status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_FILE, quote=True)
     await process_single(bot, msg, msg, status_msg, shortener_val)
@@ -141,6 +174,32 @@ async def channel_receive_handler(bot: Client, msg: Message):
     if not await is_admin(bot, msg.chat.id):
         logger.debug(f"Bot is not admin in channel {msg.chat.id} ({msg.chat.title or 'Unknown'}). Ignoring message.")
         return
+        
+    if msg.sender_chat and msg.sender_chat.id:
+        try:
+            channel_id = msg.sender_chat.id
+            logger.debug(f"Checking rate limit for channel {channel_id}")
+            
+            if not await rate_limiter.check_rate_limit(channel_id):
+                logger.info(f"Rate limit exceeded for channel {channel_id}, skipping processing")
+                return
+        except Exception as e:
+            logger.error(f"Rate limiter failed for channel {msg.chat.id}: {e}. Falling back to normal processing.")
+    elif msg.from_user:
+        try:
+            user_id = msg.from_user.id
+            logger.debug(f"Checking rate limit for channel message from user {user_id}")
+            
+            if user_id == Var.OWNER_ID:
+                logger.debug(f"Owner {user_id} bypassing rate limit for channel message")
+            elif not await rate_limiter.check_rate_limit(user_id):
+                logger.info(f"Rate limit exceeded for user {user_id} in channel, skipping processing")
+                return
+        except Exception as e:
+            logger.error(f"Rate limiter failed for user {msg.from_user.id} in channel: {e}. Falling back to normal processing.")
+    else:
+        logger.debug(f"No user or channel info for message {msg.id}, skipping rate limit check")
+    
     try:
         stored_msg = await fwd_media(msg)
         if not stored_msg:
@@ -278,6 +337,25 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             messages = []
         for m in messages:
             if m and m.media:
+                if msg.from_user and msg.from_user.id != Var.OWNER_ID:
+                    try:
+                        if not await rate_limiter.check_rate_limit(msg.from_user.id):
+                            logger.debug(f"User {msg.from_user.id} hit rate limit during batch processing, stopping batch")
+                            try:
+                                await handle_flood_wait(
+                                    msg.reply_text,
+                                    MSG_RATE_LIMIT_BATCH_PROCESSING.format(
+                                        processed=processed,
+                                        total=count
+                                    ),
+                                    quote=True
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending batch rate limit message: {e}")
+                            break
+                    except Exception as e:
+                        logger.error(f"Rate limiter failed during batch processing: {e}. Continuing with batch.")
+                
                 links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg)
                 if links:
                     links_list.append(links['online_link'])

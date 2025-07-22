@@ -77,6 +77,8 @@
 - **Customizable Templates:** Personalize HTML templates for download pages.
 - **Data Center Info:** Get data center information for users and files.
 - **Auto Set Commands:** Automatically set bot commands on startup.
+- **Rate Limiting:** Prevent abuse with configurable per-user rate limits.
+- **Request Queueing:** Queue excess requests instead of rejecting them.
 
 ### ⚙️ Technical Capabilities
 
@@ -147,6 +149,10 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `URL_SHORTENER_API_KEY` | API key for URL shortening service    | `""`      | `"abc123def456"`               |
 | `URL_SHORTENER_SITE` | URL shortening service to use           | `""`      | `"example.com"`                  |
 | `SET_COMMANDS`       | Automatically set bot commands on startup | `True`   | `False`                           |
+| `RATE_LIMIT_ENABLED` | Enable rate limiting system             | `True`    | `False`                        |
+| `MAX_FILES_PER_PERIOD` | Maximum files per time window         | `3`       | `5`                           |
+| `RATE_LIMIT_PERIOD_MINUTES` | Time window in minutes           | `1`       | `5`                            |
+| `MAX_QUEUE_SIZE`     | Maximum size of the request queue       | `100`     | `200`                          |
 
 > ℹ️ For all options, see `config_sample.env`.
 
@@ -278,6 +284,28 @@ Thunder Bot supports URL shortening for both media links and token activation li
 2. Enable URL shortening in token activation links by setting `SHORTEN_ENABLED=True` in your config.
 3. Enable URL shortening in media links links by setting `SHORTEN_MEDIA_LINKS=True` in your config.
 
+---
+
+## 🚦 Rate Limiting System
+
+Thunder Bot includes a rate limiting system to prevent abuse and ensure fair usage of resources.
+
+### How It Works
+
+1. **Per-User Limits:** Each user is limited to a configurable number of file requests within a time window.
+2. **Request Queueing:** When users exceed their rate limit, requests are automatically queued instead of rejected.
+3. **Priority Processing:** Owner bypasses rate limits entirely, while authorized users get priority in the queue.
+4. **User Feedback:** Users receive notifications when their requests are queued or when the queue is full.
+5. **Graceful Degradation:** If the rate limiter encounters errors, it falls back to normal processing.
+
+Configure the rate limiting system with these environment variables:
+
+- `RATE_LIMIT_ENABLED=True` - Enable or disable rate limiting
+- `MAX_FILES_PER_PERIOD=5` - Maximum number of files per time window
+- `RATE_LIMIT_PERIOD_MINUTES=1` - Time window in minutes
+- `MAX_QUEUE_SIZE=100` - Maximum size of the request queue
+
+---
 ---
 
 <details>
