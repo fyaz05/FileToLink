@@ -5,7 +5,7 @@ import time
 import asyncio
 from typing import Dict, List, Optional
 from pyrogram import Client
-from pyrogram.types import Message
+from pyrogram.types import Message, ReplyParameters
 from pyrogram.errors import FloodWait, RPCError
 from Thunder.utils.logger import logger
 from Thunder.utils.database import db
@@ -16,6 +16,7 @@ from Thunder.utils.messages import (
     MSG_RATE_LIMIT_QUEUE_STATUS,
     MSG_RATE_LIMIT_QUEUE_STATUS_ERROR
 )
+from Thunder.utils.handler import handle_flood_wait
 from Thunder.vars import Var
 
 class RateLimiterError(Exception):
@@ -43,17 +44,23 @@ class RateLimiter:
             self._initialization_error = False
             self._last_cleanup_time = time.time()
             self._cleanup_interval = 300
+            self.user_batch_counters: Dict[int, int] = {}
+            self.user_last_request_time: Dict[int, float] = {}
+            self.global_requests: List[float] = []
             try:
                 self.max_requests = Var.MAX_FILES_PER_PERIOD
                 self.time_window = Var.RATE_LIMIT_PERIOD_MINUTES * 60
                 self.max_queue_size = Var.MAX_QUEUE_SIZE
                 self.enabled = Var.RATE_LIMIT_ENABLED
+                self.global_enabled = Var.GLOBAL_RATE_LIMIT
+                self.max_global_requests = Var.MAX_GLOBAL_REQUESTS_PER_MINUTE
                 if not self._validate_configuration():
                     logger.warning("Rate limiter disabled due to invalid configuration")
                 else:
                     logger.info(f"Rate limiter initialized successfully: max_requests={self.max_requests}, "
                                 f"time_window={self.time_window}s, max_queue_size={self.max_queue_size}, "
-                                f"enabled={self.enabled}")
+                                f"enabled={self.enabled}, global_enabled={self.global_enabled}, "
+                                f"max_global_requests={self.max_global_requests}")
             except Exception as config_error:
                 logger.error(f"Rate limiter configuration error: {config_error}")
                 logger.debug(f"Configuration error details: {type(config_error).__name__}: {config_error}")
@@ -61,11 +68,14 @@ class RateLimiter:
                 self.time_window = 60
                 self.max_queue_size = 100
                 self.enabled = False
+                self.global_enabled = False
+                self.max_global_requests = 60
                 self._initialization_error = True
                 logger.warning("Rate limiter using safe defaults due to configuration error (graceful degradation)")
                 logger.info(f"Safe defaults applied: max_requests={self.max_requests}, "
                             f"time_window={self.time_window}s, max_queue_size={self.max_queue_size}, "
-                            f"enabled={self.enabled}")
+                            f"enabled={self.enabled}, global_enabled={self.global_enabled}, "
+                            f"max_global_requests={self.max_global_requests}")
         except Exception as init_error:
             logger.critical(f"Critical error initializing rate limiter: {init_error}")
             self.user_requests = {}
@@ -131,13 +141,15 @@ class RateLimiter:
                     removed_count += 1
             for user_id in inactive_users:
                 del self.user_requests[user_id]
+                self.user_batch_counters.pop(user_id, None)
+                self.user_last_request_time.pop(user_id, None)
             if removed_count > 0:
                 logger.debug(f"Memory cleanup: removed {removed_count}/{before_count} inactive users")
             self._last_cleanup_time = current_time
         except Exception as cleanup_error:
             logger.error(f"Error during inactive users cleanup: {cleanup_error}")
 
-    async def check_rate_limit(self, user_id: int) -> bool:
+    async def check_rate_limit(self, user_id: int, record: bool = True, is_batch_process: bool = False) -> bool:
         try:
             if user_id is None or not isinstance(user_id, int) or user_id <= 0:
                 logger.error(f"Invalid user_id for rate limit check: {user_id}")
@@ -148,21 +160,44 @@ class RateLimiter:
             if self.is_owner(user_id):
                 logger.debug(f"Owner {user_id} bypassing rate limit check")
                 return True
-            self._cleanup_expired_requests(user_id)
-            current_requests = len(self.user_requests.get(user_id, []))
-            logger.debug(f"User {user_id} has {current_requests}/{self.max_requests} requests in current window")
-            if current_requests < self.max_requests:
-                if user_id not in self.user_requests:
-                    self.user_requests[user_id] = []
-                self.user_requests[user_id].append(time.time())
-                logger.debug(f"User {user_id} within rate limit, request recorded")
-                return True
-            logger.info(f"User {user_id} exceeded rate limit ({current_requests}/{self.max_requests})")
-            return False
+            
+            current_time = time.time()
+
+            if self.global_enabled:
+                self.global_requests = [
+                    timestamp for timestamp in self.global_requests
+                    if current_time - timestamp < 60
+                ]
+                current_global_requests = len(self.global_requests)
+                logger.debug(f"Global requests: {current_global_requests}/{self.max_global_requests}")
+
+                if current_global_requests >= self.max_global_requests:
+                    logger.debug(f"Global rate limit exceeded ({current_global_requests}/{self.max_global_requests}), denying user {user_id}")
+                    return False
+
+            if not is_batch_process:
+                self._cleanup_expired_requests(user_id)
+                current_requests = len(self.user_requests.get(user_id, []))
+                logger.debug(f"User {user_id} has {current_requests}/{self.max_requests} requests in current window")
+                if current_requests >= self.max_requests:
+                    logger.debug(f"User {user_id} exceeded per-user rate limit ({current_requests}/{self.max_requests})")
+                    return False
+
+            if record:
+                if not is_batch_process:
+                    if user_id not in self.user_requests:
+                        self.user_requests[user_id] = []
+                    self.user_requests[user_id].append(current_time)
+                    logger.debug(f"User {user_id} within rate limit, request recorded.")
+                
+                if self.global_enabled:
+                    self.global_requests.append(current_time)
+                    logger.debug(f"Global request recorded.")
+            
+            return True
         except Exception as rate_check_error:
-            logger.error(f"Error checking rate limit for user {user_id}: {rate_check_error}")
+            logger.error(f"Error checking rate limit for user {user_id}: {rate_check_error}", exc_info=True)
             logger.warning(f"Rate limit check failed for user {user_id}, allowing request to proceed (graceful degradation)")
-            logger.debug(f"Rate check error details for user {user_id}: {type(rate_check_error).__name__}: {rate_check_error}")
             return True
 
     async def add_to_queue(self, request_data: dict, priority: bool = False) -> bool:
@@ -182,8 +217,8 @@ class RateLimiter:
             try:
                 target_queue.put_nowait(request_data)
                 queue_type = 'priority' if priority else 'regular'
-                logger.info(f"Successfully added request to {queue_type} queue for user {user_id} "
-                            f"(queue size: {target_queue.qsize()}, total: {total_queued + 1})")
+                logger.debug(f"Successfully added request to {queue_type} queue for user {user_id} "
+                             f"(queue size: {target_queue.qsize()}, total: {total_queued + 1})")
                 return True
             except asyncio.QueueFull:
                 logger.error(f"Queue unexpectedly full when adding request for user {user_id}")
@@ -234,293 +269,67 @@ class RateLimiter:
             logger.error(f"Error determining user priority for {user_id}: {priority_error}")
             return 'regular'
 
-    async def process_queue(self) -> None:
-        logger.info("Queue processor started")
-        consecutive_errors = 0
-        max_consecutive_errors = 10
-        total_processed = 0
-        total_errors = 0
+    async def queue_consumer(self):
+        logger.info("Queue consumer started")
         while True:
             try:
-                current_time = time.time()
-                if current_time - self._last_cleanup_time > self._cleanup_interval:
-                    self._cleanup_inactive_users()
-                processed_request = False
                 if not self.priority_queue.empty():
-                    try:
-                        request_data = await self.priority_queue.get()
-                        await self._process_queued_request(request_data, is_priority=True)
-                        self.priority_queue.task_done()
-                        processed_request = True
-                        consecutive_errors = 0
-                        total_processed += 1
-                    except Exception as priority_error:
-                        logger.error(f"Error processing priority queue request: {priority_error}")
-                        self.priority_queue.task_done()
-                        consecutive_errors += 1
-                        total_errors += 1
+                    request_data = await self.priority_queue.get()
+                    queue_name = "priority"
                 elif not self.request_queue.empty():
-                    try:
-                        request_data = await self.request_queue.get()
-                        await self._process_queued_request(request_data, is_priority=False)
-                        self.request_queue.task_done()
-                        processed_request = True
-                        consecutive_errors = 0
-                        total_processed += 1
-                    except Exception as regular_error:
-                        logger.error(f"Error processing regular queue request: {regular_error}")
-                        self.request_queue.task_done()
-                        consecutive_errors += 1
-                        total_errors += 1
-                if not processed_request:
+                    request_data = await self.request_queue.get()
+                    queue_name = "regular"
+                else:
                     await asyncio.sleep(0.1)
-                if consecutive_errors >= max_consecutive_errors:
-                    logger.warning(f"Too many consecutive errors ({consecutive_errors}), "
-                                   f"increasing wait time to prevent error spam. "
-                                   f"Total processed: {total_processed}, Total errors: {total_errors}")
-                    await asyncio.sleep(5)
-                    consecutive_errors = 0
-            except asyncio.CancelledError:
-                logger.info(f"Queue processor cancelled, shutting down. "
-                            f"Final stats - Processed: {total_processed}, Errors: {total_errors}")
-                break
-            except Exception as processor_error:
-                logger.error(f"Critical error in queue processor: {processor_error}")
-                consecutive_errors += 1
-                total_errors += 1
-                wait_time = min(2 ** min(consecutive_errors, 6), 60)
-                logger.warning(f"Queue processor waiting {wait_time}s before retry "
-                               f"(consecutive errors: {consecutive_errors}). "
-                               f"Total processed: {total_processed}, Total errors: {total_errors}")
-                await asyncio.sleep(wait_time)
-        logger.info(f"Queue processor stopped. Final stats - Processed: {total_processed}, Errors: {total_errors}")
+                    continue
 
-    async def _process_queued_request(self, request_data: dict, is_priority: bool) -> None:
-        try:
-            user_id = request_data.get('user_id')
-            if not user_id:
-                logger.error("Queued request missing user_id, skipping")
-                raise ProcessingError("Queued request missing user_id")
-            logger.debug(f"Processing {'priority' if is_priority else 'regular'} queued request for user {user_id}")
-            if self.is_owner(user_id):
-                logger.debug(f"Processing owner request {user_id} from queue immediately")
-                await self._execute_queued_request(request_data)
-                return
-            try:
-                can_process = await self.check_rate_limit(user_id)
+                user_id = request_data.get('user_id')
+                if not user_id:
+                    logger.error(f"Queued request missing user_id, skipping: {request_data}")
+                    continue
+
+                if self.is_owner(user_id):
+                    logger.debug(f"Processing owner request {user_id} from {queue_name} queue immediately")
+                    request_data['kwargs']['skip_rate_limit'] = True
+                    yield request_data
+                    if queue_name == 'priority':
+                        self.priority_queue.task_done()
+                    else:
+                        self.request_queue.task_done()
+                    continue
+
+                can_process = await self.check_rate_limit(user_id, record=True)
                 if can_process:
-                    await self._execute_queued_request(request_data)
-                    logger.info(f"Successfully processed {'priority' if is_priority else 'regular'} "
-                                f"queued request for user {user_id}")
+                    logger.debug(f"Rate limit check passed and recorded for user {user_id}. Yielding request from {queue_name} queue.")
+                    request_data['kwargs']['skip_rate_limit'] = True
+                    yield request_data
+                    if queue_name == 'priority':
+                        self.priority_queue.task_done()
+                    else:
+                        self.request_queue.task_done()
                 else:
-                    await self._requeue_request(request_data, user_id)
-            except Exception as rate_check_error:
-                logger.error(f"Error checking rate limit for queued request (user {user_id}): {rate_check_error}")
-                logger.warning(f"Processing queued request for user {user_id} despite rate check error (graceful degradation)")
-                try:
-                    await self._execute_queued_request(request_data)
-                    logger.info(f"Successfully processed request for user {user_id} via graceful degradation")
-                except Exception as fallback_error:
-                    logger.error(f"Fallback processing also failed for user {user_id}: {fallback_error}")
-                    raise ProcessingError(f"Both primary and fallback processing failed: {fallback_error}")
-        except ProcessingError:
-            raise
-        except Exception as process_error:
-            logger.error(f"Unexpected error processing queued request: {process_error}")
-            raise ProcessingError(f"Failed to process queued request: {process_error}")
+                    logger.debug(f"User {user_id} still rate-limited. Re-queuing request to {queue_name} queue.")
+                    if queue_name == 'priority':
+                        await self.priority_queue.put(request_data)
+                    else:
+                        await self.request_queue.put(request_data)
+                    
+                    await asyncio.sleep(1)
 
-    async def _requeue_request(self, request_data: dict, user_id: int) -> None:
-        try:
-            user_priority = await self.get_user_priority(user_id)
-            fallback_priority = user_priority == 'authorized'
-            try:
-                success = await self.add_to_queue(request_data, priority=fallback_priority)
-                if success:
-                    logger.debug(f"User {user_id} ({user_priority}) still rate limited, "
-                                 f"re-queued request (priority: {fallback_priority})")
-                else:
-                    logger.warning(f"Failed to re-queue request for user {user_id} - queue may be full")
-            except QueueFullError:
-                logger.warning(f"Cannot re-queue request for user {user_id} - queue is full")
-            except Exception as requeue_error:
-                if fallback_priority:
-                    logger.warning(f"Priority re-queue failed for user {user_id}, "
-                                   f"trying regular queue: {requeue_error}")
-                    try:
-                        await self.add_to_queue(request_data, priority=False)
-                        logger.info(f"Successfully re-queued user {user_id} request to regular queue")
-                    except Exception as fallback_error:
-                        logger.error(f"Failed to re-queue user {user_id} request to regular queue: {fallback_error}")
-                else:
-                    raise requeue_error
-            await asyncio.sleep(min(1.0, 0.1 * (1 + len(self.user_requests.get(user_id, [])))))
-        except Exception as requeue_error:
-            logger.error(f"Error re-queuing request for user {user_id}: {requeue_error}")
-
-    async def _execute_queued_request(self, request_data: dict) -> None:
-        try:
-            handler_type = request_data.get('handler_type')
-            bot = request_data.get('bot')
-            message = request_data.get('message')
-            kwargs = request_data.get('kwargs', {})
-            user_id = request_data.get('user_id')
-            if not handler_type:
-                raise ProcessingError("Queued request missing handler_type")
-            if not bot:
-                raise ProcessingError("Queued request missing bot instance")
-            if not message:
-                raise ProcessingError("Queued request missing message")
-            logger.debug(f"Executing queued {handler_type} request for user {user_id}")
-            if handler_type == 'private':
-                await self._process_private_request(bot, message, **kwargs)
-                logger.info(f"Successfully executed private request for user {user_id}")
-            elif handler_type == 'link':
-                await self._process_link_request(bot, message, **kwargs)
-                logger.info(f"Successfully executed link request for user {user_id}")
-            else:
-                logger.error(f"Unknown handler type: {handler_type}")
-                raise ProcessingError(f"Unknown handler type: {handler_type}")
-        except ProcessingError:
-            raise
-        except Exception as execution_error:
-            logger.error(f"Unexpected error executing queued request: {execution_error}")
-            raise ProcessingError(f"Failed to execute queued request: {execution_error}")
-
-    async def _process_private_request(self, bot: Client, message: Message, **kwargs) -> None:
-        try:
-            from Thunder.utils.bot_utils import log_newusr
-            from Thunder.utils.decorators import get_shortener_status
-            from Thunder.utils.handler import handle_flood_wait
-            from Thunder.utils.messages import MSG_PROCESSING_FILE
-            from Thunder.bot.plugins.stream import process_single
-            user_id = message.from_user.id if message.from_user else None
-            logger.debug(f"Processing private request from queue for user {user_id}")
-            try:
-                shortener_val = await get_shortener_status(bot, message)
-                await log_newusr(bot, message.from_user.id, message.from_user.first_name or "")
-                status_msg = await handle_flood_wait(message.reply_text, MSG_PROCESSING_FILE, quote=True)
-                await process_single(bot, message, message, status_msg, shortener_val)
-            except FloodWait as flood_error:
-                logger.warning(f"FloodWait error processing private request for user {user_id}: {flood_error}")
-                raise
-            except RPCError as rpc_error:
-                logger.error(f"RPC error processing private request for user {user_id}: {rpc_error}")
-                raise ProcessingError(f"RPC error: {rpc_error}")
-        except (FloodWait, ProcessingError):
-            raise
-        except ImportError as import_error:
-            logger.error(f"Import error processing private request: {import_error}")
-            raise ProcessingError(f"Failed to import required modules: {import_error}")
-        except Exception as private_error:
-            logger.error(f"Unexpected error processing private request from queue: {private_error}")
-            raise ProcessingError(f"Failed to process private request: {private_error}")
-
-    async def _process_link_request(self, bot: Client, message: Message, **kwargs) -> None:
-        try:
-            from Thunder.bot.plugins.stream import link_handler
-            user_id = message.from_user.id if message.from_user else None
-            logger.debug(f"Processing link request from queue for user {user_id}")
-            kwargs['skip_rate_limit'] = True
-            try:
-                await link_handler(bot, message, **kwargs)
-            except FloodWait as flood_error:
-                logger.warning(f"FloodWait error processing link request for user {user_id}: {flood_error}")
-                raise
-            except RPCError as rpc_error:
-                logger.error(f"RPC error processing link request for user {user_id}: {rpc_error}")
-                raise ProcessingError(f"RPC error: {rpc_error}")
-        except (FloodWait, ProcessingError):
-            raise
-        except ImportError as import_error:
-            logger.error(f"Import error processing link request: {import_error}")
-            raise ProcessingError(f"Failed to import required modules: {import_error}")
-        except Exception as link_error:
-            logger.error(f"Unexpected error processing link request from queue: {link_error}")
-            raise ProcessingError(f"Failed to process link request: {link_error}")
-
-    async def start_queue_processor(self) -> None:
-        try:
-            if not self.enabled:
-                logger.info("Rate limiter disabled, not starting queue processor")
-                return
-            if self._initialization_error:
-                logger.warning("Rate limiter had initialization errors, not starting queue processor")
-                return
-            if self.queue_processor_task and not self.queue_processor_task.done():
-                logger.warning("Queue processor task already running")
-                return
-            logger.info("Starting queue processor task")
-            self.queue_processor_task = asyncio.create_task(self.process_queue())
-            logger.info("Queue processor task started successfully")
-        except Exception as start_error:
-            logger.error(f"Error starting queue processor: {start_error}")
-            raise RateLimiterError(f"Failed to start queue processor: {start_error}")
+            except asyncio.CancelledError:
+                logger.info("Queue consumer cancelled, shutting down.")
+                break
+            except Exception as e:
+                logger.error(f"Critical error in queue consumer: {e}", exc_info=True)
+                await asyncio.sleep(5)
 
     async def shutdown(self) -> None:
-        logger.info("Shutting down rate limiter...")
-        shutdown_errors = []
-        try:
-            if hasattr(self, 'queue_processor_task') and self.queue_processor_task:
-                if not self.queue_processor_task.done():
-                    logger.debug("Cancelling queue processor task")
-                    self.queue_processor_task.cancel()
-                    try:
-                        await asyncio.wait_for(self.queue_processor_task, timeout=5.0)
-                    except asyncio.CancelledError:
-                        logger.debug("Queue processor task cancelled successfully")
-                    except asyncio.TimeoutError:
-                        logger.warning("Queue processor task did not stop within timeout")
-                else:
-                    logger.debug("Queue processor task already done")
-        except Exception as task_error:
-            error_msg = f"Error cancelling queue processor task: {task_error}"
-            logger.error(error_msg)
-            shutdown_errors.append(error_msg)
-        try:
-            cleared_regular = 0
-            while not self.request_queue.empty():
-                try:
-                    self.request_queue.get_nowait()
-                    self.request_queue.task_done()
-                    cleared_regular += 1
-                except asyncio.QueueEmpty:
-                    break
-            if cleared_regular > 0:
-                logger.info(f"Cleared {cleared_regular} requests from regular queue")
-        except Exception as regular_queue_error:
-            error_msg = f"Error clearing regular queue: {regular_queue_error}"
-            logger.error(error_msg)
-            shutdown_errors.append(error_msg)
-        try:
-            cleared_priority = 0
-            while not self.priority_queue.empty():
-                try:
-                    self.priority_queue.get_nowait()
-                    self.priority_queue.task_done()
-                    cleared_priority += 1
-                except asyncio.QueueEmpty:
-                    break
-            if cleared_priority > 0:
-                logger.info(f"Cleared {cleared_priority} requests from priority queue")
-        except Exception as priority_queue_error:
-            error_msg = f"Error clearing priority queue: {priority_queue_error}"
-            logger.error(error_msg)
-            shutdown_errors.append(error_msg)
-        try:
-            active_users = len(self.user_requests)
-            self.user_requests.clear()
-            if active_users > 0:
-                logger.info(f"Cleared rate limit data for {active_users} users")
-        except Exception as tracking_error:
-            error_msg = f"Error clearing user request tracking: {tracking_error}"
-            logger.error(error_msg)
-            shutdown_errors.append(error_msg)
-        if shutdown_errors:
-            logger.warning(f"Rate limiter shutdown completed with {len(shutdown_errors)} errors")
-            for error in shutdown_errors:
-                logger.warning(f"Shutdown error: {error}")
-        else:
-            logger.info("Rate limiter shutdown completed successfully")
+        logger.info("Shutting down rate limiter and clearing queues...")
+        for q in [self.request_queue, self.priority_queue]:
+            while not q.empty():
+                q.get_nowait()
+                q.task_done()
+        logger.info("Rate limiter queues cleared.")
 
     def get_queue_status(self) -> dict:
         return {
@@ -604,10 +413,14 @@ class RateLimiter:
         if user_id is not None:
             if user_id in self.user_requests:
                 del self.user_requests[user_id]
-                logger.info(f"Reset rate limits for user {user_id}")
+            self.user_batch_counters.pop(user_id, None)
+            self.user_last_request_time.pop(user_id, None)
+            logger.debug(f"Reset rate limits for user {user_id}")
         else:
             self.user_requests.clear()
-            logger.info("Reset rate limits for all users")
+            self.user_batch_counters.clear()
+            self.user_last_request_time.clear()
+            logger.debug("Reset rate limits for all users")
 
     def get_configuration_summary(self) -> str:
         try:
@@ -726,11 +539,22 @@ class RateLimiter:
     async def get_user_queue_position(self, user_id: int) -> dict:
         user_priority = await self.get_user_priority(user_id)
         priority_position = None
-        if user_priority == 'authorized':
-            priority_position = 1
         regular_position = None
+
+        if user_priority == 'authorized':
+            queue = list(self.priority_queue._queue)
+            for idx, req in enumerate(queue):
+                if req.get('user_id') == user_id:
+                    priority_position = idx + 1
+                    break
+
         if user_priority == 'regular':
-            regular_position = 1
+            queue = list(self.request_queue._queue)
+            for idx, req in enumerate(queue):
+                if req.get('user_id') == user_id:
+                    regular_position = idx + 1
+                    break
+
         return {
             'user_priority': user_priority,
             'priority_queue_position': priority_position,
@@ -740,7 +564,7 @@ class RateLimiter:
             'bypasses_rate_limit': user_priority == 'owner'
         }
 
-async def handle_rate_limited_request(bot: Client, message: Message, handler_type: str, priority: bool = False, **kwargs) -> bool:
+async def handle_rate_limited_request(bot: Client, message: Message, handler_type: str, **kwargs) -> bool:
     try:
         if not message or not message.from_user:
             logger.error("Cannot handle rate limited request without user information")
@@ -758,24 +582,27 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler_typ
             logger.error(f"Error determining user priority for {user_id}: {priority_error}")
             user_priority = 'regular'
             is_priority_user = False
+        notification_msg = kwargs.get("notification_msg")
+        if not notification_msg:
+            try:
+                notification_msg = await send_queue_notification(bot, message, priority=is_priority_user)
+            except Exception as notification_error:
+                logger.error(f"Error sending queue notification to user {user_id}: {notification_error}")
+        
         request_data = {
             'user_id': user_id,
             'bot': bot,
             'message': message,
             'handler_type': handler_type,
-            'kwargs': kwargs,
+            'kwargs': {**kwargs, "notified": True, "notification_msg": notification_msg},
             'timestamp': time.time(),
             'priority': is_priority_user,
-            'user_priority': user_priority
+            'user_priority': user_priority,
         }
         try:
             success = await rate_limiter.add_to_queue(request_data, priority=is_priority_user)
             if success:
-                try:
-                    await send_queue_notification(bot, message, priority=is_priority_user)
-                except Exception as notification_error:
-                    logger.error(f"Error sending queue notification to user {user_id}: {notification_error}")
-                logger.info(f"Successfully queued {user_priority} user {user_id} request (priority: {is_priority_user})")
+                logger.debug(f"Successfully queued {user_priority} user {user_id} request (priority: {is_priority_user})")
                 return True
             else:
                 try:
@@ -802,53 +629,87 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler_typ
         logger.error(f"Critical error handling rate limited request: {handle_error}")
         return False
 
-async def send_queue_notification(bot: Client, message: Message, priority: bool = False) -> None:
+async def send_queue_notification(bot: Client, message: Message, priority: bool = False):
     try:
         if not message or not message.from_user:
             logger.error("Cannot send queue notification without valid message")
-            return
+            return None
         user_id = message.from_user.id
         try:
-            status = rate_limiter.get_queue_status()
-            queue_size = status['priority_queue_size'] if priority else status['regular_queue_size']
-            wait_estimate = min(5, max(1, queue_size // 10 + 1))
+            current_time = time.time()
+            last_request_time = rate_limiter.user_last_request_time.get(user_id, 0)
+            
+            if current_time - last_request_time < 5.0:
+                rate_limiter.user_batch_counters[user_id] = rate_limiter.user_batch_counters.get(user_id, 0) + 1
+            else:
+                rate_limiter.user_batch_counters[user_id] = 1
+            
+            rate_limiter.user_last_request_time[user_id] = current_time
+            batch_offset = rate_limiter.user_batch_counters[user_id] - 1
+            
+            queue_pos = await rate_limiter.get_user_queue_position(user_id)
+            if priority:
+                position = queue_pos.get('priority_queue_position') or 1
+            else:
+                position = queue_pos.get('regular_queue_position') or 1
+            wait_estimate = position + batch_offset
             time_window = rate_limiter.time_window // 60
             max_requests = rate_limiter.max_requests
-            
+
+            s = "s" if wait_estimate > 1 else ""
+            s1 = "s" if wait_estimate > 1 else ""
+            s2 = "s" if time_window > 1 else ""
+
             if priority:
-                queue_message = MSG_RATE_LIMIT_QUEUE_PRIORITY.format(wait_estimate=wait_estimate)
+                queue_message = MSG_RATE_LIMIT_QUEUE_PRIORITY.format(
+                    wait_estimate=wait_estimate,
+                    s=s
+                )
             else:
                 queue_message = MSG_RATE_LIMIT_QUEUE_REGULAR.format(
                     wait_estimate=wait_estimate,
                     max_requests=max_requests,
-                    time_window=time_window
+                    time_window=time_window,
+                    s1=s1,
+                    s2=s2
                 )
         except Exception as status_error:
             logger.error(f"Error getting queue status for notification: {status_error}")
-            # Use message constants even in fallback case with default values
+            s = ""
+            s1 = ""
+            s2 = ""
             if priority:
-                queue_message = MSG_RATE_LIMIT_QUEUE_PRIORITY.format(wait_estimate=1)
+                queue_message = MSG_RATE_LIMIT_QUEUE_PRIORITY.format(
+                    wait_estimate=1,
+                    s=s
+                )
             else:
                 queue_message = MSG_RATE_LIMIT_QUEUE_REGULAR.format(
                     wait_estimate=1,
                     max_requests=5,
-                    time_window=1
+                    time_window=1,
+                    s1=s1,
+                    s2=s2
                 )
         try:
-            await bot.send_message(
+            sent_msg = await handle_flood_wait(
+                bot.send_message,
                 chat_id=message.chat.id,
                 text=queue_message,
-                reply_to_message_id=message.id
+                reply_parameters=ReplyParameters(message_id=message.id)
             )
             logger.debug(f"Sent {'priority' if priority else 'regular'} queue notification to user {user_id}")
+            return sent_msg
         except FloodWait as flood_error:
             logger.warning(f"FloodWait sending queue notification to user {user_id}: {flood_error}")
         except RPCError as rpc_error:
             logger.error(f"RPC error sending queue notification to user {user_id}: {rpc_error}")
         except Exception as send_error:
             logger.error(f"Unexpected error sending queue notification to user {user_id}: {send_error}")
+        return None
     except Exception as notification_error:
         logger.error(f"Critical error in send_queue_notification: {notification_error}")
+        return None
 
 async def send_queue_full_message(bot: Client, message: Message) -> None:
     try:
@@ -859,16 +720,16 @@ async def send_queue_full_message(bot: Client, message: Message) -> None:
         try:
             status = rate_limiter.get_queue_status()
             wait_estimate = max(5, min(30, status['total_queued'] // 5))
-            error_message = MSG_RATE_LIMIT_QUEUE_FULL.format(wait_estimate=wait_estimate)
+            s = "s" if wait_estimate > 1 else ""
+            error_message = MSG_RATE_LIMIT_QUEUE_FULL.format(wait_estimate=wait_estimate, s=s)
         except Exception as status_error:
             logger.error(f"Error getting queue status for full message: {status_error}")
-            # Use MSG_RATE_LIMIT_QUEUE_FULL with a default wait estimate
-            error_message = MSG_RATE_LIMIT_QUEUE_FULL.format(wait_estimate=10)
+            error_message = MSG_RATE_LIMIT_QUEUE_FULL.format(wait_estimate=10, s="")
         try:
             await bot.send_message(
                 chat_id=message.chat.id,
                 text=error_message,
-                reply_to_message_id=message.id
+                reply_parameters=ReplyParameters(message_id=message.id)
             )
             logger.debug(f"Sent queue full message to user {user_id}")
         except FloodWait as flood_error:
@@ -888,12 +749,13 @@ async def send_queue_status_message(bot: Client, message: Message) -> None:
         user_id = message.from_user.id
         try:
             status = rate_limiter.get_queue_status()
+            enabled_status = "Enabled" if status.get('enabled') else "Disabled"
             status_text = MSG_RATE_LIMIT_QUEUE_STATUS.format(
                 regular_queue_size=status['regular_queue_size'],
                 priority_queue_size=status['priority_queue_size'],
                 total_queued=status['total_queued'],
                 max_queue_size=status['max_queue_size'],
-                enabled=status['enabled'],
+                enabled_status=enabled_status,
                 active_users=status['active_users'],
                 max_requests_per_period=status['max_requests_per_period'],
                 time_window_seconds=status['time_window_seconds']
@@ -902,7 +764,7 @@ async def send_queue_status_message(bot: Client, message: Message) -> None:
                 await bot.send_message(
                     chat_id=message.chat.id,
                     text=status_text,
-                    reply_to_message_id=message.id
+                    reply_parameters=ReplyParameters(message_id=message.id)
                 )
                 logger.debug(f"Sent queue status to user {user_id}")
             except FloodWait as flood_error:
@@ -917,7 +779,7 @@ async def send_queue_status_message(bot: Client, message: Message) -> None:
                 await bot.send_message(
                     chat_id=message.chat.id,
                     text=MSG_RATE_LIMIT_QUEUE_STATUS_ERROR,
-                    reply_to_message_id=message.id
+                    reply_parameters=ReplyParameters(message_id=message.id)
                 )
             except Exception as error_send_error:
                 logger.error(f"Error sending status error message: {error_send_error}")

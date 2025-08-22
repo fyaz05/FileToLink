@@ -153,6 +153,8 @@ Rename `config_sample.env` to `config.env` and edit the following variables:
 | `MAX_FILES_PER_PERIOD` | Maximum files per time window         | `3`       | `5`                           |
 | `RATE_LIMIT_PERIOD_MINUTES` | Time window in minutes           | `1`       | `5`                            |
 | `MAX_QUEUE_SIZE`     | Maximum size of the request queue       | `100`     | `200`                          |
+| `GLOBAL_RATE_LIMIT` | Enable global rate limiting             | `True`    | `False`                        |
+| `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Maximum requests allowed across all users per minute | `4`       | `10`                           |
 
 > ℹ️ For all options, see `config_sample.env`.
 
@@ -293,19 +295,12 @@ Thunder Bot includes a rate limiting system to prevent abuse and ensure fair usa
 ### How It Works
 
 1. **Per-User Limits:** Each user is limited to a configurable number of file requests within a time window.
-2. **Request Queueing:** When users exceed their rate limit, requests are automatically queued instead of rejected.
-3. **Priority Processing:** Owner bypasses rate limits entirely, while authorized users get priority in the queue.
-4. **User Feedback:** Users receive notifications when their requests are queued or when the queue is full.
-5. **Graceful Degradation:** If the rate limiter encounters errors, it falls back to normal processing.
+2. **Global Limits:** A global rate limit can be configured to control the overall request rate across all users.
+3. **Request Queueing:** When users exceed their rate limit, requests are automatically queued instead of rejected.
+4. **Priority Processing:** Owner bypasses rate limits entirely, while authorized users get priority in the queue.
+5. **User Feedback:** Users receive notifications when their requests are queued or when the queue is full.
+6. **Graceful Degradation:** If the rate limiter encounters errors, it falls back to normal processing.
 
-Configure the rate limiting system with these environment variables:
-
-- `RATE_LIMIT_ENABLED=True` - Enable or disable rate limiting
-- `MAX_FILES_PER_PERIOD=5` - Maximum number of files per time window
-- `RATE_LIMIT_PERIOD_MINUTES=1` - Time window in minutes
-- `MAX_QUEUE_SIZE=100` - Maximum size of the request queue
-
----
 ---
 
 <details>

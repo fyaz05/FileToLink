@@ -297,22 +297,21 @@ MSG_ERROR_CALLBACK_UNSUPPORTED = "This button is not active or no longer support
 # =====================================================================================
 
 MSG_RATE_LIMIT_QUEUE_PRIORITY = (
-    "⚡ **Priority Queue!** Your request has been prioritized and will be processed soon.\n\n"
-    "> ⏳ **Estimated Wait:** `~{wait_estimate} minute{'s' if wait_estimate > 1 else ''}`\n"
-    "> 🚀 **Status:** High Priority Processing"
+    "⚡ You're in the **Priority Queue!**\n\n"
+    "> ⏳ **Estimated Wait:** `~{wait_estimate} minute{s}`\n"
+    "> 🚀 **Status:** In Queue"
 )
 
 MSG_RATE_LIMIT_QUEUE_REGULAR = (
-    "⏳ **Rate Limit Reached!** Your request has been queued and will be processed soon.\n\n"
-    "> ⌛ **Estimated Wait:** `~{wait_estimate} minute{'s' if wait_estimate > 1 else ''}`\n"
-    "> 📊 **Current Limit:** `{max_requests} files per {time_window} minute{'s' if time_window > 1 else ''}`\n"
-    "> 🔄 **Status:** In Processing Queue"
+    "⏳ **Rate Limit Reached!**\n\n"
+    "> ⌛ **Estimated Wait:** `~{wait_estimate} minute{s1}`\n"
+    "> 📊 **Limit:** `{max_requests} files per {time_window} minute{s2}`\n"
+    "> 🔄 **Status:** In Queue"
 )
 
 MSG_RATE_LIMIT_QUEUE_FULL = (
     "⚠️ **Service Busy!** The processing queue is currently full.\n\n"
-    "> 🕒 **Please try again in:** `~{wait_estimate} minute{'s' if wait_estimate > 1 else ''}`\n"
-    "> 📶 **Status:** Queue at maximum capacity\n"
+    "> 🕒 **Please try again in:** `~{wait_estimate} minute{s}`\n"
     "> 💡 **Tip:** Try again later when system load decreases"
 )
 
@@ -321,7 +320,7 @@ MSG_RATE_LIMIT_QUEUE_STATUS = (
     "> 🔄 **Regular Queue:** `{regular_queue_size}`\n"
     "> ⚡ **Priority Queue:** `{priority_queue_size}`\n"
     "> 📈 **Total Queued:** `{total_queued}/{max_queue_size}`\n"
-    "> 🚦 **Rate Limiting:** `{'Enabled' if enabled else 'Disabled'}`\n"
+    "> 🚦 **Rate Limiting:** `{enabled_status}`\n"
     "> 👥 **Active Users:** `{active_users}`\n"
     "> 🔢 **Max Requests/Period:** `{max_requests_per_period}`\n"
     "> ⏱️ **Time Window:** `{time_window_seconds}s`"
@@ -331,13 +330,6 @@ MSG_RATE_LIMIT_QUEUE_STATUS_ERROR = (
     "❌ **Queue Status Error:** Unable to retrieve queue information.\n\n"
     "> ⚠️ **System Notice:** The rate limiting system is currently unavailable.\n"
     "> 🔄 **Recommendation:** Please try again later or contact support if the issue persists."
-)
-
-MSG_RATE_LIMIT_BATCH_PROCESSING = (
-    "⏳ **Rate Limit Reached During Batch Processing!**\n\n"
-    "> ✅ **Files Processed:** `{processed}/{total}`\n"
-    "> 🛑 **Processing Stopped:** Rate limit reached\n"
-    "> 💡 **Tip:** Try processing remaining files after waiting a few minutes"
 )
 
 

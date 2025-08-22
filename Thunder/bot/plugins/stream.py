@@ -54,6 +54,30 @@ async def send_link(msg: Message, links: Dict[str, Any]):
         reply_markup=get_link_buttons(links)
     )
 
+async def _rate_limit_and_queue(bot: Client, msg: Message, handler_type: str, **kwargs) -> bool:
+    if not msg.from_user:
+        return False
+
+    if kwargs.get('skip_rate_limit', False):
+        return False
+
+    try:
+        if msg.from_user.id == Var.OWNER_ID:
+            logger.debug(f"Owner {msg.from_user.id} bypassing rate limit for {handler_type} command")
+            return False
+
+        if not await rate_limiter.check_rate_limit(msg.from_user.id):
+            if await handle_rate_limited_request(bot, msg, handler_type, **kwargs):
+                logger.debug(f"Rate limited {handler_type} request queued for user {msg.from_user.id}")
+            else:
+                logger.warning(f"Failed to queue rate limited {handler_type} request for user {msg.from_user.id}")
+            return True
+    except Exception as e:
+        logger.error(f"Rate limiter failed for user {msg.from_user.id} in {handler_type} handler: {e}. Falling back to normal processing.")
+
+    return False
+
+
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
     if not await check_banned(bot, msg):
@@ -87,22 +111,11 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         await reply_user_err(msg, MSG_ERROR_NO_FILE)
         return
     
-    skip_rate_limit = kwargs.get('skip_rate_limit', False)
-    if not skip_rate_limit and msg.from_user:
-        try:
-            if msg.from_user.id == Var.OWNER_ID:
-                logger.debug(f"Owner {msg.from_user.id} bypassing rate limit for link command")
-            else:
-                if not await rate_limiter.check_rate_limit(msg.from_user.id):
-                    is_authorized = await rate_limiter.is_authorized_user(msg.from_user.id)
-                    if await handle_rate_limited_request(bot, msg, 'link', priority=is_authorized, **kwargs):
-                        logger.debug(f"Rate limited link request queued for user {msg.from_user.id} (priority: {is_authorized})")
-                    else:
-                        logger.warning(f"Failed to queue rate limited link request for user {msg.from_user.id}")
-                    return
-        except Exception as e:
-            logger.error(f"Rate limiter failed for user {msg.from_user.id} in link handler: {e}. Falling back to normal processing.")
+    notification_msg = kwargs.get('notification_msg')
     
+    if await _rate_limit_and_queue(bot, msg, 'link', **kwargs):
+        return
+
     parts = msg.text.split()
     num_files = 1
     if len(parts) > 1:
@@ -117,9 +130,9 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
     status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_REQUEST, quote=True)
     shortener_val = kwargs.get('shortener', Var.SHORTEN_MEDIA_LINKS)
     if num_files == 1:
-        await process_single(bot, msg, msg.reply_to_message, status_msg, shortener_val)
+        await process_single(bot, msg, msg.reply_to_message, status_msg, shortener_val, notification_msg=notification_msg)
     else:
-        await process_batch(bot, msg, msg.reply_to_message.id, num_files, status_msg, shortener_val)
+        await process_batch(bot, msg, msg.reply_to_message.id, num_files, status_msg, shortener_val, notification_msg=notification_msg)
 
 @StreamBot.on_message(
     filters.private &
@@ -138,24 +151,15 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
     shortener_val = await get_shortener_status(bot, msg)
     if not msg.from_user:
         return
-    
-    try:
-        if msg.from_user.id == Var.OWNER_ID:
-            logger.debug(f"Owner {msg.from_user.id} bypassing rate limit")
-        else:
-            if not await rate_limiter.check_rate_limit(msg.from_user.id):
-                is_authorized = await rate_limiter.is_authorized_user(msg.from_user.id)
-                if await handle_rate_limited_request(bot, msg, 'private', priority=is_authorized, **kwargs):
-                    logger.debug(f"Rate limited request queued for user {msg.from_user.id} (priority: {is_authorized})")
-                else:
-                    logger.warning(f"Failed to queue rate limited request for user {msg.from_user.id}")
-                return
-    except Exception as e:
-        logger.error(f"Rate limiter failed for user {msg.from_user.id}: {e}. Falling back to normal processing.")
-    
+
+    notification_msg = kwargs.get('notification_msg')
+
+    if await _rate_limit_and_queue(bot, msg, 'private', **kwargs):
+        return
+
     await log_newusr(bot, msg.from_user.id, msg.from_user.first_name or "")
     status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_FILE, quote=True)
-    await process_single(bot, msg, msg, status_msg, shortener_val)
+    await process_single(bot, msg, msg, status_msg, shortener_val, notification_msg=notification_msg)
 
 @StreamBot.on_message(
     filters.channel &
@@ -232,14 +236,39 @@ async def channel_receive_handler(bot: Client, msg: Message):
     except Exception as e:
         logger.error(f"Error in channel_receive_handler for message {msg.id}: {e}", exc_info=True)
 
-async def process_single(bot: Client, msg: Message, file_msg: Message, status_msg: Message, shortener_val: bool, original_request_msg: Optional[Message] = None):
+async def process_single(
+    bot: Client,
+    msg: Message,
+    file_msg: Message,
+    status_msg: Message,
+    shortener_val: bool,
+    original_request_msg: Optional[Message] = None,
+    notification_msg: Optional[Message] = None,
+    is_batch_process: bool = False
+):
     try:
         stored_msg = await fwd_media(file_msg)
         if not stored_msg:
             logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
             return None
         links = await gen_links(stored_msg, shortener=shortener_val)
-        if not original_request_msg:
+        if notification_msg:
+            try:
+                await handle_flood_wait(
+                    notification_msg.edit_text,
+                    MSG_LINKS.format(
+                        file_name=links['media_name'],
+                        file_size=links['media_size'],
+                        download_link=links['online_link'],
+                        stream_link=links['stream_link']
+                    ),
+                    parse_mode=enums.ParseMode.MARKDOWN,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    reply_markup=get_link_buttons(links)
+                )
+            except Exception as e:
+                logger.error(f"Error editing notification message with links: {e}", exc_info=True)
+        elif not original_request_msg:
             await send_link(msg, links)
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
             try:
@@ -309,8 +338,16 @@ async def process_single(bot: Client, msg: Message, file_msg: Message, status_ms
             error_id=secrets.token_hex(6)
         ))
         return None
-
-async def process_batch(bot: Client, msg: Message, start_id: int, count: int, status_msg: Message, shortener_val: bool):
+ 
+async def process_batch(
+    bot: Client,
+    msg: Message,
+    start_id: int,
+    count: int,
+    status_msg: Message,
+    shortener_val: bool,
+    notification_msg: Optional[Message] = None
+):
     processed = 0
     failed = 0
     links_list = []
@@ -337,26 +374,7 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             messages = []
         for m in messages:
             if m and m.media:
-                if msg.from_user and msg.from_user.id != Var.OWNER_ID:
-                    try:
-                        if not await rate_limiter.check_rate_limit(msg.from_user.id):
-                            logger.debug(f"User {msg.from_user.id} hit rate limit during batch processing, stopping batch")
-                            try:
-                                await handle_flood_wait(
-                                    msg.reply_text,
-                                    MSG_RATE_LIMIT_BATCH_PROCESSING.format(
-                                        processed=processed,
-                                        total=count
-                                    ),
-                                    quote=True
-                                )
-                            except Exception as e:
-                                logger.error(f"Error sending batch rate limit message: {e}")
-                            break
-                    except Exception as e:
-                        logger.error(f"Rate limiter failed during batch processing: {e}. Continuing with batch.")
-                
-                links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg)
+                links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg, is_batch_process=True)
                 if links:
                     links_list.append(links['online_link'])
                     processed += 1
@@ -408,3 +426,8 @@ async def process_batch(bot: Client, msg: Message, start_id: int, count: int, st
             failed=failed
         )
     )
+    if notification_msg:
+        try:
+            await handle_flood_wait(notification_msg.delete)
+        except Exception as e:
+            logger.debug(f"Failed to delete notification message after batch: {e}")

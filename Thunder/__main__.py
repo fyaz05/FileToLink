@@ -24,6 +24,7 @@ from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.keepalive import ping_server
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+from Thunder.bot.plugins.stream import link_handler, private_receive_handler
 from Thunder.utils.rate_limiter import rate_limiter
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
@@ -128,12 +129,12 @@ async def start_services():
 
     await import_plugins()
 
-    print("   ▶ Starting Rate Limiter initialization...")
+    print("   ▶ Starting Rate Limiter and Executor initialization...")
     try:
-        await rate_limiter.start_queue_processor()
-        print("   ✓ Rate limiter and queue processor started")
+        request_executor_task = asyncio.create_task(request_executor())
+        print("   ✓ Request executor service started")
     except Exception as e:
-        logger.error(f"   ✖ Failed to start rate limiter: {e}", exc_info=True)
+        logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
         return
 
     print("   ▶ Starting Web Server initialization...")
@@ -167,7 +168,7 @@ async def start_services():
     finally:
         print("   ▶ Shutting down services...")
         
-        for task in [locals().get("keepalive_task"), locals().get("token_cleanup_task")]:
+        for task in [locals().get("keepalive_task"), locals().get("token_cleanup_task"), locals().get("request_executor_task")]:
             if task:
                 task.cancel()
                 try:
@@ -201,6 +202,35 @@ async def schedule_token_cleanup():
             break
         except Exception as e:
             logger.error(f"Token cleanup error: {e}", exc_info=True)
+
+async def request_executor():
+    logger.info("Request executor started")
+    async for request_data in rate_limiter.queue_consumer():
+        try:
+            handler_type = request_data.get('handler_type')
+            bot = request_data.get('bot')
+            message = request_data.get('message')
+            kwargs = request_data.get('kwargs', {})
+            user_id = request_data.get('user_id')
+
+            if not all([handler_type, bot, message, user_id]):
+                logger.error(f"Skipping invalid request data: {request_data}")
+                continue
+
+            logger.debug(f"Executing queued {handler_type} request for user {user_id}")
+
+            if handler_type == 'private':
+                await private_receive_handler(bot, message, **kwargs)
+            elif handler_type == 'link':
+                await link_handler(bot, message, **kwargs)
+            else:
+                logger.error(f"Unknown handler type in request executor: {handler_type}")
+
+        except asyncio.CancelledError:
+            logger.info("Request executor cancelled, shutting down.")
+            break
+        except Exception as e:
+            logger.error(f"Error executing request for user {request_data.get('user_id')}: {e}", exc_info=True)
 
 if __name__ == '__main__':
     loop = asyncio.get_event_loop()
