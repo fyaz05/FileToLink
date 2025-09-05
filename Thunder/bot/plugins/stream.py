@@ -54,85 +54,63 @@ async def send_link(msg: Message, links: Dict[str, Any]):
         reply_markup=get_link_buttons(links)
     )
 
-async def _rate_limit_and_queue(bot: Client, msg: Message, handler_type: str, **kwargs) -> bool:
-    if not msg.from_user:
-        return False
-
-    if kwargs.get('skip_rate_limit', False):
-        return False
-
-    try:
-        if msg.from_user.id == Var.OWNER_ID:
-            logger.debug(f"Owner {msg.from_user.id} bypassing rate limit for {handler_type} command")
-            return False
-
-        if not await rate_limiter.check_rate_limit(msg.from_user.id):
-            if await handle_rate_limited_request(bot, msg, handler_type, **kwargs):
-                logger.debug(f"Rate limited {handler_type} request queued for user {msg.from_user.id}")
-            else:
-                logger.warning(f"Failed to queue rate limited {handler_type} request for user {msg.from_user.id}")
-            return True
-    except Exception as e:
-        logger.error(f"Rate limiter failed for user {msg.from_user.id} in {handler_type} handler: {e}. Falling back to normal processing.")
-
-    return False
-
-
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
-    if not await check_banned(bot, msg):
-        return
-    if not await require_token(bot, msg):
-        return
-    if not await force_channel_check(bot, msg):
-        return
-    shortener_val = await get_shortener_status(bot, msg)
-    if msg.from_user and not await db.is_user_exist(msg.from_user.id):
-        invite_link = f"https://t.me/{bot.me.username}?start=start"
-        await handle_flood_wait(
-            msg.reply_text,
-            MSG_ERROR_START_BOT.format(invite_link=invite_link),
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-            parse_mode=enums.ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)
-            ]]),
-            quote=True
-        )
-        return
-    if msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        if not await is_admin(bot, msg.chat.id):
-            await reply_user_err(msg, MSG_ERROR_NOT_ADMIN)
+    async def _actual_link_handler(client: Client, message: Message, **handler_kwargs):
+        if not await check_banned(client, message):
             return
-    if not msg.reply_to_message:
-        await reply_user_err(msg, MSG_ERROR_REPLY_FILE)
-        return
-    if not msg.reply_to_message.media:
-        await reply_user_err(msg, MSG_ERROR_NO_FILE)
-        return
-    
-    notification_msg = kwargs.get('notification_msg')
-    
-    if await _rate_limit_and_queue(bot, msg, 'link', **kwargs):
-        return
-
-    parts = msg.text.split()
-    num_files = 1
-    if len(parts) > 1:
-        try:
-            num_files = int(parts[1])
-            if not 1 <= num_files <= Var.MAX_BATCH_FILES:
-                await reply_user_err(msg, MSG_ERROR_NUMBER_RANGE.format(max_files=Var.MAX_BATCH_FILES))
+        if not await require_token(client, message):
+            return
+        if not await force_channel_check(client, message):
+            return
+        shortener_val = await get_shortener_status(client, message)
+        if message.from_user and not await db.is_user_exist(message.from_user.id):
+            invite_link = f"https://t.me/{client.me.username}?start=start"
+            await handle_flood_wait(
+                message.reply_text,
+                MSG_ERROR_START_BOT.format(invite_link=invite_link),
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                parse_mode=enums.ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)
+                ]]),
+                quote=True
+            )
+            return
+        if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            if not await is_admin(client, message.chat.id):
+                await reply_user_err(message, MSG_ERROR_NOT_ADMIN)
                 return
-        except ValueError:
-            await reply_user_err(msg, MSG_ERROR_INVALID_NUMBER)
+        if not message.reply_to_message:
+            await reply_user_err(message, MSG_ERROR_REPLY_FILE)
             return
-    status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_REQUEST, quote=True)
-    shortener_val = kwargs.get('shortener', Var.SHORTEN_MEDIA_LINKS)
-    if num_files == 1:
-        await process_single(bot, msg, msg.reply_to_message, status_msg, shortener_val, notification_msg=notification_msg)
-    else:
-        await process_batch(bot, msg, msg.reply_to_message.id, num_files, status_msg, shortener_val, notification_msg=notification_msg)
+        if not message.reply_to_message.media:
+            await reply_user_err(message, MSG_ERROR_NO_FILE)
+            return
+
+        notification_msg = handler_kwargs.get('notification_msg')
+
+        parts = message.text.split()
+        num_files = 1
+        if len(parts) > 1:
+            try:
+                num_files = int(parts[1])
+                if not 1 <= num_files <= Var.MAX_BATCH_FILES:
+                    await reply_user_err(message, MSG_ERROR_NUMBER_RANGE.format(max_files=Var.MAX_BATCH_FILES))
+                    return
+            except ValueError:
+                await reply_user_err(message, MSG_ERROR_INVALID_NUMBER)
+                return
+
+        status_msg = await handle_flood_wait(message.reply_text, MSG_PROCESSING_REQUEST, quote=True)
+        shortener_val = handler_kwargs.get('shortener', Var.SHORTEN_MEDIA_LINKS)
+        if num_files == 1:
+            await process_single(client, message, message.reply_to_message, status_msg, shortener_val, notification_msg=notification_msg)
+        else:
+            await process_batch(client, message, message.reply_to_message.id, num_files, status_msg, shortener_val, notification_msg=notification_msg)
+
+    await handle_rate_limited_request(bot, msg, _actual_link_handler, **kwargs)
+
 
 @StreamBot.on_message(
     filters.private &
@@ -142,24 +120,24 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
     group=4
 )
 async def private_receive_handler(bot: Client, msg: Message, **kwargs):
-    if not await check_banned(bot, msg):
-        return
-    if not await require_token(bot, msg):
-        return
-    if not await force_channel_check(bot, msg):
-        return
-    shortener_val = await get_shortener_status(bot, msg)
-    if not msg.from_user:
-        return
+    async def _actual_private_receive_handler(client: Client, message: Message, **handler_kwargs):
+        if not await check_banned(client, message):
+            return
+        if not await require_token(client, message):
+            return
+        if not await force_channel_check(client, message):
+            return
+        shortener_val = await get_shortener_status(client, message)
+        if not message.from_user:
+            return
 
-    notification_msg = kwargs.get('notification_msg')
+        notification_msg = handler_kwargs.get('notification_msg')
 
-    if await _rate_limit_and_queue(bot, msg, 'private', **kwargs):
-        return
+        await log_newusr(client, message.from_user.id, message.from_user.first_name or "")
+        status_msg = await handle_flood_wait(message.reply_text, MSG_PROCESSING_FILE, quote=True)
+        await process_single(client, message, message, status_msg, shortener_val, notification_msg=notification_msg)
 
-    await log_newusr(bot, msg.from_user.id, msg.from_user.first_name or "")
-    status_msg = await handle_flood_wait(msg.reply_text, MSG_PROCESSING_FILE, quote=True)
-    await process_single(bot, msg, msg, status_msg, shortener_val, notification_msg=notification_msg)
+    await handle_rate_limited_request(bot, msg, _actual_private_receive_handler, **kwargs)
 
 @StreamBot.on_message(
     filters.channel &
@@ -169,72 +147,92 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
     group=-1
 )
 async def channel_receive_handler(bot: Client, msg: Message):
-    if hasattr(Var, 'BANNED_CHANNELS') and msg.chat.id in Var.BANNED_CHANNELS:
-        try:
-            await handle_flood_wait(bot.leave_chat, msg.chat.id)
-        except Exception as e:
-            logger.error(f"Error leaving banned channel {msg.chat.id}: {e}")
-        return
-    if not await is_admin(bot, msg.chat.id):
-        logger.debug(f"Bot is not admin in channel {msg.chat.id} ({msg.chat.title or 'Unknown'}). Ignoring message.")
-        return
-        
-    if msg.sender_chat and msg.sender_chat.id:
-        try:
-            channel_id = msg.sender_chat.id
-            logger.debug(f"Checking rate limit for channel {channel_id}")
-            
-            if not await rate_limiter.check_rate_limit(channel_id):
-                logger.info(f"Rate limit exceeded for channel {channel_id}, skipping processing")
-                return
-        except Exception as e:
-            logger.error(f"Rate limiter failed for channel {msg.chat.id}: {e}. Falling back to normal processing.")
-    elif msg.from_user:
-        try:
-            user_id = msg.from_user.id
-            logger.debug(f"Checking rate limit for channel message from user {user_id}")
-            
-            if user_id == Var.OWNER_ID:
-                logger.debug(f"Owner {user_id} bypassing rate limit for channel message")
-            elif not await rate_limiter.check_rate_limit(user_id):
-                logger.info(f"Rate limit exceeded for user {user_id} in channel, skipping processing")
-                return
-        except Exception as e:
-            logger.error(f"Rate limiter failed for user {msg.from_user.id} in channel: {e}. Falling back to normal processing.")
-    else:
-        logger.debug(f"No user or channel info for message {msg.id}, skipping rate limit check")
-    
-    try:
-        stored_msg = await fwd_media(msg)
-        if not stored_msg:
-            logger.error(f"Failed to forward media from channel {msg.chat.id}. Ignoring.")
+    async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
+        notification_msg = handler_kwargs.get('notification_msg')
+
+        if hasattr(Var, 'BANNED_CHANNELS') and message.chat.id in Var.BANNED_CHANNELS:
+            try:
+                await handle_flood_wait(client.leave_chat, message.chat.id)
+            except Exception as e:
+                logger.error(f"Error leaving banned channel {message.chat.id}: {e}")
             return
-        shortener_val = await get_shortener_status(bot, msg)
-        links = await gen_links(stored_msg, shortener=shortener_val)
-        source_info = msg.chat.title or "Unknown Channel"
-        await handle_flood_wait(
-            stored_msg.reply_text,
-            MSG_NEW_FILE_REQUEST.format(
-                source_info=source_info,
-                id_=msg.chat.id,
-                online_link=links['online_link'],
-                stream_link=links['stream_link']
-            ),
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
-            quote=True
-        )
+        if not await is_admin(client, message.chat.id):
+            logger.debug(f"Bot is not admin in channel {message.chat.id} ({message.chat.title or 'Unknown'}). Ignoring message.")
+            return
+
         try:
-            await handle_flood_wait(msg.edit_reply_markup, reply_markup=get_link_buttons(links))
-        except MessageNotModified:
-            pass
-        except MessageDeleteForbidden:
-            logger.debug(f"Failed to edit reply markup for message {msg.id} due to permissions. Sending new link instead.")
-            await send_link(msg, links)
+            stored_msg = await fwd_media(message)
+            if not stored_msg:
+                logger.error(f"Failed to forward media from channel {message.chat.id}. Ignoring.")
+                return
+            shortener_val = await get_shortener_status(client, message)
+            links = await gen_links(stored_msg, shortener=shortener_val)
+            source_info = message.chat.title or "Unknown Channel"
+
+            if notification_msg:
+                try:
+                    await handle_flood_wait(
+                        notification_msg.edit_text,
+                        MSG_NEW_FILE_REQUEST.format(
+                            source_info=source_info,
+                            id_=message.chat.id,
+                            online_link=links['online_link'],
+                            stream_link=links['stream_link']
+                        ),
+                        link_preview_options=LinkPreviewOptions(is_disabled=True)
+                    )
+                except Exception as e:
+                    logger.error(f"Error editing notification message with links: {e}", exc_info=True)
+                    # Fallback: send as new message
+                    await handle_flood_wait(
+                        stored_msg.reply_text,
+                        MSG_NEW_FILE_REQUEST.format(
+                            source_info=source_info,
+                            id_=message.chat.id,
+                            online_link=links['online_link'],
+                            stream_link=links['stream_link']
+                        ),
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        quote=True
+                    )
+            else:
+                await handle_flood_wait(
+                    stored_msg.reply_text,
+                    MSG_NEW_FILE_REQUEST.format(
+                        source_info=source_info,
+                        id_=message.chat.id,
+                        online_link=links['online_link'],
+                        stream_link=links['stream_link']
+                    ),
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    quote=True
+                )
+
+            try:
+                await handle_flood_wait(message.edit_reply_markup, reply_markup=get_link_buttons(links))
+            except MessageNotModified:
+                pass
+            except MessageDeleteForbidden:
+                logger.debug(f"Failed to edit reply markup for message {message.id} due to permissions. Sending new link instead.")
+                await send_link(message, links)
+            except Exception as e:
+                logger.error(f"Error editing reply markup for message {message.id}: {e}", exc_info=True)
+                await send_link(message, links)
         except Exception as e:
-            logger.error(f"Error editing reply markup for message {msg.id}: {e}", exc_info=True)
-            await send_link(msg, links)
-    except Exception as e:
-        logger.error(f"Error in channel_receive_handler for message {msg.id}: {e}", exc_info=True)
+            logger.error(f"Error in _actual_channel_receive_handler for message {message.id}: {e}", exc_info=True)
+
+    rl_user_id = None
+    if msg.sender_chat and msg.sender_chat.id:
+        rl_user_id = msg.sender_chat.id
+    elif msg.from_user:
+        rl_user_id = msg.from_user.id
+    
+    if rl_user_id is None:
+        logger.debug(f"No identifiable user/channel for rate limiting for message {msg.id}. Skipping rate limit check and processing directly.")
+        await _actual_channel_receive_handler(bot, msg)
+        return
+
+    await handle_rate_limited_request(bot, msg, _actual_channel_receive_handler, rl_user_id=rl_user_id)
 
 async def process_single(
     bot: Client,
