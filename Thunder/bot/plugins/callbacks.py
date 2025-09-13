@@ -10,7 +10,12 @@ from Thunder.utils.broadcast import broadcast_ids
 from Thunder.utils.decorators import owner_only
 from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import *
+from Thunder.utils.messages import (
+    MSG_ABOUT, MSG_BROADCAST_CANCEL, MSG_BUTTON_ABOUT, MSG_BUTTON_CLOSE,
+    MSG_BUTTON_GET_HELP, MSG_BUTTON_GITHUB, MSG_BUTTON_JOIN_CHANNEL,
+    MSG_ERROR_BROADCAST_INSTRUCTION, MSG_ERROR_BROADCAST_RESTART,
+    MSG_ERROR_CALLBACK_UNSUPPORTED, MSG_HELP
+)
 from Thunder.vars import Var
 
 async def get_force_channel_button(client: Client):

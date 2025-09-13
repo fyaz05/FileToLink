@@ -8,9 +8,6 @@ from datetime import datetime
 
 from uvloop import install
 from pathlib import Path
-
-install()
-
 from aiohttp import web
 from pyrogram import idle
 
@@ -27,6 +24,8 @@ from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
 from Thunder.utils.rate_limiter import rate_limiter, request_executor
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
+
+install()
 
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
 VERSION = __version__

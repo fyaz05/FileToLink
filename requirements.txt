@@ -1,7 +1,7 @@
 aiohttp
 cloudscraper
 Jinja2
-kurigram
+kurigram==2.2.6
 motor
 psutil
 python-dotenv

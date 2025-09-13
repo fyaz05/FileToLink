@@ -5,7 +5,7 @@ import secrets
 from typing import Any, Dict, Optional
 
 from pyrogram import Client, enums, filters
-from pyrogram.errors import MessageNotModified, MessageDeleteForbidden
+from pyrogram.errors import MessageNotModified, MessageDeleteForbidden, MessageIdInvalid
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             LinkPreviewOptions, Message)
 
@@ -18,9 +18,23 @@ from Thunder.utils.decorators import (check_banned, get_shortener_status,
 from Thunder.utils.force_channel import force_channel_check
 from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import *
-from Thunder.utils.rate_limiter import rate_limiter, handle_rate_limited_request
+from Thunder.utils.messages import (
+    MSG_BATCH_LINKS_READY, MSG_BUTTON_DOWNLOAD, MSG_BUTTON_START_CHAT,
+    MSG_BUTTON_STREAM_NOW, MSG_CRITICAL_ERROR, MSG_DM_BATCH_PREFIX,
+    MSG_DM_SINGLE_PREFIX, MSG_ERROR_DM_FAILED, MSG_ERROR_INVALID_NUMBER,
+    MSG_ERROR_NO_FILE, MSG_ERROR_NOT_ADMIN, MSG_ERROR_NUMBER_RANGE,
+    MSG_ERROR_PROCESSING_MEDIA, MSG_ERROR_REPLY_FILE, MSG_ERROR_START_BOT,
+    MSG_LINKS, MSG_NEW_FILE_REQUEST, MSG_PROCESSING_BATCH,
+    MSG_PROCESSING_FILE, MSG_PROCESSING_REQUEST, MSG_PROCESSING_RESULT,
+    MSG_PROCESSING_STATUS
+)
+from Thunder.utils.rate_limiter import handle_rate_limited_request
 from Thunder.vars import Var
+
+BATCH_SIZE = 10
+LINK_CHUNK_SIZE = 20
+BATCH_UPDATE_INTERVAL = 5
+MESSAGE_DELAY = 0.5
 
 
 async def fwd_media(m_msg: Message) -> Optional[Message]:
@@ -33,11 +47,86 @@ async def fwd_media(m_msg: Message) -> Optional[Message]:
         logger.error(f"Error fwd_media copy: {e}", exc_info=True)
         return None
 
+
 def get_link_buttons(links):
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(MSG_BUTTON_STREAM_NOW, url=links['stream_link']),
         InlineKeyboardButton(MSG_BUTTON_DOWNLOAD, url=links['online_link'])
     ]])
+
+async def validate_request_common(client: Client, message: Message) -> Optional[bool]:
+    """Common validation logic for all request handlers.
+
+    Returns:
+        bool: Shortener status if validation passes, None if validation fails
+    """
+    if not await check_banned(client, message):
+        return None
+    if not await require_token(client, message):
+        return None
+    if not await force_channel_check(client, message):
+        return None
+    return await get_shortener_status(client, message)
+
+
+async def send_channel_links(target_msg: Message, links: Dict[str, Any], source_info: str, source_id: int):
+    """Send links for channel messages with consistent formatting."""
+    await handle_flood_wait(
+        target_msg.reply_text,
+        MSG_NEW_FILE_REQUEST.format(
+            source_info=source_info,
+            id_=source_id,
+            online_link=links['online_link'],
+            stream_link=links['stream_link']
+        ),
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        quote=True
+    )
+
+
+async def safe_edit_message(message: Message, text: str, **kwargs):
+    """Safely edit a message with proper error handling."""
+    try:
+        return await handle_flood_wait(message.edit_text, text, **kwargs)
+    except MessageNotModified:
+        pass
+    except MessageDeleteForbidden:
+        logger.debug(f"Failed to edit message {message.id} due to permissions.")
+    except Exception as e:
+        logger.error(f"Error editing message {message.id}: {e}", exc_info=True)
+
+
+async def safe_delete_message(message: Message):
+    """Safely delete a message with proper error handling."""
+    try:
+        await handle_flood_wait(message.delete)
+    except MessageDeleteForbidden:
+        logger.debug(f"Failed to delete message {message.id} due to permissions.")
+    except Exception as e:
+        logger.error(f"Error deleting message {message.id}: {e}", exc_info=True)
+
+
+async def send_dm_links(bot: Client, user_id: int, links: Dict[str, Any], chat_title: str):
+    """Send direct message with links to user."""
+    try:
+        dm_text = MSG_DM_SINGLE_PREFIX.format(chat_title=chat_title) + "\n" + \
+                  MSG_LINKS.format(
+                      file_name=links['media_name'],
+                      file_size=links['media_size'],
+                      download_link=links['online_link'],
+                      stream_link=links['stream_link']
+                  )
+        await handle_flood_wait(
+            bot.send_message,
+            chat_id=user_id,
+            text=dm_text,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+            parse_mode=enums.ParseMode.MARKDOWN,
+            reply_markup=get_link_buttons(links)
+        )
+    except Exception as e:
+        logger.error(f"Error sending DM to user {user_id}: {e}", exc_info=True)
+
 
 async def send_link(msg: Message, links: Dict[str, Any]):
     await handle_flood_wait(
@@ -54,16 +143,13 @@ async def send_link(msg: Message, links: Dict[str, Any]):
         reply_markup=get_link_buttons(links)
     )
 
+
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
     async def _actual_link_handler(client: Client, message: Message, **handler_kwargs):
-        if not await check_banned(client, message):
+        shortener_val = await validate_request_common(client, message)
+        if shortener_val is None:
             return
-        if not await require_token(client, message):
-            return
-        if not await force_channel_check(client, message):
-            return
-        shortener_val = await get_shortener_status(client, message)
         if message.from_user and not await db.is_user_exist(message.from_user.id):
             invite_link = f"https://t.me/{client.me.username}?start=start"
             await handle_flood_wait(
@@ -71,21 +157,20 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
                 MSG_ERROR_START_BOT.format(invite_link=invite_link),
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
                 parse_mode=enums.ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)
-                ]]),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)]]),
                 quote=True
             )
             return
-        if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-            if not await is_admin(client, message.chat.id):
-                await reply_user_err(message, MSG_ERROR_NOT_ADMIN)
-                return
-        if not message.reply_to_message:
-            await reply_user_err(message, MSG_ERROR_REPLY_FILE)
+
+        if (message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]
+                and not await is_admin(client, message.chat.id)):
+            await reply_user_err(message, MSG_ERROR_NOT_ADMIN)
             return
-        if not message.reply_to_message.media:
-            await reply_user_err(message, MSG_ERROR_NO_FILE)
+
+        if not message.reply_to_message or not message.reply_to_message.media:
+            await reply_user_err(
+                message,
+                MSG_ERROR_REPLY_FILE if not message.reply_to_message else MSG_ERROR_NO_FILE)
             return
 
         notification_msg = handler_kwargs.get('notification_msg')
@@ -96,7 +181,9 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
             try:
                 num_files = int(parts[1])
                 if not 1 <= num_files <= Var.MAX_BATCH_FILES:
-                    await reply_user_err(message, MSG_ERROR_NUMBER_RANGE.format(max_files=Var.MAX_BATCH_FILES))
+                    await reply_user_err(
+                        message,
+                        MSG_ERROR_NUMBER_RANGE.format(max_files=Var.MAX_BATCH_FILES))
                     return
             except ValueError:
                 await reply_user_err(message, MSG_ERROR_INVALID_NUMBER)
@@ -121,13 +208,9 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
 )
 async def private_receive_handler(bot: Client, msg: Message, **kwargs):
     async def _actual_private_receive_handler(client: Client, message: Message, **handler_kwargs):
-        if not await check_banned(client, message):
+        shortener_val = await validate_request_common(client, message)
+        if shortener_val is None:
             return
-        if not await require_token(client, message):
-            return
-        if not await force_channel_check(client, message):
-            return
-        shortener_val = await get_shortener_status(client, message)
         if not message.from_user:
             return
 
@@ -139,6 +222,7 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
 
     await handle_rate_limited_request(bot, msg, _actual_private_receive_handler, **kwargs)
 
+
 @StreamBot.on_message(
     filters.channel &
     filters.incoming &
@@ -148,23 +232,30 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
 )
 async def channel_receive_handler(bot: Client, msg: Message):
     async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
+        if not Var.ALLOW_CHANNEL_PROCESSING:
+            return
         notification_msg = handler_kwargs.get('notification_msg')
 
-        if hasattr(Var, 'BANNED_CHANNELS') and message.chat.id in Var.BANNED_CHANNELS:
+        is_banned_statically = hasattr(Var, 'BANNED_CHANNELS') and message.chat.id in Var.BANNED_CHANNELS
+        is_banned_dynamically = await db.is_channel_banned(message.chat.id) is not None
+
+        if is_banned_statically or is_banned_dynamically:
             try:
                 await handle_flood_wait(client.leave_chat, message.chat.id)
             except Exception as e:
                 logger.error(f"Error leaving banned channel {message.chat.id}: {e}")
             return
         if not await is_admin(client, message.chat.id):
-            logger.debug(f"Bot is not admin in channel {message.chat.id} ({message.chat.title or 'Unknown'}). Ignoring message.")
+            logger.debug(
+                f"Bot is not admin in channel {message.chat.id} "
+                f"({message.chat.title or 'Unknown'}). Ignoring message.")
             return
 
         try:
             stored_msg = await fwd_media(message)
             if not stored_msg:
-                logger.error(f"Failed to forward media from channel {message.chat.id}. Ignoring.")
-                return
+                logger.error(
+                    f"Failed to forward media from channel {message.chat.id}. Ignoring.")
             shortener_val = await get_shortener_status(client, message)
             links = await gen_links(stored_msg, shortener=shortener_val)
             source_info = message.chat.title or "Unknown Channel"
@@ -183,37 +274,14 @@ async def channel_receive_handler(bot: Client, msg: Message):
                     )
                 except Exception as e:
                     logger.error(f"Error editing notification message with links: {e}", exc_info=True)
-                    # Fallback: send as new message
-                    await handle_flood_wait(
-                        stored_msg.reply_text,
-                        MSG_NEW_FILE_REQUEST.format(
-                            source_info=source_info,
-                            id_=message.chat.id,
-                            online_link=links['online_link'],
-                            stream_link=links['stream_link']
-                        ),
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                        quote=True
-                    )
+                    await send_channel_links(stored_msg, links, source_info, message.chat.id)
             else:
-                await handle_flood_wait(
-                    stored_msg.reply_text,
-                    MSG_NEW_FILE_REQUEST.format(
-                        source_info=source_info,
-                        id_=message.chat.id,
-                        online_link=links['online_link'],
-                        stream_link=links['stream_link']
-                    ),
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    quote=True
-                )
+                await send_channel_links(stored_msg, links, source_info, message.chat.id)
 
             try:
                 await handle_flood_wait(message.edit_reply_markup, reply_markup=get_link_buttons(links))
-            except MessageNotModified:
-                pass
-            except MessageDeleteForbidden:
-                logger.debug(f"Failed to edit reply markup for message {message.id} due to permissions. Sending new link instead.")
+            except (MessageNotModified, MessageDeleteForbidden, MessageIdInvalid):
+                logger.debug(f"Failed to edit reply markup for message {message.id} due to not modified, permissions or invalid ID. Sending new link instead.")
                 await send_link(message, links)
             except Exception as e:
                 logger.error(f"Error editing reply markup for message {message.id}: {e}", exc_info=True)
@@ -234,6 +302,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
 
     await handle_rate_limited_request(bot, msg, _actual_channel_receive_handler, rl_user_id=rl_user_id)
 
+
 async def process_single(
     bot: Client,
     msg: Message,
@@ -241,8 +310,7 @@ async def process_single(
     status_msg: Message,
     shortener_val: bool,
     original_request_msg: Optional[Message] = None,
-    notification_msg: Optional[Message] = None,
-    is_batch_process: bool = False
+    notification_msg: Optional[Message] = None
 ):
     try:
         stored_msg = await fwd_media(file_msg)
@@ -251,43 +319,22 @@ async def process_single(
             return None
         links = await gen_links(stored_msg, shortener=shortener_val)
         if notification_msg:
-            try:
-                await handle_flood_wait(
-                    notification_msg.edit_text,
-                    MSG_LINKS.format(
-                        file_name=links['media_name'],
-                        file_size=links['media_size'],
-                        download_link=links['online_link'],
-                        stream_link=links['stream_link']
-                    ),
-                    parse_mode=enums.ParseMode.MARKDOWN,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    reply_markup=get_link_buttons(links)
-                )
-            except Exception as e:
-                logger.error(f"Error editing notification message with links: {e}", exc_info=True)
+            await safe_edit_message(
+                notification_msg,
+                MSG_LINKS.format(
+                    file_name=links['media_name'],
+                    file_size=links['media_size'],
+                    download_link=links['online_link'],
+                    stream_link=links['stream_link']
+                ),
+                parse_mode=enums.ParseMode.MARKDOWN,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                reply_markup=get_link_buttons(links)
+            )
         elif not original_request_msg:
             await send_link(msg, links)
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
-            try:
-                single_dm_text = MSG_DM_SINGLE_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + \
-                                MSG_LINKS.format(
-                                    file_name=links['media_name'],
-                                    file_size=links['media_size'],
-                                    download_link=links['online_link'],
-                                    stream_link=links['stream_link']
-                                )
-                await handle_flood_wait(
-                    bot.send_message,
-                    chat_id=msg.from_user.id,
-                    text=single_dm_text,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    parse_mode=enums.ParseMode.MARKDOWN,
-                    reply_markup=get_link_buttons(links)
-                )
-            except Exception as e:
-                logger.error(f"Error sending DM for single file: {e}", exc_info=True)
-                await reply_user_err(msg, MSG_ERROR_DM_FAILED)
+            await send_dm_links(bot, msg.from_user.id, links, msg.chat.title or "the chat")
         source_msg = original_request_msg if original_request_msg else msg
         source_info = ""
         source_id = 0
@@ -312,31 +359,20 @@ async def process_single(
                 quote=True
             )
         if status_msg:
-            try:
-                await handle_flood_wait(status_msg.delete)
-            except MessageDeleteForbidden:
-                logger.debug(f"Failed to delete status message {status_msg.id} due to permissions.")
-            except Exception as e:
-                logger.error(f"Error deleting status message {status_msg.id}: {e}", exc_info=True)
+            await safe_delete_message(status_msg)
         return links
     except Exception as e:
         logger.error(f"Error processing single file for message {file_msg.id}: {e}", exc_info=True)
         if status_msg:
-            try:
-                await handle_flood_wait(status_msg.edit_text, MSG_ERROR_PROCESSING_MEDIA)
-            except MessageNotModified:
-                pass
-            except MessageDeleteForbidden:
-                logger.debug(f"Failed to edit status message {status_msg.id} due to permissions.")
-            except Exception as edit_err:
-                logger.error(f"Error editing status message {status_msg.id} after processing error: {edit_err}", exc_info=True)
+            await safe_edit_message(status_msg, MSG_ERROR_PROCESSING_MEDIA)
         
         await notify_own(bot, MSG_CRITICAL_ERROR.format(
             error=str(e),
             error_id=secrets.token_hex(6)
         ))
         return None
- 
+
+
 async def process_batch(
     bot: Client,
     msg: Message,
@@ -349,15 +385,15 @@ async def process_batch(
     processed = 0
     failed = 0
     links_list = []
-    for batch_start in range(0, count, 10):
-        batch_size = min(10, count - batch_start)
+    for batch_start in range(0, count, BATCH_SIZE):
+        batch_size = min(BATCH_SIZE, count - batch_start)
         batch_ids = list(range(start_id + batch_start, start_id + batch_start + batch_size))
         try:
             await handle_flood_wait(
                 status_msg.edit_text,
                 MSG_PROCESSING_BATCH.format(
-                    batch_number=(batch_start // 10) + 1,
-                    total_batches=(count + 9) // 10,
+                    batch_number=(batch_start // BATCH_SIZE) + 1,
+                    total_batches=(count + BATCH_SIZE - 1) // BATCH_SIZE,
                     file_count=batch_size
                 )
             )
@@ -372,7 +408,7 @@ async def process_batch(
             messages = []
         for m in messages:
             if m and m.media:
-                links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg, is_batch_process=True)
+                links = await process_single(bot, msg, m, None, shortener_val, original_request_msg=msg)
                 if links:
                     links_list.append(links['online_link'])
                     processed += 1
@@ -380,7 +416,7 @@ async def process_batch(
                     failed += 1
             else:
                 failed += 1
-        if (processed + failed) % 5 == 0 or (processed + failed) == count:
+        if (processed + failed) % BATCH_UPDATE_INTERVAL == 0 or (processed + failed) == count:
             try:
                 await handle_flood_wait(
                     status_msg.edit_text,
@@ -392,8 +428,8 @@ async def process_batch(
                 )
             except MessageNotModified:
                 pass
-    for i in range(0, len(links_list), 20):
-        chunk = links_list[i:i+20]
+    for i in range(0, len(links_list), LINK_CHUNK_SIZE):
+        chunk = links_list[i:i+LINK_CHUNK_SIZE]
         chunk_text = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{chr(10).join(chunk)}`"
         await handle_flood_wait(
             msg.reply_text,
@@ -414,8 +450,8 @@ async def process_batch(
             except Exception as e:
                 logger.error(f"Error sending DM in batch: {e}", exc_info=True)
                 await reply_user_err(msg, MSG_ERROR_DM_FAILED)
-        if i + 20 < len(links_list):
-            await asyncio.sleep(0.5)
+        if i + LINK_CHUNK_SIZE < len(links_list):
+            await asyncio.sleep(MESSAGE_DELAY)
     await handle_flood_wait(
         status_msg.edit_text,
         MSG_PROCESSING_RESULT.format(
@@ -425,7 +461,4 @@ async def process_batch(
         )
     )
     if notification_msg:
-        try:
-            await handle_flood_wait(notification_msg.delete)
-        except Exception as e:
-            logger.debug(f"Failed to delete notification message after batch: {e}")
+        await safe_delete_message(notification_msg)

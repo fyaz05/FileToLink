@@ -120,13 +120,13 @@ Copy `config_sample.env` to `config.env` and configure:
 |----------|-------------|---------|
 | `MULTI_BOT_TOKENS` | Additional bot tokens | *(empty)* |
 | `FORCE_CHANNEL_ID` | Required channel join | *(empty)* |
+| `CHANNEL` | Allow processing of channel messages | `False` |
 | `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
 | `SLEEP_THRESHOLD` | Client switch threshold | `300` |
 | `WORKERS` | Async workers | `8` |
 | `NAME` | Bot name | `ThunderF2L` |
 | `BIND_ADDRESS` | Bind address | `0.0.0.0` |
 | `PING_INTERVAL` | Ping interval (seconds) | `840` |
-| `CACHE_SIZE` | Cache size (MB) | `100` |
 | `TOKEN_ENABLED` | Enable tokens | `False` |
 | `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
 | `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
@@ -182,12 +182,6 @@ nano config.env
 python -m Thunder
 ```
 
-### High Traffic Setup
-
-- Deploy multiple bot instances
-- Increase `WORKERS` value in config
-- Add multiple bot tokens for load balancing
-
 ## Usage
 
 ### Basic Usage
@@ -225,8 +219,8 @@ python -m Thunder
 | `/status`      | Check bot status, uptime, and resource usage.                        |
 | `/broadcast`   | Send a message to all users (supports text, media, buttons).         |
 | `/stats`       | View usage statistics and analytics.                                 |
-| `/ban`         | Ban a user (reply to message or use user ID).                        |
-| `/unban`       | Unban a user.                                                        |
+| `/ban`         | Ban a user or channel (reply to message or use user/channel ID).     |
+| `/unban`       | Unban a user or channel.                                              |
 | `/log`         | Send bot logs.                                                       |
 | `/restart`     | Restart the bot.                                                     |
 | `/shell`       | Execute a shell command (Use with extreme caution!).                 |

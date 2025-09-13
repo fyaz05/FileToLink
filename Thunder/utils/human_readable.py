@@ -1,5 +1,7 @@
 # Thunder/utils/human_readable.py
 
+from Thunder.utils.logger import logger
+
 _UNITS = ('', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y')
 
 def humanbytes(size: int, decimal_places: int = 2) -> str:
