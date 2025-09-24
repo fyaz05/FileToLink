@@ -232,7 +232,7 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
 )
 async def channel_receive_handler(bot: Client, msg: Message):
     async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
-        if not Var.ALLOW_CHANNEL_PROCESSING:
+        if not Var.CHANNEL:
             return
         notification_msg = handler_kwargs.get('notification_msg')
 

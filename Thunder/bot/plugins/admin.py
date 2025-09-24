@@ -239,7 +239,6 @@ async def ban_command(client: Client, message: Message):
             await db.add_banned_channel(
                 channel_id=target_id,
                 reason=reason,
-                ban_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 banned_by=banned_by_id
             )
             text = MSG_CHANNEL_BANNED.format(channel_id=target_id)
@@ -254,7 +253,6 @@ async def ban_command(client: Client, message: Message):
             await db.add_banned_user(
                 user_id=target_id,
                 reason=reason,
-                ban_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 banned_by=banned_by_id
             )
             text = MSG_ADMIN_USER_BANNED.format(user_id=target_id)

@@ -71,7 +71,7 @@ class Database:
 
     async def get_all_users(self):
         try:
-            return self.col.find({})
+            return await self.col.find({}).to_list(None)
         except Exception as e:
             logger.error(f"Error in get_all_users: {e}", exc_info=True)
             return []
@@ -87,7 +87,7 @@ class Database:
 
     async def add_banned_user(
         self, user_id: int, banned_by: Optional[int] = None,
-        reason: Optional[str] = None, ban_time: Optional[str] = None
+        reason: Optional[str] = None
     ):
         try:
             ban_data = {
@@ -126,7 +126,7 @@ class Database:
 
     async def add_banned_channel(
         self, channel_id: int, banned_by: Optional[int] = None,
-        reason: Optional[str] = None, ban_time: Optional[str] = None
+        reason: Optional[str] = None
     ):
         try:
             ban_data = {
