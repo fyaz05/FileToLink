@@ -12,7 +12,15 @@ def str_to_bool(val: str) -> bool:
     return val.lower() in ("true", "1", "t", "y", "yes")
 
 def str_to_int_set(val: str) -> Set[int]:
-    return {int(x) for x in val.split() if x.isdigit()} if val else set()
+    if not val:
+        return set()
+    result: Set[int] = set()
+    for x in val.split():
+        try:
+            result.add(int(x))
+        except (TypeError, ValueError):
+            continue
+    return result
 
 
 

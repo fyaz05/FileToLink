@@ -104,7 +104,7 @@ Copy `config_sample.env` to `config.env` and configure:
 | `API_HASH` | Telegram API Hash | `abc123def456` |
 | `BOT_TOKEN` | Bot token from @BotFather | `123456:ABCdefGHI` |
 | `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
-| `OWNER_ID` | Owner user ID(s) | `12345678` |
+| `OWNER_ID` | Owner user ID | `12345678` |
 | `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
 | `OWNER_USERNAME` | Owner username | `yourusername` |
 | `FQDN` | Domain/IP address | `files.example.com` |

@@ -71,10 +71,10 @@ class Database:
 
     async def get_all_users(self):
         try:
-            return await self.col.find({}).to_list(None)
+            return self.col.find({})
         except Exception as e:
             logger.error(f"Error in get_all_users: {e}", exc_info=True)
-            return []
+            return self.col.find({"_id": {"$exists": False}})
 
     async def delete_user(self, user_id: int):
         try:

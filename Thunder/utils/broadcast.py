@@ -46,7 +46,7 @@ async def broadcast_message(client: Client, message: Message):
     stats["total"] = await db.total_users_count()
     
     async def do_broadcast():
-        async for user in await db.get_all_users():
+        async for user in db.get_all_users():
             if stats["cancelled"]:
                 break
             try:

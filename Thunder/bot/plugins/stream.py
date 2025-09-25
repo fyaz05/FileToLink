@@ -55,11 +55,6 @@ def get_link_buttons(links):
     ]])
 
 async def validate_request_common(client: Client, message: Message) -> Optional[bool]:
-    """Common validation logic for all request handlers.
-
-    Returns:
-        bool: Shortener status if validation passes, None if validation fails
-    """
     if not await check_banned(client, message):
         return None
     if not await require_token(client, message):
@@ -70,7 +65,6 @@ async def validate_request_common(client: Client, message: Message) -> Optional[
 
 
 async def send_channel_links(target_msg: Message, links: Dict[str, Any], source_info: str, source_id: int):
-    """Send links for channel messages with consistent formatting."""
     await handle_flood_wait(
         target_msg.reply_text,
         MSG_NEW_FILE_REQUEST.format(
@@ -85,7 +79,6 @@ async def send_channel_links(target_msg: Message, links: Dict[str, Any], source_
 
 
 async def safe_edit_message(message: Message, text: str, **kwargs):
-    """Safely edit a message with proper error handling."""
     try:
         return await handle_flood_wait(message.edit_text, text, **kwargs)
     except MessageNotModified:
@@ -97,7 +90,6 @@ async def safe_edit_message(message: Message, text: str, **kwargs):
 
 
 async def safe_delete_message(message: Message):
-    """Safely delete a message with proper error handling."""
     try:
         await handle_flood_wait(message.delete)
     except MessageDeleteForbidden:
@@ -107,7 +99,6 @@ async def safe_delete_message(message: Message):
 
 
 async def send_dm_links(bot: Client, user_id: int, links: Dict[str, Any], chat_title: str):
-    """Send direct message with links to user."""
     try:
         dm_text = MSG_DM_SINGLE_PREFIX.format(chat_title=chat_title) + "\n" + \
                   MSG_LINKS.format(
@@ -190,7 +181,7 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
                 return
 
         status_msg = await handle_flood_wait(message.reply_text, MSG_PROCESSING_REQUEST, quote=True)
-        shortener_val = handler_kwargs.get('shortener', Var.SHORTEN_MEDIA_LINKS)
+        shortener_val = handler_kwargs.get('shortener', shortener_val)
         if num_files == 1:
             await process_single(client, message, message.reply_to_message, status_msg, shortener_val, notification_msg=notification_msg)
         else:
@@ -256,6 +247,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
             if not stored_msg:
                 logger.error(
                     f"Failed to forward media from channel {message.chat.id}. Ignoring.")
+                return
             shortener_val = await get_shortener_status(client, message)
             links = await gen_links(stored_msg, shortener=shortener_val)
             source_info = message.chat.title or "Unknown Channel"
