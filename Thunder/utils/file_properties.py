@@ -55,12 +55,6 @@ def get_fname(msg: Message) -> str:
         fname = getattr(media, 'file_name', None)
     
     if not fname:
-        media_type_str = "unknown_media"
-        if msg.media:
-            media_type_value = msg.media.value
-            if media_type_value:
-                media_type_str = str(media_type_value)
-        
         ext = "bin"
         if media and hasattr(media, '_file_type'):
             file_type = media._file_type

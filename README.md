@@ -4,199 +4,200 @@
 </p>
 
 <p align="center">
-  <b>High-performance Telegram File to Link Bot</b>
+  <b>High-Performance Telegram File-to-Link Bot</b>
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/">
-    <img src="https://img.shields.io/badge/python-3.13%2B-brightgreen" alt="Python">
-  </a>
-  <a href="https://github.com/KurimuzonAkuma/pyrogram/">
-    <img src="https://img.shields.io/badge/kurigram-blue" alt="Kurigram">
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/fyaz05/FileToLink.svg?color=brightgreen" alt="License">
-  </a>
-  <a href="https://t.me/Thunder_Updates">
-    <img src="https://img.shields.io/badge/Telegram-Channel-blue?logo=telegram" alt="Telegram Channel">
-  </a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
+  <a href="https://github.com/KurimuzonAkuma/pyrogram/"><img src="https://img.shields.io/badge/Kurigram-red?style=for-the-badge" alt="Kurigram"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/fyaz05/FileToLink?style=for-the-badge&color=green" alt="License"></a>
+  <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
 </p>
 
 <hr>
 
-<p align="center">
-  <a href="#about-the-project">About</a> •
-  <a href="#-features">✨ Features</a> •
-  <a href="#-how-it-works">🔍 How It Works</a> •
-  <a href="#-prerequisites">📋 Prerequisites</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#-deployment">📦 Deployment</a> •
-  <a href="#-usage">📱 Usage</a> •
-  <a href="#commands">⌨️ Commands</a>
-</p>
+## 📑 Table of Contents
+
+- [About](#about-the-project)
+- [Features](#features)
+- [How It Works](#how-it-works)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+- [Commands](#commands)
+- [Token System](#token-system)
+- [URL Shortening](#url-shortening)
+- [Rate Limiting](#rate-limiting-system)
+- [Reverse Proxy Setup](#reverse-proxy-setup)
+- [Contributing](#contributing)
+- [License](#license)
 
 <hr>
 
 ## About The Project
 
-> **Thunder** is a powerful, high-performance Telegram bot that transforms media files into streamable direct links. Share and access files via HTTP(S) links instead of downloading from Telegram, for a seamless media experience.
+**Thunder** is a powerful Telegram bot that transforms media files into streamable direct links. Share files via HTTP(S) links without downloading from Telegram.
 
-**Perfect for:**
+### 💡 Perfect For
 
-- 🚀 Download Telegram media at high speed.
-- ☁️ Leveraging free unlimited cloud storage with high-speed links.
-- 🎬 Content creators sharing media files.
-- 👥 Communities distributing resources.
-- 🎓 Educational platforms sharing materials.
-- 🌍 Anyone needing to share Telegram media.
+- 🚀 High-speed downloads from Telegram media
+- ☁️ Unlimited cloud storage with fast streaming links
+- 🎬 Content creators sharing media files
+- 👥 Communities distributing resources
+- 🎓 Educational platforms sharing materials
 
----
+## Features
 
-## ✨ Features
+### Core Functionality
+- ✅ **Direct Link Generation** - Convert Telegram media to streaming links
+- ✅ **Permanent Links** - Active as long as file exists
+- ✅ **Multi-Client Support** - Load balancing across clients
+- ✅ **Browser Streaming** - No download required
+- ✅ **MongoDB Integration** - Persistent data storage
+- ✅ **Channel/Group Support** - Works everywhere
 
-### 🧠 Core Functionality
+### Advanced Features
+- 🔐 **Token Authentication** - Secure access control
+- 🔗 **URL Shortening** - Clean, short links
+- 📦 **Batch Processing** - Multiple files at once
+- 👤 **User Authentication** - Channel join requirements
+- 🛡️ **Admin Controls** - Full user management
+- 🌍 **Custom Domain** - Your own streaming domain
+- 📊 **Rate Limiting** - Smart request queuing
 
-- **Generate Direct Links:** Convert Telegram media files into direct streaming links.
-- **Permanent Links:** Links remain active as long as the file exists in the storage channel.
-- **Multi-Client Support:** Distribute workload across multiple Telegram clients for high traffic.
-- **Browser Streaming:** Stream media files directly in the browser without downloading.
-- **Broadcast Messages:** Send messages to all users.
-- **Channel and Group Support:** Works in private chats, groups, and channels.
-- **MongoDB Integration:** Store user data and info with advanced database capabilities.
-- **HTTP/HTTPS Streaming:** Stream media with custom player support for all devices and browsers.
-- **Flood Wait Handling:** Centralized handling for Telegram flood waits.
+### Technical Capabilities
+- ⚡ **Async Architecture** - Built with aiohttp + asyncio
+- 📈 **Media Info Display** - Size, duration, format details
+- 📁 **All File Types** - Video, audio, documents, images
+- 💾 **Caching System** - Improved performance
+- 🎨 **Custom Templates** - Personalized messages
 
-### 🧩 Advanced Features
+## How It Works
 
-- **Token Authentication:** Secure access with optional token-based authentication.
-- **URL Shortening:** URL shortening for links.
-- **Batch Processing:** Generate links for multiple files in a group chat.
-- **User Authentication:** Require users to join channels before generating links.
-- **Admin Commands:** Manage users and control bot behavior.
-- **Custom Domain Support:** Use your own domain for streaming links.
-- **Customizable Templates:** Personalize HTML templates for download pages.
-- **Data Center Info:** Get data center information for users and files.
-- **Auto Set Commands:** Automatically set bot commands on startup.
+1. **Upload** → User sends media file to bot
+2. **Store** → Bot forwards to storage channel
+3. **Generate** → Unique streaming link created
+4. **Stream** → Direct browser streaming via link
+5. **Balance** → Multi-client load distribution
 
-### ⚙️ Technical Capabilities
+## Prerequisites
 
-- **Asynchronous Architecture:** Built with aiohttp and asyncio for high concurrency.
-- **Media Info Display:** Show file size, duration, format, and more.
-- **Multiple File Types:** Supports videos, audio, documents, images, stickers, and more.
-- **Caching System:** Reduce Telegram API calls and improve responsiveness.
-- **Customizable Messages:** Personalize messages sent to users.
-
----
-
-## 🔍 How It Works
-
-1. **Upload:** User sends a media file to the bot. The bot forwards it to a storage channel and stores metadata.
-2. **Link Generation:** A unique, secure link is generated and sent to the user.
-3. **Streaming:** When the link is opened, the server authenticates, retrieves the file from Telegram, and streams it directly to the browser.
-4. **Load Balancing:** Multiple Telegram clients distribute workload, with automatic switching and smart queuing for high traffic.
-
----
-
-## 📋 Prerequisites
-
-- 🐍 Python 3.13 or higher
-- 🍃 MongoDB
-- 🔑 Telegram API ID and Hash ([my.telegram.org/apps](https://my.telegram.org/apps))
-- 🤖 Bot Token from [@BotFather](https://t.me/BotFather)
-- 🌐 Server with public IP or domain
-- 📦 Telegram storage channel
-
----
+| Requirement | Description | Source |
+|------------|-------------|--------|
+| Python 3.13+ | Programming language | [python.org](https://python.org) |
+| MongoDB | Database | [mongodb.com](https://mongodb.com) |
+| Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
+| Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
+| Public Server | VPS/Dedicated server | Any provider |
+| Storage Channel | For file storage | Create in Telegram |
 
 ## Configuration
 
-Rename `config_sample.env` to `config.env` and edit the following variables:
+Copy `config_sample.env` to `config.env` and configure:
 
-### Required
+### Required Variables
 
-| Variable         | Description                                 | Example                                 |
-|------------------|---------------------------------------------|-----------------------------------------|
-| `API_ID`         | Telegram API ID from my.telegram.org         | `12345`                                 |
-| `API_HASH`       | Telegram API Hash from my.telegram.org       | `abc123def456`                          |
-| `BOT_TOKEN`      | Bot token from @BotFather                   | `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`  |
-| `BIN_CHANNEL`    | Channel ID for storing files (add bot as admin) | `-1001234567890`                    |
-| `OWNER_ID`       | Your Telegram user ID(s) (space-separated)   | `12345678 87654321`                     |
-| `DATABASE_URL`       | MongoDB connection string                | `mongodb+srv://user:pass@host/db` |
-| `OWNER_USERNAME` | Your Telegram username (without @)           | `yourusername`                          |
-| `FQDN`           | Your domain name or server IP                | `files.yourdomain.com`                  |
-| `HAS_SSL`        | Set to "True" if using HTTPS                | `True` or `False`                       |
-| `PORT`           | Web server port                              | `8080`                                  |
-| `NO_PORT`        | Hide port in URLs                            | `True` or `False`                       |
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `API_ID` | Telegram API ID | `12345678` |
+| `API_HASH` | Telegram API Hash | `abc123def456` |
+| `BOT_TOKEN` | Bot token from @BotFather | `123456:ABCdefGHI` |
+| `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
+| `OWNER_ID` | Owner user ID | `12345678` |
+| `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
+| `OWNER_USERNAME` | Owner username | `yourusername` |
+| `FQDN` | Domain/IP address | `files.example.com` |
+| `HAS_SSL` | HTTPS enabled | `True` or `False` |
+| `PORT` | Server port | `8080` |
 
-### Optional
+### Optional Variables
 
-| Variable             | Description                              | Default   | Example                       |
-|----------------------|------------------------------------------|-----------|-------------------------------|
-| `MULTI_BOT_TOKENS`   | Additional bot tokens for load balancing | *(empty)* | `MULTI_TOKEN1=`              |
-| `FORCE_CHANNEL_ID`   | Channel ID users must join               | *(empty)* | `-1001234567890`              |
-| `BANNED_CHANNELS`    | Space-separated banned channel IDs       | *(empty)* | `-1001234567890 -100987654321`|
-| `SLEEP_THRESHOLD`    | Threshold for client switching           | `300`      | `600`                          |
-| `WORKERS`            | Number of async workers                  | `8`     | `200`                         |
-| `NAME`               | Bot application name                     | `ThunderF2L` | `MyFileBot`                |
-| `BIND_ADDRESS`       | Address to bind web server               | `0.0.0.0` | `127.0.0.1`                   |
-| `PING_INTERVAL`      | Ping interval in seconds                 | `840`     | `1200`                        |
-| `CACHE_SIZE`         | Cache size in MB                         | `100`     | `200`                         |
-| `TOKEN_ENABLED`      | Enable token authentication system      | `False`   | `True`                         |
-| `SHORTEN_ENABLED`    | Enable URL shortening for tokens        | `False`   | `True`                         |
-| `SHORTEN_MEDIA_LINKS`| Enable URL shortening for media links   | `False`   | `True`                         |
-| `URL_SHORTENER_API_KEY` | API key for URL shortening service    | `""`      | `"abc123def456"`               |
-| `URL_SHORTENER_SITE` | URL shortening service to use           | `""`      | `"example.com"`                  |
-| `SET_COMMANDS`       | Automatically set bot commands on startup | `True`   | `False`                           |
+<details>
+<summary>Click to expand optional configuration</summary>
 
-> ℹ️ For all options, see `config_sample.env`.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MULTI_BOT_TOKENS` | Additional bot tokens | *(empty)* |
+| `FORCE_CHANNEL_ID` | Required channel join | *(empty)* |
+| `CHANNEL` | Allow processing of channel messages | `False` |
+| `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
+| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
+| `WORKERS` | Async workers | `8` |
+| `NAME` | Bot name | `ThunderF2L` |
+| `BIND_ADDRESS` | Bind address | `0.0.0.0` |
+| `PING_INTERVAL` | Ping interval (seconds) | `840` |
+| `TOKEN_ENABLED` | Enable tokens | `False` |
+| `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
+| `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
+| `URL_SHORTENER_API_KEY` | Shortener API key | *(empty)* |
+| `URL_SHORTENER_SITE` | Shortener service | *(empty)* |
+| `SET_COMMANDS` | Auto-set bot commands | `True` |
+| `RATE_LIMIT_ENABLED` | Enable rate limiting | `False` |
+| `MAX_FILES_PER_PERIOD` | Files per window | `2` |
+| `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
+| `MAX_QUEUE_SIZE` | Queue size | `100` |
+| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
+| `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
 
----
+</details>
 
-## 📦 Deployment
+## Quick Start
 
-### Using Docker (Recommended)
+### Docker Installation (Recommended)
 
 ```bash
-# Ensure you have configured config.env as per the Configuration section
-# Build and run with Docker
-docker build -t Thunder .
-docker run -d --name Thunder -p 8080:8080 Thunder
+# 1. Clone repository
+git clone https://github.com/fyaz05/FileToLink.git
+cd FileToLink
+
+# 2. Configure
+cp config_sample.env config.env
+nano config.env  # Edit your settings
+
+# 3. Build and run
+docker build -t thunder .
+docker run -d --name thunder -p 8080:8080 thunder
 ```
 
 ### Manual Installation
 
 ```bash
-# Ensure you have completed the "Getting Started" and "Configuration" sections
-# Run the bot
+# 1. Clone repository
+git clone https://github.com/fyaz05/FileToLink.git
+cd FileToLink
+
+# 2. Setup virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure
+cp config_sample.env config.env
+nano config.env
+
+# 5. Run bot
 python -m Thunder
 ```
 
-### ⚡ Scaling for High Traffic or Speed
+## Usage
 
-- Use multiple bot instances.
-- Increase `WORKERS` in `config.env` based on your server's capabilities.
+### Basic Usage
 
----
+1. **Start** → Send `/start` to bot
+2. **Authenticate** → Join required channels (if configured)
+3. **Upload** → Send any media file
+4. **Receive** → Get direct streaming link
+5. **Share** → Anyone can access via link
 
-## 📱 Usage
+### Advanced Usage
 
-### Basic
-
-1. **Start:** Send `/start` to your bot.
-2. **Authenticate:** Join required channels if configured by the admin.
-3. **Token Authentication:** If token system is enabled, you'll need a valid token to use the bot. When you try to use a feature requiring authorization, the bot will automatically generate a token for you with an activation link.
-4. **Upload:** Send any media file to the bot.
-5. **Get Link:** Receive a direct streaming link.
-6. **Share:** Anyone with the link can stream or download the file.
-
-### Advanced
-
-- **Batch Processing:** Use /link with a number to generate links for multiple files in a group chat (e.g., `/link 5`).
-- **Data Center Info:** Use `/dc` to get the data center of a user or file.
-- **Ping Bot:** Use `/ping` to check if the bot is online and measure response time.
-- **Admin Commands:** If you are the bot owner, use admin commands like `/status`, `/broadcast`, `/stats`, etc., to manage the bot and users.
-
----
+- **Batch Processing**: `/link 5` in groups (process 5 files)
+- **Data Center Info**: `/dc` for DC information
+- **Performance Check**: `/ping` for response time
+- **Admin Panel**: `/status` for bot statistics
 
 ## Commands
 
@@ -211,15 +212,15 @@ python -m Thunder
 | `/about`  | Get information about the bot. |
 | `/help`   | Show help and usage instructions. |
 
-### Admin Commands (for Bot Owner)
+### Admin Commands
 
 | Command        | Description                                                          |
 |----------------|----------------------------------------------------------------------|
 | `/status`      | Check bot status, uptime, and resource usage.                        |
 | `/broadcast`   | Send a message to all users (supports text, media, buttons).         |
 | `/stats`       | View usage statistics and analytics.                                 |
-| `/ban`         | Ban a user (reply to message or use user ID).                        |
-| `/unban`       | Unban a user.                                                        |
+| `/ban`         | Ban a user or channel (reply to message or use user/channel ID).     |
+| `/unban`       | Unban a user or channel.                                              |
 | `/log`         | Send bot logs.                                                       |
 | `/restart`     | Restart the bot.                                                     |
 | `/shell`       | Execute a shell command (Use with extreme caution!).                 |
@@ -228,57 +229,57 @@ python -m Thunder
 | `/deauthorize` | Remove permanent authorization from a user.                          |
 | `/listauth`    | List all permanently authorized users.                              |
 
-### Commands for @BotFather
-
-> If `SET_COMMANDS` is set to `True` in your configuration, the bot will automatically configure these commands.
-
-Paste the following into the BotFather "Edit Commands" section for your bot.
+### BotFather Commands Setup
 
 ```text
-start - Start the bot and get a welcome message
-link - (Group) Generate a direct link for a file or batch
-dc - Retrieve the data center (DC) information of a user or file
-ping - Check the bot's status and response time
-about - Get information about the bot
-help - Show help and usage instructions
-status - (Admin) View bot details and current workload
-stats - (Admin) View usage statistics and resource consumption
-broadcast - (Admin) Send a message to all users
-ban - (Admin) Ban a user
-unban - (Admin) Unban a user
-log - (Admin) Send bot logs
-restart - (Admin) Restart the bot
-shell - (Admin) Execute a shell command
-users - (Admin) Show the total number of users
-authorize - (Admin) Grant permanent access to a user
-deauthorize - (Admin) Remove permanent access from a user
-listauth - (Admin) List all authorized users
+start - Initialize bot
+link - Generate direct link
+dc - Get data center info
+ping - Check bot status
+about - Bot information
+help - Show help guide
+status - [Admin] System status
+stats - [Admin] Usage statistics
+broadcast - [Admin] Message all users
+ban - [Admin] Ban user
+unban - [Admin] Unban user
+users - [Admin] User count
+authorize - [Admin] Grant access
+deauthorize - [Admin] Revoke access
+listauth - [Admin] List authorized
 ```
 
----
+## Token System
 
-## 🔑 Token System
+Enable controlled access with tokens:
 
-Thunder Bot includes an optional token-based access control system that allows admins to control who can use the bot.
+1. Set `TOKEN_ENABLED=True` in config
+2. Users receive automatic tokens on first use
+3. Admins can grant permanent authorization
+4. Tokens include activation links
 
-### How It Works
+## URL Shortening
 
-1. Enable the token system by setting `TOKEN_ENABLED=True` in your config.
-2. Users without a valid token will receive an "Access Denied" message when trying to use the bot
-3. Admins can authorize users permanently, or users receive automatically generated tokens
- When a user sends a media to the bot, the bot will automatically shorten the link.
+Configure URL shortening:
 
-## 🔗 Url Shortening
+```env
+SHORTEN_ENABLED=True
+SHORTEN_MEDIA_LINKS=True
+URL_SHORTENER_API_KEY=your_api_key
+URL_SHORTENER_SITE=shortener.example.com
+```
 
-Thunder Bot supports URL shortening for both media links and token activation links.
+## Rate Limiting System
 
-### How It Works
+Prevent abuse with intelligent rate limiting:
 
-1. Provide a valid URL shortener API key and site in `URL_SHORTENER_API_KEY` and `URL_SHORTENER_SITE`.
-2. Enable URL shortening in token activation links by setting `SHORTEN_ENABLED=True` in your config.
-3. Enable URL shortening in media links links by setting `SHORTEN_MEDIA_LINKS=True` in your config.
+- **Per-User Limits** - Configurable request quotas
+- **Global Limits** - System-wide control
+- **Smart Queuing** - Queue excess requests
+- **Priority Access** - Owners bypass limits
+- **User Feedback** - Queue notifications
 
----
+## Reverse Proxy Setup
 
 <details>
 <summary><b>Reverse Proxy with Cloudflare SSL</b></summary>
@@ -443,44 +444,35 @@ Your reverse proxy is now securely streaming files behind Cloudflare, powered by
 
 </details>
 
----
+## Contributing
 
-## 🤝 Contributing
+Contributions welcome! Please:
 
-Contributions are welcome! Please follow these steps:
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/amazing`)
+3. Commit changes (`git commit -m 'Add feature'`)
+4. Push branch (`git push origin feature/amazing`)
+5. Open Pull Request
 
-1. Fork the repository.
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4. Push to the branch (`git push origin feature/AmazingFeature`).
-5. Open a Pull Request.
+## License
 
----
+Licensed under [Apache License 2.0](LICENSE). See LICENSE file for details.
 
-## 📄 License
+## 🙏 Acknowledgments
 
-This repository is unlicensed and provided as-is without any warranty. No permission is granted to use, copy, modify, or distribute this software for any purpose.
+- [Kurigram](https://github.com/KurimuzonAkuma/pyrogram/) - Telegram MTProto API Framework
+- [aiohttp](https://github.com/aio-libs/aiohttp) - Async HTTP client/server
+- [Motor](https://github.com/mongodb/motor) - Async MongoDB driver
+- [TgCrypto](https://github.com/pyrogram/tgcrypto) - Fast encryption library
 
----
+## ⚠️ Disclaimer
 
-## 👏 Acknowledgements
-
-- [Kurigram](https://github.com/KurimuzonAkuma/pyrogram/) – Telegram MTProto API Client Library
-- [AIOHTTP](https://github.com/aio-libs/aiohttp) – Async HTTP client/server framework
-- [Motor](https://github.com/mongodb/motor) – Async MongoDB driver
-- [TgCrypto](https://github.com/pyrogram/tgcrypto) – Fast cryptography library for Telegram
-- All contributors who have helped improve the project.
-
----
-
-## 📢 Disclaimer
-
-> This project is not affiliated with Telegram. Use at your own risk and responsibility.
-> Comply with Telegram's Terms of Service and your local regulations regarding content distribution.
+This project is not affiliated with Telegram. Use responsibly and comply with Telegram's Terms of Service and local regulations.
 
 ---
 
 <p align="center">
-  ⭐ <b>Like this project? Give it a star!</b> ⭐<br>
-  🐛 <b>Found a bug or have a feature request?</b> <a href="https://github.com/fyaz05/FileToLink/issues/new">Open an issue</a>
+  <b>⭐ Star this project if you find it useful!</b><br>
+  <a href="https://github.com/fyaz05/FileToLink/issues/new">Report Bug</a> •
+  <a href="https://github.com/fyaz05/FileToLink/issues/new">Request Feature</a>
 </p>

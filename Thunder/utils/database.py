@@ -12,6 +12,7 @@ class Database:
         self.db = self._client[database_name]
         self.col: AsyncIOMotorCollection = self.db.users
         self.banned_users_col: AsyncIOMotorCollection = self.db.banned_users
+        self.banned_channels_col: AsyncIOMotorCollection = self.db.banned_channels
         self.token_col: AsyncIOMotorCollection = self.db.tokens
         self.authorized_users_col: AsyncIOMotorCollection = self.db.authorized_users
         self.restart_message_col: AsyncIOMotorCollection = self.db.restart_message
@@ -19,6 +20,7 @@ class Database:
     async def ensure_indexes(self):
         try:
             await self.banned_users_col.create_index("user_id", unique=True)
+            await self.banned_channels_col.create_index("channel_id", unique=True)
             await self.token_col.create_index("token", unique=True)
             await self.authorized_users_col.create_index("user_id", unique=True)
             await self.col.create_index("id", unique=True)
@@ -67,12 +69,12 @@ class Database:
             logger.error(f"Error in total_users_count: {e}", exc_info=True)
             return 0
 
-    async def get_all_users(self):
+    def get_all_users(self):
         try:
             return self.col.find({})
         except Exception as e:
             logger.error(f"Error in get_all_users: {e}", exc_info=True)
-            return []
+            return self.col.find({"_id": {"$exists": False}})
 
     async def delete_user(self, user_id: int):
         try:
@@ -85,7 +87,7 @@ class Database:
 
     async def add_banned_user(
         self, user_id: int, banned_by: Optional[int] = None,
-        reason: Optional[str] = None, ban_time: Optional[str] = None
+        reason: Optional[str] = None
     ):
         try:
             ban_data = {
@@ -120,6 +122,45 @@ class Database:
             return await self.banned_users_col.find_one({"user_id": user_id})
         except Exception as e:
             logger.error(f"Error in is_user_banned for user {user_id}: {e}", exc_info=True)
+            return None
+
+    async def add_banned_channel(
+        self, channel_id: int, banned_by: Optional[int] = None,
+        reason: Optional[str] = None
+    ):
+        try:
+            ban_data = {
+                "channel_id": channel_id,
+                "banned_at": datetime.datetime.utcnow(),
+                "banned_by": banned_by,
+                "reason": reason
+            }
+            await self.banned_channels_col.update_one(
+                {"channel_id": channel_id},
+                {"$set": ban_data},
+                upsert=True
+            )
+            logger.debug(f"Added/Updated banned channel {channel_id}. Reason: {reason}")
+        except Exception as e:
+            logger.error(f"Error in add_banned_channel for channel {channel_id}: {e}", exc_info=True)
+            raise
+
+    async def remove_banned_channel(self, channel_id: int) -> bool:
+        try:
+            result = await self.banned_channels_col.delete_one({"channel_id": channel_id})
+            if result.deleted_count > 0:
+                logger.debug(f"Removed banned channel {channel_id}.")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error in remove_banned_channel for channel {channel_id}: {e}", exc_info=True)
+            return False
+
+    async def is_channel_banned(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.banned_channels_col.find_one({"channel_id": channel_id})
+        except Exception as e:
+            logger.error(f"Error in is_channel_banned for channel {channel_id}: {e}", exc_info=True)
             return None
 
     async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime, activated: bool) -> None:

@@ -1,12 +1,11 @@
 # Thunder/utils/bot_utils.py
 
 import asyncio
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import quote
 
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus
-from pyrogram.errors import FloodWait
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             LinkPreviewOptions, Message, User)
 

@@ -2,7 +2,6 @@
 
 from pyrogram import Client
 from Thunder.vars import Var
-from Thunder.utils.logger import logger
 
 StreamBot = Client(
     name="Web Streamer",

@@ -14,7 +14,12 @@ from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
 from Thunder.utils.database import db
 from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import *
+from Thunder.utils.messages import (
+    MSG_INVALID_BROADCAST_CMD,
+    MSG_BROADCAST_START,
+    MSG_BUTTON_CANCEL_BROADCAST,
+    MSG_BROADCAST_COMPLETE
+)
 from Thunder.utils.time_format import get_readable_time
 
 
@@ -41,7 +46,7 @@ async def broadcast_message(client: Client, message: Message):
     stats["total"] = await db.total_users_count()
     
     async def do_broadcast():
-        async for user in await db.get_all_users():
+        async for user in db.get_all_users():
             if stats["cancelled"]:
                 break
             try:
