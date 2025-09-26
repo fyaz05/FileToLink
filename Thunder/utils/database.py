@@ -69,7 +69,7 @@ class Database:
             logger.error(f"Error in total_users_count: {e}", exc_info=True)
             return 0
 
-    async def get_all_users(self):
+    def get_all_users(self):
         try:
             return self.col.find({})
         except Exception as e:
