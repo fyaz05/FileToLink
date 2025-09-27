@@ -217,6 +217,13 @@ async def media_delivery(request: web.Request):
             if range_header:
                 headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
+            if request.method == 'HEAD':
+                work_loads[client_id] -= 1
+                return web.Response(
+                    status=206 if range_header else 200,
+                    headers=headers
+                )
+
             async def stream_generator():
                 try:
                     bytes_sent = 0

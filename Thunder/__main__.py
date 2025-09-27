@@ -178,6 +178,18 @@ async def start_services():
                 await request_executor_task
             except asyncio.CancelledError:
                 pass
+        try:
+            await StreamBot.stop()
+        except Exception:
+            pass
+        try:
+            await cleanup_clients()
+        except Exception:
+            pass
+        try:
+            await rate_limiter.shutdown()
+        except Exception:
+            pass
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
