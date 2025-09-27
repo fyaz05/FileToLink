@@ -190,9 +190,11 @@ class RateLimiter:
                     request_data = queue.popleft()
 
                 user_id = request_data['user_id']
+                processed = False
                 if not self.is_owner(user_id):
                     if not await self.check_limits(user_id, record=True):
                         await self._requeue_request(request_data, queue_type)
+                        await asyncio.sleep(0.5)
                         continue
 
                 logger.debug(f"Processing request for user {user_id} from {queue_type} queue.")
@@ -209,17 +211,21 @@ class RateLimiter:
                         file_times = self.file_processing_times.setdefault(file_identifier, deque(maxlen=100))
                         file_times.append(processing_time)
 
+                    processed = True
+
                 except FloodWait as e:
                     logger.warning(f"FloodWait for user {user_id}, waiting {e.value}s before re-queuing.")
                     await asyncio.sleep(e.value)
                     await self._requeue_request(request_data, queue_type)
                 except Exception as e:
                     logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
+                    processed = True
                 finally:
                     async with self.request_lock:
-                        self.user_queue_counts[user_id] -= 1
-                        if self.user_queue_counts[user_id] == 0:
-                            del self.user_queue_counts[user_id]
+                        if processed and user_id in self.user_queue_counts:
+                            self.user_queue_counts[user_id] -= 1
+                            if self.user_queue_counts[user_id] <= 0:
+                                self.user_queue_counts.pop(user_id, None)
 
             except asyncio.CancelledError:
                 logger.info("Request executor cancelled, shutting down.")

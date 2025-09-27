@@ -91,8 +91,19 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if not match:
         raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
 
-    start = int(match.group("start")) if match.group("start") else 0
-    end = int(match.group("end")) if match.group("end") else file_size - 1
+    start_str = match.group("start")
+    end_str = match.group("end")
+    if start_str:
+        start = int(start_str)
+        end = int(end_str) if end_str else file_size - 1
+    else:
+        if not end_str:
+            raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
+        suffix_len = int(end_str)
+        if suffix_len <= 0:
+            raise web.HTTPRequestRangeNotSatisfiable(headers={"Content-Range": f"bytes */{file_size}"})
+        start = max(file_size - suffix_len, 0)
+        end = file_size - 1
 
     if start < 0 or end >= file_size or start > end:
         raise web.HTTPRequestRangeNotSatisfiable(

@@ -343,7 +343,13 @@ async def run_shell_command(client: Client, message: Message):
             await reply(message, text=output, parse_mode=ParseMode.HTML)
             
     except Exception as e:
-        await handle_flood_wait(
-            status_msg.edit_text,
-            MSG_SHELL_ERROR.format(error=html.escape(str(e))),
-            parse_mode=ParseMode.HTML)
+        try:
+            await handle_flood_wait(
+                status_msg.edit_text,
+                MSG_SHELL_ERROR.format(error=html.escape(str(e))),
+                parse_mode=ParseMode.HTML)
+        except Exception:
+            await reply(
+                message,
+                text=MSG_SHELL_ERROR.format(error=html.escape(str(e))),
+                parse_mode=ParseMode.HTML)

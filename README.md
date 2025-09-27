@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <b>High-Performance Telegram File-to-Link Bot</b>
+  <b>High-Performance Telegram File-to-Link Bot for Direct Links & Streaming</b>
 </p>
 
 <p align="center">
@@ -18,133 +18,101 @@
 
 ## 📑 Table of Contents
 
-- [About](#about-the-project)
-- [Features](#features)
+- [About The Project](#about-the-project)
 - [How It Works](#how-it-works)
-- [Prerequisites](#prerequisites)
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
 - [Configuration](#configuration)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-- [Commands](#commands)
-- [Token System](#token-system)
-- [URL Shortening](#url-shortening)
-- [Rate Limiting](#rate-limiting-system)
-- [Reverse Proxy Setup](#reverse-proxy-setup)
-- [Contributing](#contributing)
+  - [Essential Configuration](#essential-configuration)
+  - [Optional Configuration](#optional-configuration)
+- [Usage and Commands](#usage-and-commands)
+  - [Basic Usage](#basic-usage)
+  - [Commands Reference](#commands-reference)
+- [Advanced Feature Setup](#advanced-feature-setup)
+  - [Token System](#token-system)
+  - [URL Shortening](#url-shortening)
+  - [Rate Limiting System](#rate-limiting-system)
+- [Production Deployment Guide](#production-deployment-guide)
+  - [Custom Domain & FQDN System](#custom-domain--fqdn-system)
+  - [Reverse Proxy Setup](#reverse-proxy-setup)
+- [Support & Community](#support--community)
+  - [Troubleshooting & FAQ](#troubleshooting--faq)
+  - [Contributing](#contributing)
 - [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 <hr>
 
 ## About The Project
 
-**Thunder** is a powerful Telegram bot that transforms media files into streamable direct links. Share files via HTTP(S) links without downloading from Telegram.
+**Thunder** is a powerful Telegram bot that transforms Telegram files into high-speed direct links, perfect for both streaming and rapid downloading. Share files via HTTP(S) links without needing to download them from the Telegram client first.
 
 ### 💡 Perfect For
 
-- 🚀 High-speed downloads from Telegram media
-- ☁️ Unlimited cloud storage with fast streaming links
-- 🎬 Content creators sharing media files
-- 👥 Communities distributing resources
-- 🎓 Educational platforms sharing materials
-
-## Features
-
-### Core Functionality
-- ✅ **Direct Link Generation** - Convert Telegram media to streaming links
-- ✅ **Permanent Links** - Active as long as file exists
-- ✅ **Multi-Client Support** - Load balancing across clients
-- ✅ **Browser Streaming** - No download required
-- ✅ **MongoDB Integration** - Persistent data storage
-- ✅ **Channel/Group Support** - Works everywhere
-
-### Advanced Features
-- 🔐 **Token Authentication** - Secure access control
-- 🔗 **URL Shortening** - Clean, short links
-- 📦 **Batch Processing** - Multiple files at once
-- 👤 **User Authentication** - Channel join requirements
-- 🛡️ **Admin Controls** - Full user management
-- 🌍 **Custom Domain** - Your own streaming domain
-- 📊 **Rate Limiting** - Smart request queuing
-
-### Technical Capabilities
-- ⚡ **Async Architecture** - Built with aiohttp + asyncio
-- 📈 **Media Info Display** - Size, duration, format details
-- 📁 **All File Types** - Video, audio, documents, images
-- 💾 **Caching System** - Improved performance
-- 🎨 **Custom Templates** - Personalized messages
+-   🚀 Bypassing Telegram's built-in download speed limits
+-   ☁️ Unlimited cloud storage with fast streaming and download links
+-   🎬 Content creators sharing media files
+-   👥 Communities distributing resources
+-   🎓 Educational platforms sharing materials
 
 ## How It Works
 
-1. **Upload** → User sends media file to bot
-2. **Store** → Bot forwards to storage channel
-3. **Generate** → Unique streaming link created
-4. **Stream** → Direct browser streaming via link
-5. **Balance** → Multi-client load distribution
+```
+User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct Link → Direct Download / Streaming
+```
 
-## Prerequisites
+1.  **Upload** → User sends any file to the bot.
+2.  **Store** → The bot forwards the file to your private storage channel (`BIN_CHANNEL`), where it is permanently saved to generate the link.
+3.  **Generate** → A unique, permanent link is created.
+4.  **Stream/Download** → Anyone with the link can stream or download the file directly in their browser.
+5.  **Balance** → Multi-client support distributes the load for high availability.
+
+## Features
+
+#### Core Functionality
+- ✅ **Direct Link Generation** - Convert any Telegram file into a direct HTTP(S) link.
+- ✅ **Permanent Links** - Links remain active as long as the file exists in the storage channel.
+- ✅ **Browser Streaming & Downloading** - Stream media directly or download files at high speed without a Telegram client.
+- ✅ **All File Types** - Supports video, audio, documents, images, and any other file format.
+- ✅ **Batch Processing** - Generate links for multiple files at once with a single command.
+
+#### Performance & Scalability
+- ✅ **Multi-Client Support** - Distributes traffic across multiple Telegram bots to avoid limits and increase throughput.
+- ✅ **Async Architecture** - Built with `aiohttp` and `asyncio` for non-blocking, high-performance operations.
+- ✅ **MongoDB Integration** - Ensures persistent and reliable data storage.
+
+#### Security & Control
+- 🔐 **Token Authentication** - Secure user access with a time-limited token system.
+- 🛡️ **Admin Controls** - Full suite of commands for user and bot management.
+- 👤 **User Authentication** - Require users to join a specific channel before they can use the bot.
+- ✅ **Channel/Group Support** - Fully functional in private chats, groups, and channels.
+
+#### Customization
+- 🌍 **Custom Domain** - Serve files from your own domain for a professional look.
+- 🔗 **URL Shortening** - Integrate with URL shortener services for clean, shareable links.
+- 🎨 **Custom Templates** - Personalize messages sent by the bot to match your brand.
+- 📈 **Media Info Display** - Shows file size, duration, and format details in the response message.
+
+## Getting Started
+
+This section covers the system requirements and step-by-step installation guide for setting up Thunder.
+
+### Prerequisites
 
 | Requirement | Description | Source |
-|------------|-------------|--------|
-| Python 3.13+ | Programming language | [python.org](https://python.org) |
+| :--- | :--- | :--- |
+| Python 3.13 | Programming language | [python.org](https://python.org) |
 | MongoDB | Database | [mongodb.com](https://mongodb.com) |
 | Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
 | Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
 | Public Server | VPS/Dedicated server | Any provider |
 | Storage Channel | For file storage | Create in Telegram |
 
-## Configuration
+### Installation
 
-Copy `config_sample.env` to `config.env` and configure:
-
-### Required Variables
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `API_ID` | Telegram API ID | `12345678` |
-| `API_HASH` | Telegram API Hash | `abc123def456` |
-| `BOT_TOKEN` | Bot token from @BotFather | `123456:ABCdefGHI` |
-| `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
-| `OWNER_ID` | Owner user ID | `12345678` |
-| `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
-| `OWNER_USERNAME` | Owner username | `yourusername` |
-| `FQDN` | Domain/IP address | `files.example.com` |
-| `HAS_SSL` | HTTPS enabled | `True` or `False` |
-| `PORT` | Server port | `8080` |
-
-### Optional Variables
-
-<details>
-<summary>Click to expand optional configuration</summary>
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MULTI_BOT_TOKENS` | Additional bot tokens | *(empty)* |
-| `FORCE_CHANNEL_ID` | Required channel join | *(empty)* |
-| `CHANNEL` | Allow processing of channel messages | `False` |
-| `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
-| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
-| `WORKERS` | Async workers | `8` |
-| `NAME` | Bot name | `ThunderF2L` |
-| `BIND_ADDRESS` | Bind address | `0.0.0.0` |
-| `PING_INTERVAL` | Ping interval (seconds) | `840` |
-| `TOKEN_ENABLED` | Enable tokens | `False` |
-| `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
-| `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
-| `URL_SHORTENER_API_KEY` | Shortener API key | *(empty)* |
-| `URL_SHORTENER_SITE` | Shortener service | *(empty)* |
-| `SET_COMMANDS` | Auto-set bot commands | `True` |
-| `RATE_LIMIT_ENABLED` | Enable rate limiting | `False` |
-| `MAX_FILES_PER_PERIOD` | Files per window | `2` |
-| `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
-| `MAX_QUEUE_SIZE` | Queue size | `100` |
-| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
-| `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
-
-</details>
-
-## Quick Start
-
-### Docker Installation (Recommended)
+#### Docker Installation (Recommended)
 
 ```bash
 # 1. Clone repository
@@ -160,7 +128,8 @@ docker build -t thunder .
 docker run -d --name thunder -p 8080:8080 thunder
 ```
 
-### Manual Installation
+<details>
+<summary>Manual Installation</summary>
 
 ```bash
 # 1. Clone repository
@@ -182,54 +151,103 @@ nano config.env
 python -m Thunder
 ```
 
-## Usage
+> **Tip:** Start with the essential configuration to get Thunder running, then add optional features as needed.
+
+</details>
+
+## Configuration
+
+Copy `config_sample.env` to `config.env` and fill in your values.
+
+### Essential Configuration
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `API_ID` | Telegram API ID | `12345678` |
+| `API_HASH` | Telegram API Hash | `abc123def456` |
+| `BOT_TOKEN` | Bot token from @BotFather | `123456:ABCdefGHI` |
+| `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
+| `OWNER_ID` | Owner user ID | `12345678` |
+| `OWNER_USERNAME` | Owner username | `yourusername` |
+| `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
+| `FQDN` | Domain/IP address | `f2l.thunder.com` |
+| `HAS_SSL` | HTTPS enabled | `True` or `False` |
+| `PORT` | Server port | `8080` |
+| `NO_PORT` | Hide port in URLs | `True` or `False` |
+
+<details>
+<summary><h3>Optional Configuration</h3></summary>
+
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `MULTI_TOKEN1` | Additional bot token 1 (use MULTI_TOKEN1, MULTI_TOKEN2, etc.) | *(empty)* |
+| `FORCE_CHANNEL_ID` | Required channel join | *(empty)* |
+| `MAX_BATCH_FILES` | Maximum files in batch processing | `50` |
+| `CHANNEL` | Allow processing messages from channels | `False` |
+| `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
+| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
+| `WORKERS` | Async workers | `8` |
+| `NAME` | Bot name | `ThunderF2L` |
+| `BIND_ADDRESS` | Bind address | `0.0.0.0` |
+| `PING_INTERVAL` | Ping interval (seconds) | `840` |
+| `TOKEN_ENABLED` | Enable tokens | `False` |
+| `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
+| `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
+| `TOKEN_TTL_HOURS` | Token validity duration in hours | `24` |
+| `URL_SHORTENER_API_KEY` | Shortener API key | *(empty)* |
+| `URL_SHORTENER_SITE` | Shortener service | *(empty)* |
+| `SET_COMMANDS` | Auto-set bot commands | `True` |
+| `RATE_LIMIT_ENABLED` | Enable rate limiting | `False` |
+| `MAX_FILES_PER_PERIOD` | Files per window | `2` |
+| `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
+| `MAX_QUEUE_SIZE` | Queue size | `100` |
+| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
+| `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
+
+</details>
+
+## Usage and Commands
 
 ### Basic Usage
 
-1. **Start** → Send `/start` to bot
-2. **Authenticate** → Join required channels (if configured)
-3. **Upload** → Send any media file
-4. **Receive** → Get direct streaming link
-5. **Share** → Anyone can access via link
+1.  **Start** → Send `/start` to the bot.
+2.  **Authenticate** → Join required channels (if configured).
+3.  **Upload** → Send any media file.
+4.  **Receive** → Get a direct streaming and download link.
+5.  **Share** → Anyone can access the file via the link.
 
-### Advanced Usage
+### Commands Reference
 
-- **Batch Processing**: `/link 5` in groups (process 5 files)
-- **Data Center Info**: `/dc` for DC information
-- **Performance Check**: `/ping` for response time
-- **Admin Panel**: `/status` for bot statistics
+#### User Commands
 
-## Commands
+| Command | Description |
+| :--- | :--- |
+| `/start` | Start the bot and get a welcome message. Also used for token activation. |
+| `/link` | Generates a link. For batches, **reply to the first file** of a group and specify the count. **Example:** `/link 5` will process that file and the next four. |
+| `/dc` | Get the data center (DC) of a user or file. Use `/dc id`, or reply to a file or user. |
+| `/ping` | Check if the bot is online and measure response time. |
+| `/about` | Get information about the bot. |
+| `/help` | Show help and usage instructions. |
 
-### User Commands
+#### Admin Commands
 
-| Command   | Description |
-|-----------|-------------|
-| `/start`  | Start the bot and get a welcome message. Also used for token activation. |
-| `/link`   | Generate a direct link for a file in a group. Supports batch files by replying to the first file in a group (e.g., `/link 5`). |
-| `/dc`     | Get the data center (DC) of a user or file. Use `/dc id`, or reply to a file or user. Works in both groups and private chats. |
-| `/ping`   | Check if the bot is online and measure response time. |
-| `/about`  | Get information about the bot. |
-| `/help`   | Show help and usage instructions. |
+| Command | Description |
+| :--- | :--- |
+| `/status` | Check bot status, uptime, and resource usage. |
+| `/broadcast` | Send a message to all users (supports text, media, buttons). |
+| `/stats` | View usage statistics and analytics. |
+| `/ban` | Ban a user or channel (reply to message or use user/channel ID). |
+| `/unban` | Unban a user or channel. |
+| `/log` | Send bot logs. |
+| `/restart` | Restart the bot. |
+| `/shell` | Execute a shell command. |
+| `/users` | Show total number of users. |
+| `/authorize` | Permanently authorize a user to use the bot (bypasses token system). |
+| `/deauthorize` | Remove permanent authorization from a user. |
+| `/listauth` | List all permanently authorized users. |
 
-### Admin Commands
-
-| Command        | Description                                                          |
-|----------------|----------------------------------------------------------------------|
-| `/status`      | Check bot status, uptime, and resource usage.                        |
-| `/broadcast`   | Send a message to all users (supports text, media, buttons).         |
-| `/stats`       | View usage statistics and analytics.                                 |
-| `/ban`         | Ban a user or channel (reply to message or use user/channel ID).     |
-| `/unban`       | Unban a user or channel.                                              |
-| `/log`         | Send bot logs.                                                       |
-| `/restart`     | Restart the bot.                                                     |
-| `/shell`       | Execute a shell command (Use with extreme caution!).                 |
-| `/users`       | Show total number of users.                                          |
-| `/authorize`   | Permanently authorize a user to use the bot (bypasses token system). |
-| `/deauthorize` | Remove permanent authorization from a user.                          |
-| `/listauth`    | List all permanently authorized users.                              |
-
-### BotFather Commands Setup
+<details>
+<summary><h4>BotFather Commands Setup</h4></summary>
 
 ```text
 start - Initialize bot
@@ -247,20 +265,27 @@ users - [Admin] User count
 authorize - [Admin] Grant access
 deauthorize - [Admin] Revoke access
 listauth - [Admin] List authorized
+log - [Admin] Send bot logs
+restart - [Admin] Restart the bot
+shell - [Admin] Execute shell command
 ```
 
-## Token System
+</details>
+
+## Advanced Feature Setup
+
+### Token System
 
 Enable controlled access with tokens:
 
-1. Set `TOKEN_ENABLED=True` in config
-2. Users receive automatic tokens on first use
-3. Admins can grant permanent authorization
-4. Tokens include activation links
+1.  Set `TOKEN_ENABLED=True` in your `config.env`.
+2.  Users receive automatic tokens on first use.
+3.  Admins can grant permanent authorization with `/authorize` to bypass tokens.
+4.  Tokens include activation links for secure access.
 
-## URL Shortening
+### URL Shortening
 
-Configure URL shortening:
+Configure URL shortening for cleaner links:
 
 ```env
 SHORTEN_ENABLED=True
@@ -269,116 +294,92 @@ URL_SHORTENER_API_KEY=your_api_key
 URL_SHORTENER_SITE=shortener.example.com
 ```
 
-## Rate Limiting System
+### Rate Limiting System
+Thunder implements a sophisticated multi-tier rate limiting system designed for high-performance file sharing:
 
-Prevent abuse with intelligent rate limiting:
+#### **Priority Queue Architecture**
+- **Owner Priority**: Complete bypass of all rate limits.
+- **Authorized Users**: Dedicated priority queue with faster processing.
+- **Regular Users**: Standard queue with fair scheduling.
 
-- **Per-User Limits** - Configurable request quotas
-- **Global Limits** - System-wide control
-- **Smart Queuing** - Queue excess requests
-- **Priority Access** - Owners bypass limits
-- **User Feedback** - Queue notifications
+#### **Multi-Level Rate Limiting**
+- **Per-User Limits**: Configurable files per time window.
+- **Global Limits**: System-wide request throttling.
+- **Sliding Window**: Time-based rate limiting with automatic cleanup.
 
-## Reverse Proxy Setup
+#### **Smart Queue Management**
+- **Automatic Re-queuing**: Failed requests due to rate limits are intelligently re-queued.
+- **Queue Size Limits**: Configurable maximum queue size.
+- **Flood Protection**: Built-in protection against Telegram flood waits.
+
+## Production Deployment Guide
+
+### Custom Domain & FQDN System
+
+Thunder provides enterprise-grade domain configuration through the `FQDN` setting, enabling professional file sharing with custom domains and comprehensive SSL support.
+
+-   **Custom Domain Support**: Set your primary domain for file sharing.
+-   **Protocol Selection**: Dynamically serves over HTTP/HTTPS based on your `HAS_SSL` configuration.
+-   **Cloudflare Compatible**: Full support for Cloudflare Origin Certificates and reverse proxies.
+-   **Security Headers**: Adds proper security headers for production deployments.
 
 <details>
-<summary><b>Reverse Proxy with Cloudflare SSL</b></summary>
+<summary><h3>Reverse Proxy Setup</h3></summary>
 
-## Reverse Proxy Setup for File Streaming Bot with Cloudflare SSL
- 
 This guide will help you set up a secure reverse proxy using **NGINX** for your file streaming bot with **Cloudflare SSL protection**.
 
 ---
 
-## ✅ What You Need
+#### ✅ What You Need
 
-- A **VPS or server** running Ubuntu/Debian with NGINX installed
-- Your **file streaming bot** running on a local port (e.g., `5063`)
-- A **subdomain** (e.g., `dl.yoursite.com`) set up in **Cloudflare**
-- **Cloudflare Origin Certificate** files:
-  - `cert.pem` (Certificate file)
-  - `key.key` (Private key file)
+-   A **VPS or server** running Ubuntu/Debian with NGINX installed.
+-   Your **file streaming bot** running on a local port (e.g., `8080`).
+-   A **subdomain** (e.g., `f2l.thunder.com`) set up in **Cloudflare**.
+-   **Cloudflare Origin Certificate** files: `cert.pem` and `key.key`.
 
 ---
 
-## 🔐 Step 1: Configure Cloudflare
+#### 🔐 Step 1: Configure Cloudflare
 
-**Set up DNS:**
-- Go to your domain in [Cloudflare Dashboard](https://dash.cloudflare.com)
-- Navigate to **DNS** → Add an `A` record:
-  - **Name:** `dl` (or your preferred subdomain)
-  - **Content:** Your server's IP address
-  - **Proxy Status:** **Proxied (orange cloud)**
-
-**Configure SSL:**
-- Go to **SSL/TLS** → **Overview**
-- Set encryption mode to **Full (strict)**
-- Create your **Origin Certificate** if you haven't already
+-   **DNS**: Add an `A` record for your subdomain pointing to your server's IP. Ensure **Proxy Status** is **Proxied (orange cloud)**.
+-   **SSL**: In the **SSL/TLS** tab, set the encryption mode to **Full (strict)**.
 
 ---
 
-## 🛡️ Step 2: Set Up SSL Certificates
+#### 🛡️ Step 2: Set Up SSL Certificates on Server
 
-Create a folder for your SSL certificates:
+Create a folder for your certificates and place `cert.pem` and `key.key` inside. Secure the private key.
 
 ```bash
-sudo mkdir -p /etc/ssl/cloudflare/dl.yoursite.com
-```
-
-**If you have the certificate files already:**
-```bash
-sudo mv cert.pem key.key /etc/ssl/cloudflare/dl.yoursite.com/
-```
-
-**If you need to create them:**
-```bash
-# Create certificate file
-sudo nano /etc/ssl/cloudflare/dl.yoursite.com/cert.pem
-# Paste your Origin Certificate here and save
-
-# Create private key file  
-sudo nano /etc/ssl/cloudflare/dl.yoursite.com/key.key
-# Paste your Private Key here and save
-```
-
-**Make the files secure:**
-```bash
-sudo chmod 600 /etc/ssl/cloudflare/dl.yoursite.com/key.key
-sudo chmod 644 /etc/ssl/cloudflare/dl.yoursite.com/cert.pem
+sudo mkdir -p /etc/ssl/cloudflare/f2l.thunder.com
+# Move/copy your cert.pem and key.key files into this directory
+sudo chmod 600 /etc/ssl/cloudflare/f2l.thunder.com/key.key
+sudo chmod 644 /etc/ssl/cloudflare/f2l.thunder.com/cert.pem
 ```
 
 ---
 
-## 🛠️ Step 3: Create NGINX Configuration
+#### 🛠️ Step 3: Create NGINX Configuration
 
-Create a new configuration file:
-```bash
-sudo nano /etc/nginx/sites-available/dl.yoursite.conf
-```
-
-**Paste this configuration** (replace `dl.yoursite.com` and `5063` with your values):
+Create a new file at `/etc/nginx/sites-available/f2l.thunder.conf` and paste the following, replacing `f2l.thunder.com` and `8080` with your values.
 
 ```nginx
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name dl.yoursite.com;
+    server_name f2l.thunder.com;
 
     # SSL Configuration
-    ssl_certificate     /etc/ssl/cloudflare/dl.yoursite.com/cert.pem;
-    ssl_certificate_key /etc/ssl/cloudflare/dl.yoursite.com/key.key;
+    ssl_certificate     /etc/ssl/cloudflare/f2l.thunder.com/cert.pem;
+    ssl_certificate_key /etc/ssl/cloudflare/f2l.thunder.com/key.key;
 
     # Basic security
     add_header X-Frame-Options DENY;
     add_header X-Content-Type-Options nosniff;
 
-    # Logging
-    access_log /var/log/nginx/dl.yoursite.com.access.log;
-    error_log /var/log/nginx/dl.yoursite.com.error.log;
-
     location / {
         # Forward requests to your bot
-        proxy_pass http://localhost:5063;
+        proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -387,8 +388,6 @@ server {
         # Settings for file streaming
         proxy_buffering off;
         proxy_request_buffering off;
-        
-        # Allow large files
         client_max_body_size 0;
     }
 }
@@ -397,77 +396,73 @@ server {
 server {
     listen 80;
     listen [::]:80;
-    server_name dl.yoursite.com;
-    
+    server_name f2l.thunder.com;
     return 301 https://$host$request_uri;
 }
 ```
 
-**Enable the configuration:**
-```bash
-sudo ln -s /etc/nginx/sites-available/dl.yoursite.conf /etc/nginx/sites-enabled/
-```
-
 ---
 
-## 🔄 Step 4: Test and Apply Changes
+#### 🔄 Step 4: Test and Apply Changes
 
-**Check if configuration is correct:**
+Enable the configuration, test it, and reload NGINX.
+
 ```bash
+sudo ln -s /etc/nginx/sites-available/f2l.thunder.conf /etc/nginx/sites-enabled/
 sudo nginx -t
-```
-
-**If no errors, restart NGINX:**
-```bash
 sudo systemctl reload nginx
 ```
 
----
-
-## ✅ Step 5: Test Your Setup
-
-**Test if your site is working:**
-```bash
-curl -I https://dl.yoursite.com
-```
-
-**Test a file download:**
-```bash
-curl -I https://dl.yoursite.com/dl/<your_file_id>
-```
-
----
-
-## 🎉 Done!
-
-Your reverse proxy is now securely streaming files behind Cloudflare, powered by NGINX!
+Your reverse proxy is now securely streaming files behind Cloudflare!
 
 </details>
 
-## Contributing
+## Support & Community
 
-Contributions welcome! Please:
+### Troubleshooting & FAQ
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add feature'`)
-4. Push branch (`git push origin feature/amazing`)
-5. Open Pull Request
+**Bot not responding?**
+
+-   Check if the `BOT_TOKEN` is correct in your `config.env`.
+-   Ensure your server's firewall is not blocking the bot's port.
+-   View bot logs for any error messages.
+
+**Links not working?**
+
+-   Verify your `FQDN` and `PORT` settings are correct.
+-   If using SSL (`HAS_SSL=True`), ensure your reverse proxy and certificates are set up correctly.
+-   Check that the bot has admin rights in the `BIN_CHANNEL` and can forward messages there.
+
+**Q: How do I get my API credentials?**
+A: Visit [my.telegram.org/apps](https://my.telegram.org/apps) to get your `API_ID` and `API_HASH`.
+
+**Q: Where can I create a bot token?**
+A: Use [@BotFather](https://t.me/BotFather) on Telegram to create and manage your bot.
+
+### Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1.  Fork the repository.
+2.  Create a new feature branch (`git checkout -b feature/amazing-feature`).
+3.  Commit your changes (`git commit -m 'Add some amazing feature'`).
+4.  Push to the branch (`git push origin feature/amazing-feature`).
+5.  Open a Pull Request.
 
 ## License
 
-Licensed under [Apache License 2.0](LICENSE). See LICENSE file for details.
+Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-- [Kurigram](https://github.com/KurimuzonAkuma/pyrogram/) - Telegram MTProto API Framework
-- [aiohttp](https://github.com/aio-libs/aiohttp) - Async HTTP client/server
-- [Motor](https://github.com/mongodb/motor) - Async MongoDB driver
-- [TgCrypto](https://github.com/pyrogram/tgcrypto) - Fast encryption library
+-   [Kurigram](https://github.com/KurimuzonAkuma/pyrogram/) - Telegram MTProto API Framework
+-   [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
+-   [Motor](https://github.com/mongodb/motor) - Asynchronous MongoDB Driver
+-   [TgCrypto](https://github.com/pyrogram/tgcrypto) - High-performance cryptography library
 
 ## ⚠️ Disclaimer
 
-This project is not affiliated with Telegram. Use responsibly and comply with Telegram's Terms of Service and local regulations.
+This project is not affiliated with Telegram. Use it responsibly and in compliance with Telegram's Terms of Service and all applicable local regulations.
 
 ---
 

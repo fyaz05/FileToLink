@@ -172,6 +172,12 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
+        if 'request_executor_task' in locals() and not request_executor_task.done():
+            request_executor_task.cancel()
+            try:
+                await request_executor_task
+            except asyncio.CancelledError:
+                pass
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
