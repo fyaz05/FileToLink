@@ -7,7 +7,6 @@
 # ------ General Errors ------
 MSG_ERROR_GENERIC = "⚠️ **Oops!** Something went wrong. Please try again. If the issue persists, contact support."
 MSG_ERROR_USER_INFO = "❗ **User Not Found:** Couldn't find user. Please check the ID or Username."
-MSG_ERROR_RATE_LIMIT = "⏳ **Slow Down!** Too many requests. Please wait `{seconds}` seconds."
 
 # ------ User Input & Validation Errors ------
 MSG_INVALID_USER_ID = "❌ **Invalid User ID:** Please provide a numeric user ID."
@@ -19,9 +18,7 @@ MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and {max_fi
 MSG_ERROR_DM_FAILED = "⚠️ I couldn't send you a Direct Message. Please start the bot first."
 
 # ------ File & Media Errors ------
-MSG_ERROR_FILE_INVALID = "🚫 **File Error:** Invalid file. It might be deleted or inaccessible."
 MSG_ERROR_PROCESSING_MEDIA = "⚠️ **Oops!** Something went wrong while processing your media. Please try again. If the issue persists, contact support."
-MSG_FILE_ACCESS_ERROR = "⚙️ **Error Retrieving File!** Could not fetch details. File might be unavailable, ID incorrect, or deleted from storage."
 
 # ------ Admin Action Errors (Ban, Auth, etc.) ------
 MSG_AUTHORIZE_FAILED = (
@@ -37,8 +34,6 @@ MSG_TOKEN_FAILED = (
     "> ❗ Reason: {reason}\n\n"
     "🔑 Please check your token or contact support."
 )
-MSG_TOKEN_ERROR = "⚙️ **Token Activation Error:** Something went wrong. Please try again."
-MSG_START_INVALID_PAYLOAD = "Invalid command format or expired/invalid link. Please use a valid command or activation link. Error ID: {error_id}"
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
 <pre>{error}</pre>"""
 
@@ -72,6 +67,10 @@ MSG_UNBAN_USAGE = "⚠️ **Usage:** /unban <user_id>"
 MSG_ADMIN_USER_UNBANNED = "✅ **User {user_id} has been unbanned."
 MSG_USER_UNBANNED_NOTIFICATION = "🎉 **You have been unbanned from using this bot.**"
 MSG_USER_NOT_IN_BAN_LIST = "ℹ️ **User {user_id} was not found in the ban list."
+MSG_CHANNEL_BANNED = "✅ **Channel {channel_id} has been banned.**"
+MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 **Reason:** {reason}"
+MSG_CHANNEL_UNBANNED = "✅ **Channel {channel_id} has been unbanned.**"
+MSG_CHANNEL_NOT_BANNED = "ℹ️ **Channel {channel_id} was not found in the ban list.**"
 
 # ------ Token & Authorization ------
 MSG_AUTHORIZE_USAGE = "🔑 **Usage:** `/authorize <user_id>`"
@@ -252,7 +251,6 @@ MSG_COMMUNITY_CHANNEL = "📢 **{channel_title}:** 🔒 Join this channel to use
 # ------ General File Processing ------
 MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
 MSG_PROCESSING_FILE = "⏳ **Processing your file...**"
-MSG_DEFAULT_FILENAME = "Untitled File"
 MSG_NEW_FILE_REQUEST = (
     "> 👤 **Source:** [{source_info}](tg://user?id={id_})\n"
     "> 🆔 **ID:** `{id_}`\n\n"
@@ -291,6 +289,30 @@ MSG_ERROR_UNAUTHORIZED = "You are not authorized to view this information."
 MSG_ERROR_BROADCAST_RESTART = "Please use the /broadcast command to start a new broadcast."
 MSG_ERROR_BROADCAST_INSTRUCTION = "To start a new broadcast, use the /broadcast command and reply to the message you want to broadcast."
 MSG_ERROR_CALLBACK_UNSUPPORTED = "This button is not active or no longer supported."
+
+# =====================================================================================
+# ====== RATE LIMITING MESSAGES ======
+# =====================================================================================
+
+MSG_RATE_LIMIT_QUEUE_PRIORITY = (
+    "⚡ You're in the **Priority Queue!**\n\n"
+    "> ⏳ **Estimated Wait:** `~{wait_estimate} minute{s}`\n"
+    "> 🚀 **Status:** In Queue"
+)
+
+MSG_RATE_LIMIT_QUEUE_REGULAR = (
+    "⏳ **Rate Limit Reached!**\n\n"
+    "> ⌛ **Estimated Wait:** `~{wait_estimate} minute{s1}`\n"
+    "> 📊 **Limit:** `{max_requests} files per {time_window} minute{s2}`\n"
+    "> 🔄 **Status:** In Queue"
+)
+
+MSG_RATE_LIMIT_QUEUE_FULL = (
+    "⚠️ **Service Busy!** The processing queue is currently full.\n\n"
+    "> 🕒 **Please try again in:** `~{wait_estimate} minute{s}`\n"
+    "> 💡 **Tip:** Try again later when system load decreases"
+)
+
 
 # =====================================================================================
 # ====== FILE TYPE DESCRIPTIONS ======

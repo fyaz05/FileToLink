@@ -1,9 +1,9 @@
-# Thunder/__main__.py
+# Thunder/vars.py
 
 import os
 
 from dotenv import load_dotenv
-from typing import Set, Optional, List, Dict
+from typing import Set, Optional
 from Thunder.utils.logger import logger
 
 load_dotenv("config.env")
@@ -11,14 +11,21 @@ load_dotenv("config.env")
 def str_to_bool(val: str) -> bool:
     return val.lower() in ("true", "1", "t", "y", "yes")
 
-def str_to_int_list(val: str) -> List[int]:
-    return [int(x) for x in val.split() if x.isdigit()] if val else []
-
 def str_to_int_set(val: str) -> Set[int]:
-    return {int(x) for x in val.split() if x.isdigit()} if val else set()
+    if not val:
+        return set()
+    result: Set[int] = set()
+    for x in val.split():
+        try:
+            result.add(int(x))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
 
 class Var:
-    API_ID: int = int(os.getenv("API_ID", ""))
+    API_ID: int = int(os.getenv("API_ID", "0"))
     API_HASH: str = os.getenv("API_HASH", "")
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 
@@ -29,7 +36,6 @@ class Var:
     NAME: str = os.getenv("NAME", "ThunderF2L")
     SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "600"))
     WORKERS: int = int(os.getenv("WORKERS", "8"))
-    TIMEOUT: int = int(os.getenv("TIMEOUT", "90"))
 
     BIN_CHANNEL: int = int(os.getenv("BIN_CHANNEL", "0"))
 
@@ -41,9 +47,8 @@ class Var:
     BIND_ADDRESS: str = os.getenv("BIND_ADDRESS", "0.0.0.0")
     PING_INTERVAL: int = int(os.getenv("PING_INTERVAL", "840"))
     NO_PORT: bool = str_to_bool(os.getenv("NO_PORT", "True"))
-    CACHE_SIZE: int = int(os.getenv("CACHE_SIZE", "100"))
 
-    OWNER_ID: int = int(os.getenv("OWNER_ID", ""))
+    OWNER_ID: int = int(os.getenv("OWNER_ID", "0"))
 
     if not OWNER_ID:
         logger.warning("WARNING: OWNER_ID is not set. No user will be granted owner access.")
@@ -66,6 +71,8 @@ class Var:
 
     MAX_BATCH_FILES: int = int(os.getenv("MAX_BATCH_FILES", "50"))
 
+    CHANNEL: bool = str_to_bool(os.getenv("CHANNEL", "False"))
+
     BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
 
     MULTI_CLIENT: bool = False
@@ -87,3 +94,11 @@ class Var:
     SHORTEN_MEDIA_LINKS: bool = str_to_bool(os.getenv("SHORTEN_MEDIA_LINKS", "False"))
     URL_SHORTENER_API_KEY: str = os.getenv("URL_SHORTENER_API_KEY", "")
     URL_SHORTENER_SITE: str = os.getenv("URL_SHORTENER_SITE", "")
+
+    GLOBAL_RATE_LIMIT: bool = str_to_bool(os.getenv("GLOBAL_RATE_LIMIT", "False"))
+    MAX_GLOBAL_REQUESTS_PER_MINUTE: int = int(os.getenv("MAX_GLOBAL_REQUESTS_PER_MINUTE", "4"))
+
+    RATE_LIMIT_ENABLED: bool = str_to_bool(os.getenv("RATE_LIMIT_ENABLED", "False"))
+    MAX_FILES_PER_PERIOD: int = int(os.getenv("MAX_FILES_PER_PERIOD", "2"))
+    RATE_LIMIT_PERIOD_MINUTES: int = int(os.getenv("RATE_LIMIT_PERIOD_MINUTES", "1"))
+    MAX_QUEUE_SIZE: int = int(os.getenv("MAX_QUEUE_SIZE", "100"))

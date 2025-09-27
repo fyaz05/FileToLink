@@ -10,7 +10,6 @@ from uvloop import install
 from pathlib import Path
 
 install()
-
 from aiohttp import web
 from pyrogram import idle
 
@@ -24,11 +23,14 @@ from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.keepalive import ping_server
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+from Thunder.utils.rate_limiter import rate_limiter, request_executor
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
 
+
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
 VERSION = __version__
+
 
 def print_banner():
     banner = f"""
@@ -46,6 +48,7 @@ def print_banner():
 """
     print(banner)
 
+
 async def import_plugins():
     print("╠════════════════════ IMPORTING PLUGINS ════════════════════╣")
     plugins = glob.glob(PLUGIN_PATH)
@@ -62,7 +65,9 @@ async def import_plugins():
             plugin_name = plugin_path.stem
             import_path = f"Thunder.bot.plugins.{plugin_name}"
 
-            spec = importlib.util.spec_from_file_location(import_path, plugin_path)
+            spec = importlib.util.spec_from_file_location(
+                import_path, plugin_path
+            )
             if spec is None or spec.loader is None:
                 logger.error(f"Invalid plugin specification for {plugin_name}")
                 failed_plugins.append(plugin_name)
@@ -78,11 +83,15 @@ async def import_plugins():
             logger.error(f"   ✖ Failed to import plugin {plugin_name}: {e}")
             failed_plugins.append(plugin_name)
 
-    print(f"   ▶ Total: {len(plugins)} | Success: {success_count} | Failed: {len(failed_plugins)}")
+    print(
+        f"   ▶ Total: {len(plugins)} | Success: {success_count} | "
+        f"Failed: {len(failed_plugins)}"
+    )
     if failed_plugins:
         print(f"   ▶ Failed plugins: {', '.join(failed_plugins)}")
 
     return success_count
+
 
 async def start_services():
     start_time = datetime.now()
@@ -106,16 +115,22 @@ async def start_services():
                     StreamBot.edit_message_text,
                     chat_id=restart_message_data["chat_id"],
                     message_id=restart_message_data["message_id"],
-                    text=MSG_ADMIN_RESTART_DONE
+                    text=MSG_ADMIN_RESTART_DONE,
                 )
-                await db.delete_restart_message(restart_message_data["message_id"])
+                await db.delete_restart_message(
+                    restart_message_data["message_id"]
+                )
             except Exception as e:
-                logger.error(f"Error processing restart message: {e}", exc_info=True)
+                logger.error(
+                    f"Error processing restart message: {e}", exc_info=True
+                )
         else:
             pass
 
     except Exception as e:
-        logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
+        logger.error(
+            f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
+        )
         return
 
     print("   ▶ Starting Client initialization...")
@@ -127,6 +142,18 @@ async def start_services():
 
     await import_plugins()
 
+    print("   ▶ Starting Request Executor initialization...")
+    try:
+        request_executor_task = asyncio.create_task(
+            request_executor(), name="request_executor_task"
+        )
+        print("   ✓ Request executor service started")
+    except Exception as e:
+        logger.error(
+            f"   ✖ Failed to start request executor: {e}", exc_info=True
+        )
+        return
+
     print("   ▶ Starting Web Server initialization...")
     try:
         app_runner = web.AppRunner(await web_server())
@@ -135,12 +162,34 @@ async def start_services():
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
 
-        keepalive_task = asyncio.create_task(ping_server())
+        keepalive_task = asyncio.create_task(
+            ping_server(), name="keepalive_task"
+        )
         print("   ✓ Keep-alive service started")
-        token_cleanup_task = asyncio.create_task(schedule_token_cleanup())
+        token_cleanup_task = asyncio.create_task(
+            schedule_token_cleanup(), name="token_cleanup_task"
+        )
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
+        if 'request_executor_task' in locals() and not request_executor_task.done():
+            request_executor_task.cancel()
+            try:
+                await request_executor_task
+            except asyncio.CancelledError:
+                pass
+        try:
+            await StreamBot.stop()
+        except Exception:
+            pass
+        try:
+            await cleanup_clients()
+        except Exception:
+            pass
+        try:
+            await rate_limiter.shutdown()
+        except Exception:
+            pass
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -153,16 +202,29 @@ async def start_services():
     print("╚═══════════════════════════════════════════════════════════╝")
     print("   ▶ Bot is now running! Press CTRL+C to stop.")
 
+    background_tasks = [
+        request_executor_task,
+        keepalive_task,
+        token_cleanup_task
+    ]
+
     try:
         await idle()
     finally:
-        for task in [locals().get("keepalive_task"), locals().get("token_cleanup_task")]:
-            if task:
+        print("   ▶ Shutting down services...")
+
+        for task in background_tasks:
+            if not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
+
+        try:
+            await rate_limiter.shutdown()
+        except Exception as e:
+            logger.error(f"Error during rate limiter cleanup: {e}")
 
         try:
             await cleanup_clients()
@@ -174,6 +236,7 @@ async def start_services():
                 await app_runner.cleanup()
             except Exception as e:
                 logger.error(f"Error during web server cleanup: {e}")
+
 
 async def schedule_token_cleanup():
     while True:
