@@ -11,14 +11,14 @@
     <meta property="og:description" content="File Streamer">
     <meta property="og:type" content="website">
     <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
-    
+
     <!-- Configuration -->
     <meta name="theme-color" content="#1a1a2e">
     <meta name="msapplication-navbutton-color" content="#1a1a2e">
     <meta name="apple-mobile-web-app-status-bar-style" content="#1a1a2e">
     <meta name="color-scheme" content="dark light">
     <meta name="application-name" content="Thunder FileToLink">
-    
+
     <!-- Icons -->
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
@@ -26,10 +26,29 @@
     <!-- External Resources -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <link href="https://unpkg.com/@videojs/themes@1/dist/city/index.css" rel="stylesheet">
 
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
+    <style>
+        .vjs-control-bar {
+            display: flex !important;
+        }
+        .vjs-button > .vjs-icon-placeholder::before {
+            font-size: 1.8em;
+            line-height: 2;
+        }
+        .video-js .vjs-menu-button-popup .vjs-menu {
+            left: -3em;
+        }
+        .video-js .vjs-menu-button-popup .vjs-menu .vjs-menu-item, .video-js .vjs-menu-button-popup .vjs-menu .vjs-menu-title {
+            line-height: 2.5em;
+        }
+        .vjs-menu-item.vjs-selected {
+            background-color: #0078f2;
+        }
+    </style>
 </head>
 <body>
     <button class="theme-toggle button-base" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode">
@@ -50,9 +69,13 @@
 
         <main id="main-content">
             <section class="player-container" aria-label="Video Player">
-                <video id="player" playsinline preload="metadata" controlsList="nodownload" aria-label="Video player">
+                <video id="player" class="video-js vjs-theme-city" playsinline preload="metadata" controls controlsList="nodownload" aria-label="Video player">
                     <source src="{{ src }}" type="video/mp4" />
-                    <p>Your browser does not support the video tag. Please <a href="{{ src }}" download>download the video</a> instead.</p>
+                    <p class="vjs-no-js">
+                        To view this video please enable JavaScript, and consider upgrading to a
+                        web browser that
+                        <a href="https://videojs.com/html5-video-support/" target="_blank">supports HTML5 video</a>
+                    </p>
                 </video>
             </section>
 
@@ -131,6 +154,11 @@
                     <i class="fas fa-copy" aria-hidden="true"></i>
                     <span>Copy Link</span>
                 </button>
+                <label for="subtitle-upload" class="action-button button-base secondary-button" title="Upload custom subtitle" aria-label="Upload custom subtitle">
+                    <i class="fas fa-closed-captioning" aria-hidden="true"></i>
+                    <span>Add Subtitle</span>
+                </label>
+                <input type="file" id="subtitle-upload" accept=".vtt,.srt" style="display: none;">
             </nav>
         </main>
     </div>
@@ -146,8 +174,38 @@
         <div class="toast-message">Action completed.</div>
     </div>
 
-    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js" defer></script>
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js" defer></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const player = videojs('player');
+            const subtitleUpload = document.getElementById('subtitle-upload');
+
+            subtitleUpload.addEventListener('change', function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const newTrack = {
+                            kind: 'subtitles',
+                            label: file.name,
+                            srclang: 'en',
+                            src: e.target.result,
+                        };
+
+                        // Remove existing remote text tracks before adding a new one
+                        const existingTracks = player.remoteTextTracks();
+                        let i = existingTracks.length;
+                        while (i--) {
+                            player.removeRemoteTextTrack(existingTracks[i]);
+                        }
+
+                        player.addRemoteTextTrack(newTrack, true);
+                    };
+                    reader.readAsDataURL(file); [11, 24, 27]
+                }
+            });
+        });
+    </script>
 </body>
 </html>
-
