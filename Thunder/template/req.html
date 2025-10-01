@@ -4,203 +4,151 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ heading }}</title>
+
+    <!-- Social Meta Tags -->
+    <meta name="description" content="Easily share and distribute files">
+    <meta property="og:title" content="Thunder FileToLink">
+    <meta property="og:description" content="File Streamer">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
     
-    <!-- Icons and Fonts -->
+    <!-- Configuration -->
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="msapplication-navbutton-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-status-bar-style" content="#1a1a2e">
+    <meta name="color-scheme" content="dark light">
+    <meta name="application-name" content="Thunder FileToLink">
+    
+    <!-- Icons -->
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
+
+    <!-- External Resources -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
-    
-    <!-- Plyr CSS -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
 
-    <!-- Final Vertical Layout Styles -->
-    <style>
-        :root {
-            --background-dark: #1a1a2e;
-            --background-light: #f4f4f8;
-            --text-dark: #ffffff;
-            --text-light: #121212;
-            --surface-dark: #2c2c3e;
-            --surface-light: #e0e0e0;
-            --border-dark: #3a3a52;
-            --border-light: #dcdce5;
-            --plyr-color-main: #3b82f6;
-        }
-        html[data-theme='dark'] {
-            --background-color: var(--background-dark);
-            --text-color: var(--text-dark);
-            --surface-color: var(--surface-dark);
-            --border-color: var(--border-dark);
-        }
-        html[data-theme='light'] {
-            --background-color: var(--background-light);
-            --text-color: var(--text-light);
-            --surface-color: var(--surface-light);
-            --border-color: var(--border-light);
-        }
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 1rem;
-            display: flex;
-            justify-content: center;
-        }
-        .container {
-            width: 100%;
-            max-width: 600px;
-            display: flex;
-            flex-direction: column;
-        }
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 1rem;
-            /* Header Separator Line */
-            border-bottom: 1px solid var(--border-color);
-        }
-        #logo {
-            font-size: 1.8rem;
-            font-weight: 700;
-        }
-        .theme-toggle {
-            background: transparent;
-            border: none;
-            color: var(--text-color);
-            cursor: pointer;
-            font-size: 1.6rem;
-        }
-        .player-container {
-            width: 100%;
-            margin-top: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .controls-section {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1rem;
-            width: 100%;
-            margin-bottom: 1.5rem;
-        }
-        .action-button {
-            width: 100%;
-            max-width: 400px;
-            padding: 0.9rem 1rem;
-            border-radius: 8px;
-            background-color: var(--surface-color);
-            color: var(--text-color);
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            border: none;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 0.75rem;
-            text-decoration: none;
-        }
-        footer {
-            text-align: center;
-            color: #aaa;
-            padding-top: 1rem;
-            /* Footer Separator Line */
-            border-top: 1px solid var(--border-color);
-        }
-        footer a { color: #aaa; text-decoration: none; }
-        footer a:hover { text-decoration: underline; }
-        .hidden-input { display: none; }
-    </style>
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
 </head>
 <body>
-    <div class="container">
-        <!-- 1. Header -->
-        <header class="header">
-            <div id="logo">⚡ Thunder</div>
-            <button class="theme-toggle" id="theme-toggle" title="Toggle Theme">
-                <i class="fas fa-moon"></i>
-            </button>
-        </header>
+    <button class="theme-toggle button-base" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode">
+        <i class="fas fa-moon" aria-hidden="true"></i>
+    </button>
 
-        <!-- 2. Video Player -->
-        <div class="player-container">
-            <video id="player" playsinline preload="metadata" controls></video>
-        </div>
-
-        <!-- 3. & 4. Buttons -->
-        <nav class="controls-section">
-            <label for="subtitle-upload" class="action-button">
-                <i class="fas fa-closed-captioning"></i><span>Add Subtitle</span>
-            </label>
-            <a href="{{ src }}" download="{{ file_name }}" class="action-button">
-                <i class="fas fa-cloud-download-alt"></i><span>Download</span>
-            </a>
-            <input type="file" id="subtitle-upload" class="hidden-input" accept=".vtt,.srt">
-        </nav>
-
-        <!-- 5. Footer -->
-        <footer>
-            <p><a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer">⚡ Thunder © <span id="current-year"></span> | GitHub</a></p>
-        </footer>
+    <div class="background-animation" aria-hidden="true">
+        <div class="bg-gradient"></div>
     </div>
 
-    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const player = new Plyr('#player');
-            player.source = {
-                type: 'video',
-                sources: [{ src: '{{ src }}', type: 'video/mp4' }]
-            };
+    <div class="container">
+        <header class="header">
+            <div class="file-info">
+                <h1 id="file-name">{{ file_name }}</h1>
+                <div class="file-meta" role="group" aria-label="File metadata"></div>
+            </div>
+        </header>
 
-            const subtitleUpload = document.getElementById('subtitle-upload');
-            const themeToggle = document.getElementById('theme-toggle');
-            const currentYearSpan = document.getElementById('current-year');
-            let currentObjectUrl = null;
+        <main id="main-content">
+            <section class="player-container" aria-label="Video Player">
+                <video id="player" playsinline preload="metadata" controlsList="nodownload" aria-label="Video player">
+                    <source src="{{ src }}" type="video/mp4" />
+                    <p>Your browser does not support the video tag. Please <a href="{{ src }}" download>download the video</a> instead.</p>
+                </video>
+            </section>
 
-            function srtToVtt(srtText) {
-                return "WEBVTT\n\n" + srtText.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2').trim();
-            }
+            <nav class="controls-section" aria-label="File options">
+                <div class="dropdown-container" id="stream-dropdown-container">
+                    <button type="button" class="action-button button-base secondary-button stream-btn" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
+                        <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+                        <span>Stream</span>
+                    </button>
+                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label" role="menu">
+                        <div class="stream-menu-header">
+                            <h3>Open with external player</h3>
+                            <button type="button" aria-label="Close menu" class="stream-menu-close button-base">
+                                <i class="fas fa-times" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <div class="stream-menu-content">
+                            <div class="stream-category">
+                                <h4 class="category-heading"><i class="fas fa-mobile-screen-button" aria-hidden="true"></i> Mobile Players</h4>
+                                <div class="player-grid" role="group" aria-label="Mobile video players">
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="vlc">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Mobile" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">VLC Mobile</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mxpro">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player Pro" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MX Pro</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mx">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/mx.png" alt="MX Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MX Player</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="nplayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/nPlayer.webp" alt="nPlayer" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">nPlayer</span>
+                                    </button>
+                                     <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="splayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/splayer.webp" alt="S Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">S Player</span>
+                                    </button>
+                                     <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="km">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">KM Player</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="stream-category">
+                                <h4 class="category-heading"><i class="fas fa-desktop" aria-hidden="true"></i> Desktop Players</h4>
+                                <div class="player-grid" role="group" aria-label="Desktop video players">
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="vlc-pc" title="Open in VLC Player (PC)">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/vlc.png" alt="VLC Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">VLC Player</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="potplayer" title="Open in PotPlayer">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/pot.png" alt="PotPlayer" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">PotPlayer</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="mpc" title="Open in MPC-HC">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/classic.png" alt="MPC-HC" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">MPC-HC</span>
+                                    </button>
+                                    <button type="button" class="player-card dropdown-item" role="menuitem" data-player-type="kmpc" title="Open in KM Player (PC)">
+                                        <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/HydroStreamerBot/km.webp" alt="KM Player" loading="lazy" width="32" height="32" class="player-icon">
+                                        <span class="player-name">KM Player</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="action-button button-base secondary-button" title="Download the video" aria-label="Download video file">
+                    <i class="fas fa-cloud-download-alt" aria-hidden="true"></i>
+                    <span>Download</span>
+                </button>
+                <button type="button" class="action-button button-base secondary-button" title="Copy video link" aria-label="Copy video link to clipboard">
+                    <i class="fas fa-copy" aria-hidden="true"></i>
+                    <span>Copy Link</span>
+                </button>
+            </nav>
+        </main>
+    </div>
 
-            subtitleUpload.addEventListener('change', (event) => {
-                const file = event.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    let trackContent = e.target.result;
-                    if (file.name.toLowerCase().endsWith('.srt')) trackContent = srtToVtt(trackContent);
-                    if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
-                    const blob = new Blob([trackContent], { type: 'text/vtt' });
-                    currentObjectUrl = URL.createObjectURL(blob);
-                    const oldTrack = player.media.querySelector('track');
-                    if (oldTrack) oldTrack.remove();
-                    const trackElement = document.createElement('track');
-                    trackElement.kind = 'subtitles';
-                    trackElement.label = 'Custom';
-                    trackElement.src = currentObjectUrl;
-                    trackElement.default = true;
-                    player.media.appendChild(trackElement);
-                    player.restart().then(() => player.toggleCaptions(true));
-                };
-                reader.readAsText(file);
-            });
+    <footer>
+        <p><span id="thunder-text">⚡ Thunder</span> © <span id="current-year"></span> | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer" aria-label="View source code on GitHub"><i class="fab fa-github" aria-hidden="true"></i> <span>GitHub</span></a></p>
+    </footer>
 
-            function applyTheme(theme) {
-                document.documentElement.setAttribute('data-theme', theme);
-                // Update icon based on theme
-                themeToggle.querySelector('i').className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-            }
-            const savedTheme = localStorage.getItem('theme') || 'dark';
-            applyTheme(savedTheme);
-            themeToggle.addEventListener('click', () => {
-                const newTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-                localStorage.setItem('theme', newTheme);
-                applyTheme(newTheme);
-            });
-            if (currentYearSpan) currentYearSpan.textContent = new Date().getFullYear();
-        });
-    </script>
+    <div class="toast" id="toast" role="alert" aria-live="polite" aria-atomic="true" aria-hidden="true">
+        <div class="toast-icon" aria-hidden="true">
+            <i class="fas fa-info-circle"></i>
+        </div>
+        <div class="toast-message">Action completed.</div>
+    </div>
+
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js" defer></script>
 </body>
 </html>
+
+
