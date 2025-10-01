@@ -18,33 +18,6 @@
 
 ## 📑 Table of Contents
 
-- [About The Project](#about-the-project)
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-- [Configuration](#configuration)
-  - [Essential Configuration](#essential-configuration)
-  - [Optional Configuration](#optional-configuration)
-- [Usage and Commands](#usage-and-commands)
-  - [Basic Usage](#basic-usage)
-  - [Commands Reference](#commands-reference)
-- [Advanced Feature Setup](#advanced-feature-setup)
-  - [Token System](#token-system)
-  - [URL Shortening](#url-shortening)
-  - [Rate Limiting System](#rate-limiting-system)
-- [Production Deployment Guide](#production-deployment-guide)
-  - [Custom Domain & FQDN System](#custom-domain--fqdn-system)
-  - [Reverse Proxy Setup](#reverse-proxy-setup)
-  - [Deploy to Koyeb](#deploy-to-koyeb)
-- [Support & Community](#support--community)
-  - [Troubleshooting & FAQ](#troubleshooting--faq)
-  - [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
-- [Credits](#credits)
-
 <hr>
 
 ## About The Project
