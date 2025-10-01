@@ -27,26 +27,27 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
-    <link href="https://unpkg.com/@videojs/themes@1/dist/city/index.css" rel="stylesheet">
+    <link href="https://unpkg.com/@videojs/themes@1/dist/sea/index.css" rel="stylesheet">
 
     <!-- Main Stylesheet -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
     <style>
-        .vjs-control-bar {
-            display: flex !important;
+        .video-js.vjs-theme-sea {
+            --vjs-theme-sea--primary: #2e71e5;
+            --vjs-theme-sea--secondary: #ffffff;
         }
-        .vjs-button > .vjs-icon-placeholder::before {
-            font-size: 1.8em;
-            line-height: 2;
+        .video-js .vjs-big-play-button {
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            background-color: rgba(43, 51, 63, 0.7);
+            border: none;
         }
-        .video-js .vjs-menu-button-popup .vjs-menu {
-            left: -3em;
-        }
-        .video-js .vjs-menu-button-popup .vjs-menu .vjs-menu-item, .video-js .vjs-menu-button-popup .vjs-menu .vjs-menu-title {
-            line-height: 2.5em;
-        }
-        .vjs-menu-item.vjs-selected {
-            background-color: #0078f2;
+        .video-js:hover .vjs-big-play-button {
+            background-color: rgba(43, 51, 63, 0.8);
         }
     </style>
 </head>
@@ -69,7 +70,7 @@
 
         <main id="main-content">
             <section class="player-container" aria-label="Video Player">
-                <video id="player" class="video-js vjs-theme-city" playsinline preload="metadata" controls controlsList="nodownload" aria-label="Video player">
+                <video id="player" class="video-js vjs-theme-sea" playsinline preload="metadata" controls controlsList="nodownload" aria-label="Video player">
                     <source src="{{ src }}" type="video/mp4" />
                     <p class="vjs-no-js">
                         To view this video please enable JavaScript, and consider upgrading to a
@@ -178,31 +179,44 @@
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js" defer></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const player = videojs('player');
+            const player = videojs('player', {
+                fluid: true,
+                responsive: true
+            });
             const subtitleUpload = document.getElementById('subtitle-upload');
+            let currentObjectUrl = null;
 
             subtitleUpload.addEventListener('change', function(event) {
                 const file = event.target.files[0];
                 if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        const newTrack = {
-                            kind: 'subtitles',
-                            label: file.name,
-                            srclang: 'en',
-                            src: e.target.result,
-                        };
+                    // Revoke the old object URL to avoid memory leaks
+                    if (currentObjectUrl) {
+                        URL.revokeObjectURL(currentObjectUrl);
+                    }
 
-                        // Remove existing remote text tracks before adding a new one
-                        const existingTracks = player.remoteTextTracks();
-                        let i = existingTracks.length;
-                        while (i--) {
-                            player.removeRemoteTextTrack(existingTracks[i]);
-                        }
+                    currentObjectUrl = URL.createObjectURL(file);
 
-                        player.addRemoteTextTrack(newTrack, true);
+                    const newTrack = {
+                        kind: 'subtitles',
+                        label: file.name,
+                        srclang: 'en',
+                        src: currentObjectUrl,
                     };
-                    reader.readAsDataURL(file); [11, 24, 27]
+
+                    // Remove existing remote text tracks before adding a new one
+                    const existingTracks = player.remoteTextTracks();
+                    let i = existingTracks.length;
+                    while (i--) {
+                        player.removeRemoteTextTrack(existingTracks[i]);
+                    }
+
+                    const track = player.addRemoteTextTrack(newTrack, false);
+
+                    track.addEventListener('load', function() {
+                        // Set the mode of the track to 'showing' to make it visible
+                        this.mode = 'showing';
+                        player.textTracks()[player.textTracks().length - 1].mode = 'showing';
+                    });
                 }
             });
         });
