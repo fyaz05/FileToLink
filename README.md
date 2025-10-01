@@ -14,11 +14,6 @@
   <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
 </p>
 
-<hr>
-
-## 📑 Table of Contents
-
-<hr>
 
 ## About The Project
 
@@ -32,7 +27,6 @@
 -   👥 Communities distributing resources
 -   🎓 Educational platforms sharing materials
 
-[...previous content remains the same until the new Koyeb section...]
 
 ## Production Deployment Guide
 
