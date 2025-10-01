@@ -5,126 +5,141 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ heading }}</title>
 
-    <!-- Plyr CSS -->
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <!-- Social Meta Tags -->
+    <meta name="description" content="Easily share and distribute files">
+    <meta property="og:title" content="Thunder FileToLink">
+    <meta property="og:description" content="File Streamer">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
+    
+    <!-- Icons -->
+    <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
+    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
 
-    <!-- Custom Styles for YouTube Look -->
+    <!-- External Resources -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    
+    <!-- Plyr CSS -->
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
+
+    <!-- Custom Player & Subtitle Styles -->
     <style>
         :root {
             --plyr-color-main: #ff0000;
-            --plyr-font-family: 'Roboto', sans-serif;
-            --plyr-control-spacing: 15px;
-            --plyr-control-radius: 4px;
         }
-
-        body {
-            font-family: var(--plyr-font-family);
-            background-color: #121212;
-            color: #ffffff;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 900px;
-        }
-        
-        header h1 {
-            font-size: 1.5em;
-            margin-bottom: 20px;
-        }
-
-        .plyr__control--overlaid {
+        /* Increase subtitle font size and add background */
+        .plyr--captions-enabled ::cue {
+            font-size: 30px;
+            font-weight: 500;
             background: rgba(0, 0, 0, 0.7);
-            border-radius: 50%;
-            width: 70px;
-            height: 70px;
-        }
-        
-        .plyr__menu__container {
-            background: rgba(30, 30, 30, 0.95);
-        }
-
-        .controls-section {
-            display: flex;
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .action-button {
-            background-color: #333;
-            border: none;
-            color: white;
-            padding: 10px 15px;
+            padding: 5px 10px;
             border-radius: 4px;
-            cursor: pointer;
-            font-size: 1em;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
         }
-        
-        .action-button:hover {
-            background-color: #444;
+        /* Ensure player fits the container */
+        .player-container {
+            position: relative;
         }
-
-        footer {
-            margin-top: 40px;
-            color: #aaa;
-        }
-
-        .hidden {
+        .hidden-input {
             display: none;
         }
     </style>
 </head>
 <body>
+    <button class="theme-toggle button-base" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode">
+        <i class="fas fa-moon" aria-hidden="true"></i>
+    </button>
+
+    <div class="background-animation" aria-hidden="true">
+        <div class="bg-gradient"></div>
+    </div>
 
     <div class="container">
-        <header>
-            <h1 id="file-name">{{ file_name }}</h1>
+        <header class="header">
+            <div class="file-info">
+                <h1 id="file-name">{{ file_name }}</h1>
+                <div class="file-meta" role="group" aria-label="File metadata"></div>
+            </div>
         </header>
 
-        <video id="player" playsinline controls>
-            <source src="{{ src }}" type="video/mp4" />
-        </video>
+        <main id="main-content">
+            <section class="player-container" aria-label="Video Player">
+                <video id="player" playsinline preload="metadata" controls>
+                    <source src="{{ src }}" type="video/mp4" />
+                </video>
+            </section>
 
-        <div class="controls-section">
-            <a href="{{ src }}" download="{{ file_name }}" class="action-button">
-                <span>Download</span>
-            </a>
-            <label for="subtitle-upload" class="action-button">
-                <span>Add Subtitle</span>
-            </label>
-            <input type="file" id="subtitle-upload" class="hidden" accept=".vtt,.srt">
-        </div>
+            <nav class="controls-section" aria-label="File options">
+                <!-- Stream Dropdown -->
+                <div class="dropdown-container" id="stream-dropdown-container">
+                    <button type="button" class="action-button button-base secondary-button stream-btn" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
+                        <i class="fas fa-external-link-alt" aria-hidden="true"></i>
+                        <span>Stream</span>
+                    </button>
+                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label" role="menu">
+                        <!-- Stream menu content will be populated by script.js -->
+                    </div>
+                </div>
+                <!-- Download Button -->
+                <a href="{{ src }}" download="{{ file_name }}" class="action-button button-base secondary-button" title="Download the video" aria-label="Download video file">
+                    <i class="fas fa-cloud-download-alt" aria-hidden="true"></i>
+                    <span>Download</span>
+                </a>
+                <!-- Copy Link Button -->
+                <button type="button" class="action-button button-base secondary-button" title="Copy video link" aria-label="Copy video link to clipboard">
+                    <i class="fas fa-copy" aria-hidden="true"></i>
+                    <span>Copy Link</span>
+                </button>
+                <!-- Add Subtitle Button -->
+                <label for="subtitle-upload" class="action-button button-base secondary-button" title="Upload custom subtitle" aria-label="Upload custom subtitle" style="cursor: pointer;">
+                    <i class="fas fa-closed-captioning" aria-hidden="true"></i>
+                    <span>Add Subtitle</span>
+                </label>
+                <input type="file" id="subtitle-upload" class="hidden-input" accept=".vtt,.srt">
+            </nav>
+        </main>
     </div>
 
     <footer>
-        <p>Created by MD Salman</p>
-        <a href="#" id="telegram-link" style="display:none;">Telegram</a>
+        <p><span id="thunder-text">⚡ Thunder</span> © <span id="current-year"></span> | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer" aria-label="View source code on GitHub"><i class="fab fa-github" aria-hidden="true"></i> <span>GitHub</span></a></p>
     </footer>
 
-    <!-- Plyr JS -->
+    <div class="toast" id="toast" role="alert" aria-live="polite" aria-atomic="true" aria-hidden="true">
+        <div class="toast-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></div>
+        <div class="toast-message">Action completed.</div>
+    </div>
+
+    <!-- Plyr.io Player -->
     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    
+    <!-- Original Page Functionality Script -->
+    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js"></script>
+
+    <!-- Player and Subtitle Logic -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Check if Plyr is defined before initializing
+            if (typeof Plyr === 'undefined') {
+                console.error('Plyr is not loaded.');
+                return;
+            }
+
             const player = new Plyr('#player', {
                 controls: [
                     'play-large', 'play', 'progress', 'current-time', 'mute', 
                     'volume', 'captions', 'settings', 'fullscreen'
                 ],
-                settings: ['captions', 'quality', 'speed'],
+                settings: ['captions', 'quality', 'speed', 'loop'],
                 captions: { active: true, update: true, language: 'en' }
             });
 
             const subtitleUpload = document.getElementById('subtitle-upload');
             let currentObjectUrl = null;
 
+            // Function to convert SRT format to VTT
             function srtToVtt(srtText) {
                 return "WEBVTT\n\n" + srtText
                     .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
@@ -141,7 +156,6 @@
                 reader.onload = (e) => {
                     let trackContent = e.target.result;
 
-                    // Convert SRT to VTT if needed
                     if (file.name.toLowerCase().endsWith('.srt')) {
                         trackContent = srtToVtt(trackContent);
                     }
@@ -153,32 +167,30 @@
                     const blob = new Blob([trackContent], { type: 'text/vtt' });
                     currentObjectUrl = URL.createObjectURL(blob);
 
-                    // Remove existing subtitle tracks
                     const existingTracks = player.media.querySelectorAll('track');
                     existingTracks.forEach(track => track.remove());
 
-                    // Add new track element
                     const trackElement = document.createElement('track');
                     trackElement.kind = 'subtitles';
-                    trackElement.label = 'Custom';
+                    trackElement.label = file.name.split('.').slice(0, -1).join('.') || 'Custom';
                     trackElement.srclang = 'en';
                     trackElement.src = currentObjectUrl;
                     trackElement.default = true;
 
                     player.media.appendChild(trackElement);
                     
-                    // The player needs to be reloaded to recognize the new track
                     player.restart().then(() => {
-                         // Wait a moment for tracks to be processed, then enable captions
                         setTimeout(() => {
                             player.toggleCaptions(true);
-                        }, 200);
+                        }, 250);
                     });
                 };
                 reader.readAsText(file);
             });
+            
+            // Make player accessible globally for the external script if needed
+            window.player = player;
         });
     </script>
-
 </body>
 </html>
