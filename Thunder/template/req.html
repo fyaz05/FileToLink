@@ -4,192 +4,202 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ heading }}</title>
-
-    <!-- Social Meta Tags -->
-    <meta name="description" content="Easily share and distribute files">
-    <meta property="og:title" content="Thunder FileToLink">
-    <meta property="og:description" content="File Streamer">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/live.png">
     
-    <!-- Icons -->
+    <!-- Icons and Fonts -->
     <link rel="icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
-    <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg">
-
-    <!-- External Resources -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
     
     <!-- Plyr CSS -->
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
 
-    <!-- Main Stylesheet -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/style.css">
-
-    <!-- Custom Player & Subtitle Styles -->
+    <!-- Final Vertical Layout Styles -->
     <style>
         :root {
-            --plyr-color-main: #ff0000;
+            --background-dark: #1a1a2e;
+            --background-light: #f4f4f8;
+            --text-dark: #ffffff;
+            --text-light: #121212;
+            --surface-dark: #2c2c3e;
+            --surface-light: #e0e0e0;
+            --border-dark: #3a3a52;
+            --border-light: #dcdce5;
+            --plyr-color-main: #3b82f6;
         }
-        /* Increase subtitle font size and add background */
-        .plyr--captions-enabled ::cue {
-            font-size: 30px;
-            font-weight: 500;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 5px 10px;
-            border-radius: 4px;
+        html[data-theme='dark'] {
+            --background-color: var(--background-dark);
+            --text-color: var(--text-dark);
+            --surface-color: var(--surface-dark);
+            --border-color: var(--border-dark);
         }
-        /* Ensure player fits the container */
+        html[data-theme='light'] {
+            --background-color: var(--background-light);
+            --text-color: var(--text-light);
+            --surface-color: var(--surface-light);
+            --border-color: var(--border-light);
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 1rem;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1rem;
+            /* Header Separator Line */
+            border-bottom: 1px solid var(--border-color);
+        }
+        #logo {
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+        .theme-toggle {
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 1.6rem;
+        }
         .player-container {
-            position: relative;
+            width: 100%;
+            margin-top: 1.5rem;
+            margin-bottom: 1.5rem;
         }
-        .hidden-input {
-            display: none;
+        .controls-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            width: 100%;
+            margin-bottom: 1.5rem;
         }
+        .action-button {
+            width: 100%;
+            max-width: 400px;
+            padding: 0.9rem 1rem;
+            border-radius: 8px;
+            background-color: var(--surface-color);
+            color: var(--text-color);
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+        }
+        footer {
+            text-align: center;
+            color: #aaa;
+            padding-top: 1rem;
+            /* Footer Separator Line */
+            border-top: 1px solid var(--border-color);
+        }
+        footer a { color: #aaa; text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+        .hidden-input { display: none; }
     </style>
 </head>
 <body>
-    <button class="theme-toggle button-base" aria-label="Toggle Light/Dark Mode" aria-pressed="false" title="Toggle Light/Dark Mode">
-        <i class="fas fa-moon" aria-hidden="true"></i>
-    </button>
-
-    <div class="background-animation" aria-hidden="true">
-        <div class="bg-gradient"></div>
-    </div>
-
     <div class="container">
+        <!-- 1. Header -->
         <header class="header">
-            <div class="file-info">
-                <h1 id="file-name">{{ file_name }}</h1>
-                <div class="file-meta" role="group" aria-label="File metadata"></div>
-            </div>
+            <div id="logo">⚡ Thunder</div>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle Theme">
+                <i class="fas fa-moon"></i>
+            </button>
         </header>
 
-        <main id="main-content">
-            <section class="player-container" aria-label="Video Player">
-                <video id="player" playsinline preload="metadata" controls>
-                    <source src="{{ src }}" type="video/mp4" />
-                </video>
-            </section>
+        <!-- 2. Video Player -->
+        <div class="player-container">
+            <video id="player" playsinline preload="metadata" controls></video>
+        </div>
 
-            <nav class="controls-section" aria-label="File options">
-                <!-- Stream Dropdown -->
-                <div class="dropdown-container" id="stream-dropdown-container">
-                    <button type="button" class="action-button button-base secondary-button stream-btn" aria-haspopup="true" aria-expanded="false" aria-controls="stream-menu" id="stream-btn-label">
-                        <i class="fas fa-external-link-alt" aria-hidden="true"></i>
-                        <span>Stream</span>
-                    </button>
-                    <div class="dropdown-menu" id="stream-menu" aria-labelledby="stream-btn-label" role="menu">
-                        <!-- Stream menu content will be populated by script.js -->
-                    </div>
-                </div>
-                <!-- Download Button -->
-                <a href="{{ src }}" download="{{ file_name }}" class="action-button button-base secondary-button" title="Download the video" aria-label="Download video file">
-                    <i class="fas fa-cloud-download-alt" aria-hidden="true"></i>
-                    <span>Download</span>
-                </a>
-                <!-- Copy Link Button -->
-                <button type="button" class="action-button button-base secondary-button" title="Copy video link" aria-label="Copy video link to clipboard">
-                    <i class="fas fa-copy" aria-hidden="true"></i>
-                    <span>Copy Link</span>
-                </button>
-                <!-- Add Subtitle Button -->
-                <label for="subtitle-upload" class="action-button button-base secondary-button" title="Upload custom subtitle" aria-label="Upload custom subtitle" style="cursor: pointer;">
-                    <i class="fas fa-closed-captioning" aria-hidden="true"></i>
-                    <span>Add Subtitle</span>
-                </label>
-                <input type="file" id="subtitle-upload" class="hidden-input" accept=".vtt,.srt">
-            </nav>
-        </main>
+        <!-- 3. & 4. Buttons -->
+        <nav class="controls-section">
+            <label for="subtitle-upload" class="action-button">
+                <i class="fas fa-closed-captioning"></i><span>Add Subtitle</span>
+            </label>
+            <a href="{{ src }}" download="{{ file_name }}" class="action-button">
+                <i class="fas fa-cloud-download-alt"></i><span>Download</span>
+            </a>
+            <input type="file" id="subtitle-upload" class="hidden-input" accept=".vtt,.srt">
+        </nav>
+
+        <!-- 5. Footer -->
+        <footer>
+            <p><a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer">⚡ Thunder © <span id="current-year"></span> | GitHub</a></p>
+        </footer>
     </div>
 
-    <footer>
-        <p><span id="thunder-text">⚡ Thunder</span> © <span id="current-year"></span> | <a href="https://github.com/fyaz05/FileToLink" target="_blank" rel="noopener noreferrer" aria-label="View source code on GitHub"><i class="fab fa-github" aria-hidden="true"></i> <span>GitHub</span></a></p>
-    </footer>
-
-    <div class="toast" id="toast" role="alert" aria-live="polite" aria-atomic="true" aria-hidden="true">
-        <div class="toast-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></div>
-        <div class="toast-message">Action completed.</div>
-    </div>
-
-    <!-- Plyr.io Player -->
     <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-    
-    <!-- Original Page Functionality Script -->
-    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/script.js"></script>
-
-    <!-- Player and Subtitle Logic -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Check if Plyr is defined before initializing
-            if (typeof Plyr === 'undefined') {
-                console.error('Plyr is not loaded.');
-                return;
-            }
-
-            const player = new Plyr('#player', {
-                controls: [
-                    'play-large', 'play', 'progress', 'current-time', 'mute', 
-                    'volume', 'captions', 'settings', 'fullscreen'
-                ],
-                settings: ['captions', 'quality', 'speed', 'loop'],
-                captions: { active: true, update: true, language: 'en' }
-            });
+            const player = new Plyr('#player');
+            player.source = {
+                type: 'video',
+                sources: [{ src: '{{ src }}', type: 'video/mp4' }]
+            };
 
             const subtitleUpload = document.getElementById('subtitle-upload');
+            const themeToggle = document.getElementById('theme-toggle');
+            const currentYearSpan = document.getElementById('current-year');
             let currentObjectUrl = null;
 
-            // Function to convert SRT format to VTT
             function srtToVtt(srtText) {
-                return "WEBVTT\n\n" + srtText
-                    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2')
-                    .split('\n')
-                    .map(line => line.trim())
-                    .join('\n');
+                return "WEBVTT\n\n" + srtText.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2').trim();
             }
 
             subtitleUpload.addEventListener('change', (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
-
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     let trackContent = e.target.result;
-
-                    if (file.name.toLowerCase().endsWith('.srt')) {
-                        trackContent = srtToVtt(trackContent);
-                    }
-                    
-                    if (currentObjectUrl) {
-                        URL.revokeObjectURL(currentObjectUrl);
-                    }
-                    
+                    if (file.name.toLowerCase().endsWith('.srt')) trackContent = srtToVtt(trackContent);
+                    if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
                     const blob = new Blob([trackContent], { type: 'text/vtt' });
                     currentObjectUrl = URL.createObjectURL(blob);
-
-                    const existingTracks = player.media.querySelectorAll('track');
-                    existingTracks.forEach(track => track.remove());
-
+                    const oldTrack = player.media.querySelector('track');
+                    if (oldTrack) oldTrack.remove();
                     const trackElement = document.createElement('track');
                     trackElement.kind = 'subtitles';
-                    trackElement.label = file.name.split('.').slice(0, -1).join('.') || 'Custom';
-                    trackElement.srclang = 'en';
+                    trackElement.label = 'Custom';
                     trackElement.src = currentObjectUrl;
                     trackElement.default = true;
-
                     player.media.appendChild(trackElement);
-                    
-                    player.restart().then(() => {
-                        setTimeout(() => {
-                            player.toggleCaptions(true);
-                        }, 250);
-                    });
+                    player.restart().then(() => player.toggleCaptions(true));
                 };
                 reader.readAsText(file);
             });
-            
-            // Make player accessible globally for the external script if needed
-            window.player = player;
+
+            function applyTheme(theme) {
+                document.documentElement.setAttribute('data-theme', theme);
+                // Update icon based on theme
+                themeToggle.querySelector('i').className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+            }
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            applyTheme(savedTheme);
+            themeToggle.addEventListener('click', () => {
+                const newTheme = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+                localStorage.setItem('theme', newTheme);
+                applyTheme(newTheme);
+            });
+            if (currentYearSpan) currentYearSpan.textContent = new Date().getFullYear();
         });
     </script>
 </body>
