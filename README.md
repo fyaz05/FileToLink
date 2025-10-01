@@ -85,8 +85,6 @@ You can deploy this bot to Koyeb with just a few clicks:
 4. Click "Deploy" and wait for the deployment to complete
 5. Your bot will be available at the URL provided by Koyeb
 
-[...previous content remains the same until Credits section...]
-
 ## Credits
 
 - Original Repository: [fyaz05/FileToLink](https://github.com/fyaz05/FileToLink)
