@@ -1,0 +1,22 @@
+name: filetolink
+service:
+  name: filetolink
+  instance:
+    type: nano
+  ports:
+    - port: 8080
+  env:
+    - name: BOT_TOKEN
+      value: ""
+    - name: API_ID
+      value: ""
+    - name: API_HASH
+      value: ""
+    - name: BIN_CHANNEL
+      value: ""
+    - name: DATABASE_URL
+      value: ""
+    - name: FQDN
+      value: ""
+    - name: OWNER_ID
+      value: ""
