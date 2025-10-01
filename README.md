@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg" alt="Thunder Logo" width="120">
-  <h1 align="center">⚡ Thunder</h1>
+  <h1 align="center">⚡ Thunder modified</h1>
 </p>
 
 <p align="center">
