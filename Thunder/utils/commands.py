@@ -20,6 +20,7 @@ def get_commands():
         "log": "(Admin) Send bot logs",
         "restart": "(Admin) Restart the bot",
         "shell": "(Admin) Execute a shell command",
+        "speedtest": "(Admin) Run network speed test",
         "users": "(Admin) Show the total number of users",
         "authorize": "(Admin) Grant permanent access to a user",
         "deauthorize": "(Admin) Remove permanent access from a user",

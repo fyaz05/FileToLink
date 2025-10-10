@@ -35,6 +35,7 @@ from Thunder.utils.messages import (
     MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
     MSG_SHELL_OUTPUT_STDERR, MSG_SHELL_OUTPUT_STDOUT, MSG_SHELL_USAGE,
+    MSG_SPEEDTEST_ERROR, MSG_SPEEDTEST_INIT, MSG_SPEEDTEST_RESULT,
     MSG_STATUS_ERROR, MSG_SYSTEM_STATS, MSG_SYSTEM_STATUS,
     MSG_UNBAN_USAGE, MSG_USER_BANNED_NOTIFICATION,
     MSG_USER_NOT_IN_BAN_LIST, MSG_USER_UNBANNED_NOTIFICATION,
@@ -42,6 +43,7 @@ from Thunder.utils.messages import (
 )
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.tokens import authorize, deauthorize, list_allowed
+from Thunder.utils.speedtest import run_speedtest
 from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
@@ -353,3 +355,67 @@ async def run_shell_command(client: Client, message: Message):
                 message,
                 text=MSG_SHELL_ERROR.format(error=html.escape(str(e))),
                 parse_mode=ParseMode.HTML)
+
+
+@StreamBot.on_message(filters.command("speedtest") & owner_filter)
+async def speedtest_command(client: Client, message: Message):
+    status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
+    
+    try:
+        result_dict, image_url = await run_speedtest()
+        
+        if result_dict is None:
+            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+            return
+        
+        download_mbps = result_dict['download'] / 1_000_000
+        upload_mbps = result_dict['upload'] / 1_000_000
+        download_bps = result_dict['download'] / 8
+        upload_bps = result_dict['upload'] / 8
+        
+        result_text = MSG_SPEEDTEST_RESULT.format(
+            download_mbps=f"{download_mbps:.2f}",
+            upload_mbps=f"{upload_mbps:.2f}",
+            download_bps=humanbytes(download_bps),
+            upload_bps=humanbytes(upload_bps),
+            ping=f"{result_dict['ping']:.2f}",
+            timestamp=result_dict['timestamp'],
+            bytes_sent=humanbytes(result_dict['bytes_sent']),
+            bytes_received=humanbytes(result_dict['bytes_received']),
+            server_name=result_dict['server']['name'],
+            server_country=result_dict['server']['country'],
+            server_sponsor=result_dict['server']['sponsor'],
+            server_latency=f"{float(result_dict['server']['latency']):.2f}",
+            server_lat=f"{float(result_dict['server']['lat']):.4f}",
+            server_lon=f"{float(result_dict['server']['lon']):.4f}",
+            client_ip=result_dict['client']['ip'],
+            client_lat=f"{float(result_dict['client']['lat']):.4f}",
+            client_lon=f"{float(result_dict['client']['lon']):.4f}",
+            client_isp=result_dict['client']['isp'],
+            client_isprating=result_dict['client']['isprating'],
+            client_country=result_dict['client']['country']
+        )
+        
+        if image_url:
+            await handle_flood_wait(
+                message.reply_photo,
+                image_url,
+                caption=result_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await handle_flood_wait(
+                status_msg.edit_text,
+                result_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        await handle_flood_wait(status_msg.delete)
+        
+    except Exception as e:
+        logger.error(f"Error in speedtest_command: {e}", exc_info=True)
+        try:
+            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+        except Exception:
+            await reply(message, text=MSG_SPEEDTEST_ERROR)
