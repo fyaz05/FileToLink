@@ -197,7 +197,6 @@ async def deauthorize_command(client: Client, message: Message):
         await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
         logger.error(f"Error in deauthorize_command: {e}", exc_info=True)
-
         await reply(message, text=MSG_ERROR_GENERIC)
 
 
@@ -368,22 +367,17 @@ async def speedtest_command(client: Client, message: Message):
             await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
             return
         
-        download_mbps = result_dict['download'] / 1_000_000
-        upload_mbps = result_dict['upload'] / 1_000_000
-        download_bps = result_dict['download'] / 8
-        upload_bps = result_dict['upload'] / 8
-        
         result_text = MSG_SPEEDTEST_RESULT.format(
-            download_mbps=f"{download_mbps:.2f}",
-            upload_mbps=f"{upload_mbps:.2f}",
-            download_bps=humanbytes(download_bps),
-            upload_bps=humanbytes(upload_bps),
+            download_mbps=f"{result_dict['download_mbps']:.2f}",
+            upload_mbps=f"{result_dict['upload_mbps']:.2f}",
+            download_bps=humanbytes(result_dict['download_bps']),
+            upload_bps=humanbytes(result_dict['upload_bps']),
             ping=f"{result_dict['ping']:.2f}",
             timestamp=result_dict['timestamp'],
             bytes_sent=humanbytes(result_dict['bytes_sent']),
             bytes_received=humanbytes(result_dict['bytes_received']),
             server_name=result_dict['server']['name'],
-            server_country=result_dict['server']['country'],
+            server_country=f"{result_dict['server']['country']} ({result_dict['server']['cc']})",
             server_sponsor=result_dict['server']['sponsor'],
             server_latency=f"{float(result_dict['server']['latency']):.2f}",
             server_lat=f"{float(result_dict['server']['lat']):.4f}",
@@ -409,7 +403,6 @@ async def speedtest_command(client: Client, message: Message):
                 result_text,
                 parse_mode=ParseMode.MARKDOWN
             )
-            return
         
         await handle_flood_wait(status_msg.delete)
         
