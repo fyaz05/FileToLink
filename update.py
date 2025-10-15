@@ -29,9 +29,12 @@ if UPSTREAM_REPO:
             f"git reset --hard origin/{UPSTREAM_BRANCH} -q"
         )
         
-        update = srun(git_commands, shell=True)
+        result = srun(git_commands, shell=True)
         
-        logger.info('Successfully updated' if update.returncode == 0 else 'Update failed, check UPSTREAM_REPO')
+        if result.returncode == 0:
+            logger.info('Successfully updated with latest commit from UPSTREAM_REPO')
+        else:
+            logger.error('Something went wrong while updating, check UPSTREAM_REPO if valid or not!')
             
     finally:
         if opath.exists(config_backup):
