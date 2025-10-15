@@ -359,56 +359,55 @@ async def run_shell_command(client: Client, message: Message):
 @StreamBot.on_message(filters.command("speedtest") & owner_filter)
 async def speedtest_command(client: Client, message: Message):
     status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
-    
     try:
         result_dict, image_url = await run_speedtest()
-        
         if result_dict is None:
             await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
             return
         
-        result_text = MSG_SPEEDTEST_RESULT.format(
-            download_mbps=f"{result_dict['download_mbps']:.2f}",
-            upload_mbps=f"{result_dict['upload_mbps']:.2f}",
-            download_bps=humanbytes(result_dict['download_bps']),
-            upload_bps=humanbytes(result_dict['upload_bps']),
-            ping=f"{result_dict['ping']:.2f}",
-            timestamp=result_dict['timestamp'],
-            bytes_sent=humanbytes(result_dict['bytes_sent']),
-            bytes_received=humanbytes(result_dict['bytes_received']),
-            server_name=result_dict['server']['name'],
-            server_country=f"{result_dict['server']['country']} ({result_dict['server']['cc']})",
-            server_sponsor=result_dict['server']['sponsor'],
-            server_latency=f"{float(result_dict['server']['latency']):.2f}",
-            server_lat=f"{float(result_dict['server']['lat']):.4f}",
-            server_lon=f"{float(result_dict['server']['lon']):.4f}",
-            client_ip=result_dict['client']['ip'],
-            client_lat=f"{float(result_dict['client']['lat']):.4f}",
-            client_lon=f"{float(result_dict['client']['lon']):.4f}",
-            client_isp=result_dict['client']['isp'],
-            client_isprating=result_dict['client']['isprating'],
-            client_country=result_dict['client']['country']
-        )
-        
-        if image_url:
-            await handle_flood_wait(
-                message.reply_photo,
-                image_url,
-                caption=result_text,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await handle_flood_wait(
-                status_msg.edit_text,
-                result_text,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        
-        await handle_flood_wait(status_msg.delete)
-        
+        result_text = _format_speedtest_result(result_dict)
+        await _send_result(message, status_msg, result_text, image_url)
     except Exception as e:
         logger.error(f"Error in speedtest_command: {e}", exc_info=True)
         try:
             await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
         except Exception:
             await reply(message, text=MSG_SPEEDTEST_ERROR)
+
+
+def _format_speedtest_result(result_dict: dict) -> str:
+    s, c = result_dict['server'], result_dict['client']
+    return MSG_SPEEDTEST_RESULT.format(
+        download_mbps=_fmt(result_dict['download_mbps']),
+        upload_mbps=_fmt(result_dict['upload_mbps']),
+        download_bps=humanbytes(result_dict['download_bps']),
+        upload_bps=humanbytes(result_dict['upload_bps']),
+        ping=_fmt(result_dict['ping']),
+        timestamp=result_dict['timestamp'],
+        bytes_sent=humanbytes(result_dict['bytes_sent']),
+        bytes_received=humanbytes(result_dict['bytes_received']),
+        server_name=s['name'],
+        server_country=f"{s['country']} ({s['cc']})",
+        server_sponsor=s['sponsor'],
+        server_latency=_fmt(s['latency']),
+        server_lat=_fmt(s['lat'], 4),
+        server_lon=_fmt(s['lon'], 4),
+        client_ip=c['ip'],
+        client_lat=_fmt(c['lat'], 4),
+        client_lon=_fmt(c['lon'], 4),
+        client_isp=c['isp'],
+        client_isprating=c['isprating'],
+        client_country=c['country']
+    )
+
+
+async def _send_result(message: Message, status_msg: Message, result_text: str, image_url: str):
+    if image_url:
+        await handle_flood_wait(message.reply_photo, image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
+        await handle_flood_wait(status_msg.delete)
+    else:
+        await handle_flood_wait(status_msg.edit_text, result_text, parse_mode=ParseMode.MARKDOWN)
+
+
+def _fmt(value, decimals: int = 2) -> str:
+    return f"{float(value):.{decimals}f}"
