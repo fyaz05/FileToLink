@@ -35,6 +35,7 @@ from Thunder.utils.messages import (
     MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
     MSG_SHELL_OUTPUT_STDERR, MSG_SHELL_OUTPUT_STDOUT, MSG_SHELL_USAGE,
+    MSG_SPEEDTEST_ERROR, MSG_SPEEDTEST_INIT, MSG_SPEEDTEST_RESULT,
     MSG_STATUS_ERROR, MSG_SYSTEM_STATS, MSG_SYSTEM_STATUS,
     MSG_UNBAN_USAGE, MSG_USER_BANNED_NOTIFICATION,
     MSG_USER_NOT_IN_BAN_LIST, MSG_USER_UNBANNED_NOTIFICATION,
@@ -42,6 +43,7 @@ from Thunder.utils.messages import (
 )
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.tokens import authorize, deauthorize, list_allowed
+from Thunder.utils.speedtest import run_speedtest
 from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
@@ -195,7 +197,6 @@ async def deauthorize_command(client: Client, message: Message):
         await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
         logger.error(f"Error in deauthorize_command: {e}", exc_info=True)
-
         await reply(message, text=MSG_ERROR_GENERIC)
 
 
@@ -353,3 +354,60 @@ async def run_shell_command(client: Client, message: Message):
                 message,
                 text=MSG_SHELL_ERROR.format(error=html.escape(str(e))),
                 parse_mode=ParseMode.HTML)
+
+
+@StreamBot.on_message(filters.command("speedtest") & owner_filter)
+async def speedtest_command(client: Client, message: Message):
+    status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
+    try:
+        result_dict, image_url = await run_speedtest()
+        if result_dict is None:
+            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+            return
+        
+        result_text = _format_speedtest_result(result_dict)
+        await _send_result(message, status_msg, result_text, image_url)
+    except Exception as e:
+        logger.error(f"Error in speedtest_command: {e}", exc_info=True)
+        try:
+            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+        except Exception:
+            await reply(message, text=MSG_SPEEDTEST_ERROR)
+
+
+def _format_speedtest_result(result_dict: dict) -> str:
+    s, c = result_dict['server'], result_dict['client']
+    return MSG_SPEEDTEST_RESULT.format(
+        download_mbps=_fmt(result_dict['download_mbps']),
+        upload_mbps=_fmt(result_dict['upload_mbps']),
+        download_bps=humanbytes(result_dict['download_bps']),
+        upload_bps=humanbytes(result_dict['upload_bps']),
+        ping=_fmt(result_dict['ping']),
+        timestamp=result_dict['timestamp'],
+        bytes_sent=humanbytes(result_dict['bytes_sent']),
+        bytes_received=humanbytes(result_dict['bytes_received']),
+        server_name=s['name'],
+        server_country=f"{s['country']} ({s['cc']})",
+        server_sponsor=s['sponsor'],
+        server_latency=_fmt(s['latency']),
+        server_lat=_fmt(s['lat'], 4),
+        server_lon=_fmt(s['lon'], 4),
+        client_ip=c['ip'],
+        client_lat=_fmt(c['lat'], 4),
+        client_lon=_fmt(c['lon'], 4),
+        client_isp=c['isp'],
+        client_isprating=c['isprating'],
+        client_country=c['country']
+    )
+
+
+async def _send_result(message: Message, status_msg: Message, result_text: str, image_url: str):
+    if image_url:
+        await handle_flood_wait(message.reply_photo, image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
+        await handle_flood_wait(status_msg.delete)
+    else:
+        await handle_flood_wait(status_msg.edit_text, result_text, parse_mode=ParseMode.MARKDOWN)
+
+
+def _fmt(value, decimals: int = 2) -> str:
+    return f"{float(value):.{decimals}f}"
