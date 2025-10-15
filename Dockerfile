@@ -20,4 +20,4 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
-CMD ["python", "-m", "Thunder"]
+CMD ["bash", "thunder.sh"]
