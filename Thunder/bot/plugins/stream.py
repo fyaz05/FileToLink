@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 from pyrogram import Client, enums, filters
 from pyrogram.errors import MessageNotModified, MessageDeleteForbidden, MessageIdInvalid
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            LinkPreviewOptions, Message)
+                            Message)
 
 from Thunder.bot import StreamBot
 from Thunder.utils.bot_utils import (gen_links, is_admin, log_newusr, notify_own,
@@ -73,7 +73,7 @@ async def send_channel_links(target_msg: Message, links: Dict[str, Any], source_
             online_link=links['online_link'],
             stream_link=links['stream_link']
         ),
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        disable_web_page_preview=True,
         quote=True
     )
 
@@ -111,7 +111,7 @@ async def send_dm_links(bot: Client, user_id: int, links: Dict[str, Any], chat_t
             bot.send_message,
             chat_id=user_id,
             text=dm_text,
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
+            disable_web_page_preview=True,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=get_link_buttons(links)
         )
@@ -130,7 +130,7 @@ async def send_link(msg: Message, links: Dict[str, Any]):
         ),
         quote=True,
         parse_mode=enums.ParseMode.MARKDOWN,
-        link_preview_options=LinkPreviewOptions(is_disabled=True),
+        disable_web_page_preview=True,
         reply_markup=get_link_buttons(links)
     )
 
@@ -146,7 +146,7 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
             await handle_flood_wait(
                 message.reply_text,
                 MSG_ERROR_START_BOT.format(invite_link=invite_link),
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                disable_web_page_preview=True,
                 parse_mode=enums.ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_START_CHAT, url=invite_link)]]),
                 quote=True
@@ -262,7 +262,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
                             online_link=links['online_link'],
                             stream_link=links['stream_link']
                         ),
-                        link_preview_options=LinkPreviewOptions(is_disabled=True)
+                        disable_web_page_preview=True
                     )
                 except Exception as e:
                     logger.error(f"Error editing notification message with links: {e}", exc_info=True)
@@ -320,7 +320,7 @@ async def process_single(
                     stream_link=links['stream_link']
                 ),
                 parse_mode=enums.ParseMode.MARKDOWN,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                disable_web_page_preview=True,
                 reply_markup=get_link_buttons(links)
             )
         elif not original_request_msg:
@@ -347,7 +347,7 @@ async def process_single(
                     online_link=links['online_link'],
                     stream_link=links['stream_link']
                 ),
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                disable_web_page_preview=True,
                 quote=True
             )
         if status_msg:
@@ -427,7 +427,7 @@ async def process_batch(
             msg.reply_text,
             chunk_text,
             quote=True,
-            link_preview_options=LinkPreviewOptions(is_disabled=True),
+            disable_web_page_preview=True,
             parse_mode=enums.ParseMode.MARKDOWN
         )
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
@@ -436,7 +436,7 @@ async def process_batch(
                     bot.send_message,
                     chat_id=msg.from_user.id,
                     text=MSG_DM_BATCH_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + chunk_text,
-                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                    disable_web_page_preview=True,
                     parse_mode=enums.ParseMode.MARKDOWN
                 )
             except Exception as e:

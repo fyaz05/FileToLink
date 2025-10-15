@@ -6,7 +6,7 @@ import asyncio
 from collections import deque
 from typing import Callable, Dict, Optional, Tuple
 from pyrogram import Client
-from pyrogram.types import Message, ReplyParameters
+from pyrogram.types import Message
 from pyrogram.errors import FloodWait, RPCError
 from Thunder.utils.logger import logger
 from Thunder.utils.database import db
@@ -394,7 +394,7 @@ async def _send_notification(bot: Client, message: Message, template: str, file_
                 bot.send_message,
                 chat_id=message.chat.id,
                 text=text,
-                reply_parameters=ReplyParameters(message_id=message.id)
+                reply_to_message_id=message.id
             )
         else:
             logger.debug("Skipping notification for channel message (no from_user)")

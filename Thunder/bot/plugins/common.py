@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from pyrogram import Client, filters
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            LinkPreviewOptions, Message, User)
+                            Message, User)
 
 from Thunder.bot import StreamBot
 from Thunder.utils.bot_utils import (gen_dc_txt, get_user, log_newusr,
@@ -219,5 +219,5 @@ async def ping_command(bot: Client, msg: Message):
     await handle_flood_wait(sent.edit_text,
         MSG_PING_RESPONSE.format(time_taken_ms=ms),
         reply_markup=InlineKeyboardMarkup(btns),
-        link_preview_options=LinkPreviewOptions(is_disabled=True)
+        disable_web_page_preview=True
     )
