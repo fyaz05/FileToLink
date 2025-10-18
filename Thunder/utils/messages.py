@@ -342,13 +342,13 @@ MSG_SYSTEM_STATUS = (
 )
 
 # ------ Speedtest Messages ------
-MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...** ⏳\n\n> Please wait while I test your connection speed."
+MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...**"
 MSG_SPEEDTEST_ERROR = "❌ **Speed Test Failed!**\n\n> Unable to complete the speed test. Please try again later."
 MSG_SPEEDTEST_RESULT = (
     "⚡ **Speed Test Results**\n\n"
     "**SPEEDTEST INFO:**\n"
-    "> **Download:** `{download_mbps} Mbps` (`{download_bps} B/s`)\n"
-    "> **Upload:** `{upload_mbps} Mbps` (`{upload_bps} B/s`)\n"
+    "> **Download:** `{download_mbps} Mbps` (`{download_bps}/s`)\n"
+    "> **Upload:** `{upload_mbps} Mbps` (`{upload_bps}/s`)\n"
     "> **Ping:** `{ping} ms`\n"
     "> **Timestamp:** `{timestamp}`\n"
     "> **Data Sent:** `{bytes_sent}`\n"
@@ -361,7 +361,7 @@ MSG_SPEEDTEST_RESULT = (
     "> **Coordinates:** `{server_lat}, {server_lon}`\n\n"
     "**CLIENT DETAILS:**\n"
     "> **IP:** `{client_ip}`\n"
-    "> **Location:** `{client_lat}, {client_lon}`\n"
+    "> **Coordinates:** `{client_lat}, {client_lon}`\n"
     "> **ISP:** `{client_isp}`\n"
     "> **ISP Rating:** `{client_isprating}`\n"
     "> **Country:** `{client_country}`"

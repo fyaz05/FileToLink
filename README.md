@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
-  <a href="https://github.com/KurimuzonAkuma/pyrogram/"><img src="https://img.shields.io/badge/Kurigram-red?style=for-the-badge" alt="Kurigram"></a>
+  <a href="https://github.com/Mayuri-Chan/pyrofork"><img src="https://img.shields.io/badge/Pyrofork-red?style=for-the-badge" alt="Pyrofork"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fyaz05/FileToLink?style=for-the-badge&color=green" alt="License"></a>
   <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
 </p>
@@ -467,7 +467,7 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 ## Acknowledgments
 
--   [Kurigram](https://github.com/KurimuzonAkuma/pyrogram/) - Telegram MTProto API Framework
+-   [Pyrofork](https://github.com/Mayuri-Chan/pyrofork) - Telegram MTProto API Framework
 -   [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
 -   [Motor](https://github.com/mongodb/motor) - Asynchronous MongoDB Driver
 -   [TgCrypto](https://github.com/pyrogram/tgcrypto) - High-performance cryptography library

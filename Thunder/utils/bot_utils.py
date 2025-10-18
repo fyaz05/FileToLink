@@ -7,7 +7,7 @@ from urllib.parse import quote
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            LinkPreviewOptions, Message, User)
+                            Message, User)
 
 from Thunder.utils.database import db
 from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
@@ -40,7 +40,7 @@ async def reply_user_err(msg: Message, err_txt: str):
         msg.reply_text,
         text=err_txt,
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
-        link_preview_options=LinkPreviewOptions(is_disabled=True)
+        disable_web_page_preview=True
     )
 
 
@@ -107,4 +107,4 @@ async def is_admin(cli: Client, chat_id_val: int) -> bool:
 
 
 async def reply(msg: Message, **kwargs):
-    return await handle_flood_wait(msg.reply_text, **kwargs, quote=True, link_preview_options=LinkPreviewOptions(is_disabled=True))
+    return await handle_flood_wait(msg.reply_text, **kwargs, quote=True, disable_web_page_preview=True)
