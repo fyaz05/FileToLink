@@ -325,7 +325,7 @@ async def process_single(
             )
         elif not original_request_msg:
             await send_link(msg, links)
-        if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
+        if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user and not original_request_msg:
             await send_dm_links(bot, msg.from_user.id, links, msg.chat.title or "the chat")
         source_msg = original_request_msg if original_request_msg else msg
         source_info = ""

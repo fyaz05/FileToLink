@@ -5,7 +5,7 @@ from Thunder.utils.logger import logger
 
 load_dotenv('config.env', override=True)
 
-UPSTREAM_REPO = getenv('UPSTREAM_REPO', "https://github.com/fyaz05/FileToLink")
+UPSTREAM_REPO = getenv('UPSTREAM_REPO', "")
 UPSTREAM_BRANCH = getenv('UPSTREAM_BRANCH', "main")
 
 if UPSTREAM_REPO:
