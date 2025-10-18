@@ -6,12 +6,10 @@ import importlib.util
 import sys
 from datetime import datetime
 
+from uvloop import install
 from pathlib import Path
 
-import uvloop
-uvloop.install()
-asyncio.set_event_loop(asyncio.new_event_loop())
-
+install()
 from aiohttp import web
 from pyrogram import idle
 
@@ -252,11 +250,14 @@ async def schedule_token_cleanup():
             logger.error(f"Token cleanup error: {e}", exc_info=True)
 
 if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
     try:
-        asyncio.run(start_services())
+        loop.run_until_complete(start_services())
     except KeyboardInterrupt:
         print("╔═══════════════════════════════════════════════════════════╗")
         print("║                   Bot stopped by user (CTRL+C)            ║")
         print("╚═══════════════════════════════════════════════════════════╝")
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
+    finally:
+        loop.close()

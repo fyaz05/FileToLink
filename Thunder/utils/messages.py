@@ -111,7 +111,7 @@ MSG_SHELL_NO_OUTPUT = "✅ <b>Command Executed:</b> No output."
 
 MSG_WORKLOAD_ITEM = "   {bot_name}: {load}\n"
 MSG_ADMIN_RESTART_DONE = "✅ **Restart Successful!**"
-MSG_RESTARTING = "♻️ **Restarting Bot...**\n\n> ⏳ Please wait a moment."
+MSG_RESTARTING = "♻️ **Updating and Restarting Bot...**\n\n> ⏳ Please wait a moment."
 MSG_LOG_FILE_CAPTION = "📄 **System Logs**"
 
 MSG_LOG_FILE_EMPTY = "ℹ️ **Log File Empty:** No data found in the log file."

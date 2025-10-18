@@ -18,7 +18,7 @@ def get_commands():
         "ban": "(Admin) Ban a user",
         "unban": "(Admin) Unban a user",
         "log": "(Admin) Send bot logs",
-        "restart": "(Admin) Restart the bot",
+        "restart": "(Admin) Update and restart the bot",
         "shell": "(Admin) Execute a shell command",
         "speedtest": "(Admin) Run network speed test",
         "users": "(Admin) Show the total number of users",
