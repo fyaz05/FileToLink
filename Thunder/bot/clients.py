@@ -3,17 +3,21 @@
 import asyncio
 
 from pyrogram import Client
+from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.utils.config_parser import TokenParser
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
 
 async def cleanup_clients():
     for client in multi_clients.values():
         try:
-            await handle_flood_wait(client.stop)
+            try:
+                await client.stop()
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.stop()
         except Exception as e:
             logger.error(f"Error stopping client: {e}", exc_info=True)
 
@@ -46,7 +50,11 @@ async def initialize_clients():
                 max_concurrent_transmissions=1000,
                 sleep_threshold=Var.SLEEP_THRESHOLD
             )
-            await handle_flood_wait(client.start)
+            try:
+                await client.start()
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.start()
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client

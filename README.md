@@ -469,7 +469,7 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 -   [Pyrofork](https://github.com/Mayuri-Chan/pyrofork) - Telegram MTProto API Framework
 -   [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
--   [Motor](https://github.com/mongodb/motor) - Asynchronous MongoDB Driver
+-   [PyMongo](https://github.com/mongodb/mongo-python-driver) - Asynchronous MongoDB Driver
 -   [TgCrypto](https://github.com/pyrogram/tgcrypto) - High-performance cryptography library
 
 ## ⚠️ Disclaimer

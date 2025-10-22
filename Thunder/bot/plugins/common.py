@@ -1,9 +1,11 @@
 # Thunder/bot/plugins/common.py
 
+import asyncio
 import time
 from datetime import datetime, timedelta
 
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             Message, User)
 
@@ -14,7 +16,6 @@ from Thunder.utils.database import db
 from Thunder.utils.decorators import check_banned
 from Thunder.utils.file_properties import get_fname, get_fsize, parse_fid
 from Thunder.utils.force_channel import force_channel_check, get_force_info
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
@@ -47,16 +48,30 @@ async def start_command(bot: Client, msg: Message):
             token = await db.token_col.find_one({"token": payload})
             if token:
                 if token["user_id"] != user.id:
-                    return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_FAILED.format(
-                        reason="This activation link is not for your account.",
-                        error_id=str(int(time.time()))[-8:]
-                    ))
+                    try:
+                        return await msg.reply_text(text=MSG_TOKEN_FAILED.format(
+                            reason="This activation link is not for your account.",
+                            error_id=str(int(time.time()))[-8:]
+                        ))
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                        return await msg.reply_text(text=MSG_TOKEN_FAILED.format(
+                            reason="This activation link is not for your account.",
+                            error_id=str(int(time.time()))[-8:]
+                        ))
                 
                 if token.get("activated"):
-                    return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_FAILED.format(
-                        reason="Token has already been activated.",
-                        error_id=str(int(time.time()))[-8:]
-                    ))
+                    try:
+                        return await msg.reply_text(text=MSG_TOKEN_FAILED.format(
+                            reason="Token has already been activated.",
+                            error_id=str(int(time.time()))[-8:]
+                        ))
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                        return await msg.reply_text(text=MSG_TOKEN_FAILED.format(
+                            reason="Token has already been activated.",
+                            error_id=str(int(time.time()))[-8:]
+                        ))
                 
                 now = datetime.utcnow()
                 exp = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
@@ -67,9 +82,17 @@ async def start_command(bot: Client, msg: Message):
                 )
                 
                 hrs = round((exp - now).total_seconds() / 3600, 1)
-                return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hrs))
+                try:
+                    return await msg.reply_text(text=MSG_TOKEN_ACTIVATED.format(duration_hours=hrs))
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    return await msg.reply_text(text=MSG_TOKEN_ACTIVATED.format(duration_hours=hrs))
             else:
-                return await handle_flood_wait(msg.reply_text, text=MSG_TOKEN_INVALID)
+                try:
+                    return await msg.reply_text(text=MSG_TOKEN_INVALID)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    return await msg.reply_text(text=MSG_TOKEN_INVALID)
             
     txt = MSG_WELCOME.format(user_name=user.first_name if user else "Unknown")
     link, title = await get_force_info(bot)
@@ -86,7 +109,11 @@ async def start_command(bot: Client, msg: Message):
     if link:
         btns.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title), url=link)])
     
-    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    try:
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, msg: Message):
@@ -103,7 +130,11 @@ async def help_command(bot: Client, msg: Message):
         btns.append([InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title), url=link)])
     
     btns.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    try:
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, msg: Message):
@@ -118,7 +149,11 @@ async def about_command(bot: Client, msg: Message):
          InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
     
-    await handle_flood_wait(msg.reply_text, text=MSG_ABOUT, reply_markup=InlineKeyboardMarkup(btns))
+    try:
+        await msg.reply_text(text=MSG_ABOUT, reply_markup=InlineKeyboardMarkup(btns))
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await msg.reply_text(text=MSG_ABOUT, reply_markup=InlineKeyboardMarkup(btns))
 
 async def send_user_dc(msg: Message, user: User):
     txt = await gen_dc_txt(user)
@@ -127,7 +162,11 @@ async def send_user_dc(msg: Message, user: User):
         [InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=url)],
         [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
-    await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    try:
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
 
 async def send_file_dc(msg: Message, file_msg: Message):
     try:
@@ -161,7 +200,11 @@ async def send_file_dc(msg: Message, file_msg: Message):
         )
         
         btns = [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
-        await handle_flood_wait(msg.reply_text, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+        try:
+            await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await msg.reply_text(text=txt, reply_markup=InlineKeyboardMarkup(btns))
         
     except Exception as e:
         logger.error(f"File DC error: {e}", exc_info=True)
@@ -207,7 +250,11 @@ async def ping_command(bot: Client, msg: Message):
     if not await force_channel_check(bot, msg):
         return
     start = time.time()
-    sent = await handle_flood_wait(msg.reply_text, text=MSG_PING_START)
+    try:
+        sent = await msg.reply_text(text=MSG_PING_START)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        sent = await msg.reply_text(text=MSG_PING_START)
     end = time.time()
     ms = (end - start) * 1000
     
@@ -216,8 +263,18 @@ async def ping_command(bot: Client, msg: Message):
          InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
     
-    await handle_flood_wait(sent.edit_text,
-        MSG_PING_RESPONSE.format(time_taken_ms=ms),
-        reply_markup=InlineKeyboardMarkup(btns),
-        disable_web_page_preview=True
-    )
+    try:
+        await sent.edit_text(
+            MSG_PING_RESPONSE.format(time_taken_ms=ms),
+            reply_markup=InlineKeyboardMarkup(btns),
+            disable_web_page_preview=True
+        )
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await sent.edit_text(
+            MSG_PING_RESPONSE.format(time_taken_ms=ms),
+            reply_markup=InlineKeyboardMarkup(btns),
+            disable_web_page_preview=True
+        )
+    except MessageNotModified:
+        pass
