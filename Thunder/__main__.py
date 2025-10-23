@@ -219,7 +219,6 @@ async def start_services():
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")
     print(f"   ▶ Server: {bind_address}:{Var.PORT}")
-    print(f"   ▶ Owner: {Var.OWNER_USERNAME}")
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")
     print("╚═══════════════════════════════════════════════════════════╝")
     print("   ▶ Bot is now running! Press CTRL+C to stop.")

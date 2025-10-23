@@ -234,7 +234,7 @@ class RateLimiter:
                 await asyncio.sleep(5)
 
     async def shutdown(self):
-        logger.debug"Shutting down rate limiter and clearing queues...")
+        logger.debug("Shutting down rate limiter and clearing queues...")
         async with self.request_lock:
             self.request_queue.clear()
             self.priority_queue.clear()

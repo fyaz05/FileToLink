@@ -2,7 +2,7 @@ aiohttp
 cloudscraper
 Jinja2
 pyrofork
-pymongo[async]
+pymongo
 psutil
 python-dotenv
 speedtest-cli
