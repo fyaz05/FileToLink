@@ -31,7 +31,7 @@ def _perform_speedtest() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         results['download_bps'] = st.results.download / 8
         results['upload_bps'] = st.results.upload / 8
         
-        logger.info(f"Download: {download_mbps:.2f} Mbps | Upload: {upload_mbps:.2f} Mbps")
+        logger.debug(f"Download: {download_mbps:.2f} Mbps | Upload: {upload_mbps:.2f} Mbps")
         
         try:
             return results, st.results.share()

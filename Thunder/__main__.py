@@ -12,6 +12,7 @@ from pathlib import Path
 install()
 from aiohttp import web
 from pyrogram import idle
+from pyrogram.errors import FloodWait, MessageNotModified
 
 from Thunder import __version__
 from Thunder.bot import StreamBot
@@ -19,7 +20,6 @@ from Thunder.bot.clients import cleanup_clients, initialize_clients
 from Thunder.server import web_server
 from Thunder.utils.commands import set_commands
 from Thunder.utils.database import db
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.keepalive import ping_server
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
@@ -100,8 +100,20 @@ async def start_services():
 
     print("   ▶ Starting Telegram Bot initialization...")
     try:
-        await handle_flood_wait(StreamBot.start)
-        bot_info = await handle_flood_wait(StreamBot.get_me)
+        try:
+            await StreamBot.start()
+        except FloodWait as e:
+            logger.debug(f"FloodWait in bot start, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await StreamBot.start()
+        
+        try:
+            bot_info = await StreamBot.get_me()
+        except FloodWait as e:
+            logger.debug(f"FloodWait in get_me, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            bot_info = await StreamBot.get_me()
+        
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
@@ -111,12 +123,22 @@ async def start_services():
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
             try:
-                await handle_flood_wait(
-                    StreamBot.edit_message_text,
-                    chat_id=restart_message_data["chat_id"],
-                    message_id=restart_message_data["message_id"],
-                    text=MSG_ADMIN_RESTART_DONE,
-                )
+                try:
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE,
+                    )
+                except FloodWait as e:
+                    logger.debug(f"FloodWait in restart message edit, sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    await StreamBot.edit_message_text(
+                        chat_id=restart_message_data["chat_id"],
+                        message_id=restart_message_data["message_id"],
+                        text=MSG_ADMIN_RESTART_DONE,
+                    )
+                except MessageNotModified:
+                    pass
                 await db.delete_restart_message(
                     restart_message_data["message_id"]
                 )
@@ -197,7 +219,6 @@ async def start_services():
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")
     print(f"   ▶ Server: {bind_address}:{Var.PORT}")
-    print(f"   ▶ Owner: {Var.OWNER_USERNAME}")
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")
     print("╚═══════════════════════════════════════════════════════════╝")
     print("   ▶ Bot is now running! Press CTRL+C to stop.")

@@ -2,7 +2,7 @@ aiohttp
 cloudscraper
 Jinja2
 pyrofork
-motor
+pymongo
 psutil
 python-dotenv
 speedtest-cli

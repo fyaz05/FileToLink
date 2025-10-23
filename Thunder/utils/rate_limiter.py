@@ -15,7 +15,6 @@ from Thunder.utils.messages import (
     MSG_RATE_LIMIT_QUEUE_REGULAR,
     MSG_RATE_LIMIT_QUEUE_FULL
 )
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.vars import Var
 
 
@@ -228,20 +227,20 @@ class RateLimiter:
                                 self.user_queue_counts.pop(user_id, None)
 
             except asyncio.CancelledError:
-                logger.info("Request executor cancelled, shutting down.")
+                logger.debug("Request executor cancelled, shutting down.")
                 break
             except Exception as e:
                 logger.critical(f"Critical error in request executor: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
     async def shutdown(self):
-        logger.info("Shutting down rate limiter and clearing queues...")
+        logger.debug("Shutting down rate limiter and clearing queues...")
         async with self.request_lock:
             self.request_queue.clear()
             self.priority_queue.clear()
             self.user_queue_counts.clear()
             self.request_event.clear()
-        logger.info("Rate limiter queues cleared.")
+        logger.debug("Rate limiter queues cleared.")
 
     def get_queue_status(self) -> dict:
         return {
@@ -390,12 +389,19 @@ async def _send_notification(bot: Client, message: Message, template: str, file_
 
             text = template.format(wait_estimate=wait_estimate, s="s" if wait_estimate > 1 else "", **format_kwargs)
 
-            return await handle_flood_wait(
-                bot.send_message,
-                chat_id=message.chat.id,
-                text=text,
-                reply_to_message_id=message.id
-            )
+            try:
+                return await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=text,
+                    reply_to_message_id=message.id
+                )
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                return await bot.send_message(
+                    chat_id=message.chat.id,
+                    text=text,
+                    reply_to_message_id=message.id
+                )
         else:
             logger.debug("Skipping notification for channel message (no from_user)")
             return None

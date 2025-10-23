@@ -21,9 +21,6 @@
 - [About The Project](#about-the-project)
 - [How It Works](#how-it-works)
 - [Features](#features)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
 - [Configuration](#configuration)
   - [Essential Configuration](#essential-configuration)
   - [Optional Configuration](#optional-configuration)
@@ -34,8 +31,14 @@
   - [Token System](#token-system)
   - [URL Shortening](#url-shortening)
   - [Rate Limiting System](#rate-limiting-system)
-- [Production Deployment Guide](#production-deployment-guide)
-  - [Custom Domain & FQDN System](#custom-domain--fqdn-system)
+  - [Network Speed Testing](#network-speed-testing)
+- [Deployment Guide](#deployment-guide)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Quick Deploy](#quick-deploy)
+    - [Deploy to Koyeb](#deploy-to-koyeb)
+    - [Deploy to Render](#deploy-to-render)
+    - [Deploy to Railway](#deploy-to-railway)
   - [Reverse Proxy Setup](#reverse-proxy-setup)
 - [Support & Community](#support--community)
   - [Troubleshooting & FAQ](#troubleshooting--faq)
@@ -95,65 +98,6 @@ User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct 
 - 🎨 **Custom Templates** - Personalize messages sent by the bot to match your brand.
 - 📈 **Media Info Display** - Shows file size, duration, and format details in the response message.
 
-## Getting Started
-
-This section covers the system requirements and step-by-step installation guide for setting up Thunder.
-
-### Prerequisites
-
-| Requirement | Description | Source |
-| :--- | :--- | :--- |
-| Python 3.13 | Programming language | [python.org](https://python.org) |
-| MongoDB | Database | [mongodb.com](https://mongodb.com) |
-| Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
-| Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
-| Public Server | VPS/Dedicated server | Any provider |
-| Storage Channel | For file storage | Create in Telegram |
-
-### Installation
-
-#### Docker Installation (Recommended)
-
-```bash
-# 1. Clone repository
-git clone https://github.com/fyaz05/FileToLink.git
-cd FileToLink
-
-# 2. Configure
-cp config_sample.env config.env
-nano config.env  # Edit your settings
-
-# 3. Build and run
-docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 thunder
-```
-
-<details>
-<summary>Manual Installation</summary>
-
-```bash
-# 1. Clone repository
-git clone https://github.com/fyaz05/FileToLink.git
-cd FileToLink
-
-# 2. Setup virtual environment
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Configure
-cp config_sample.env config.env
-nano config.env
-
-# 5. Run bot
-python -m Thunder
-```
-
-> **Tip:** Start with the essential configuration to get Thunder running, then add optional features as needed.
-
-</details>
 
 ## Configuration
 
@@ -168,15 +112,16 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `BOT_TOKEN` | Bot token from @BotFather | `123456:ABCdefGHI` |
 | `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
 | `OWNER_ID` | Owner user ID | `12345678` |
-| `OWNER_USERNAME` | Owner username | `yourusername` |
 | `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
 | `FQDN` | Domain/IP address | `f2l.thunder.com` |
 | `HAS_SSL` | HTTPS enabled | `True` or `False` |
 | `PORT` | Server port | `8080` |
 | `NO_PORT` | Hide port in URLs | `True` or `False` |
 
+### Optional Configuration
+
 <details>
-<summary><h3>Optional Configuration</h3></summary>
+<summary>Optional Configuration Details</summary>
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
@@ -324,19 +269,95 @@ Monitor server performance with built-in speed testing:
 
 Features include download/upload speeds, latency measurements, and shareable result images for performance monitoring.
 
-## Production Deployment Guide
+## Deployment Guide
 
-### Custom Domain & FQDN System
+This section covers the complete setup process for deploying Thunder, from prerequisites to production deployment.
 
-Thunder provides enterprise-grade domain configuration through the `FQDN` setting, enabling professional file sharing with custom domains and comprehensive SSL support.
+### Prerequisites
 
--   **Custom Domain Support**: Set your primary domain for file sharing.
--   **Protocol Selection**: Dynamically serves over HTTP/HTTPS based on your `HAS_SSL` configuration.
--   **Cloudflare Compatible**: Full support for Cloudflare Origin Certificates and reverse proxies.
--   **Security Headers**: Adds proper security headers for production deployments.
+| Requirement | Description | Source |
+| :--- | :--- | :--- |
+| Python 3.13 | Programming language | [python.org](https://python.org) |
+| MongoDB | Database | [mongodb.com](https://mongodb.com) |
+| Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
+| Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
+| Public Server | VPS/Dedicated server | Any provider |
+| Storage Channel | For file storage | Create in Telegram |
+
+### Installation
+
+#### Docker Installation (Recommended)
+
+```bash
+# 1. Clone repository
+git clone https://github.com/fyaz05/FileToLink.git
+cd FileToLink
+
+# 2. Configure
+cp config_sample.env config.env
+nano config.env  # Edit your settings
+
+# 3. Build and run
+docker build -t thunder .
+docker run -d --name thunder -p 8080:8080 thunder
+```
 
 <details>
-<summary><h3>Reverse Proxy Setup</h3></summary>
+<summary>Manual Installation</summary>
+
+```bash
+# 1. Clone repository
+git clone https://github.com/fyaz05/FileToLink.git
+cd FileToLink
+
+# 2. Setup virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Configure
+cp config_sample.env config.env
+nano config.env
+
+# 5. Run bot
+python -m Thunder
+```
+
+> **Tip:** Start with the essential configuration to get Thunder running, then add optional features as needed.
+
+</details>
+
+## Quick Deploy
+
+### Deploy to Koyeb
+
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&image=docker.io/fyaz05/thunder:latest&name=thunder&ports=8080;http;/&env[API_ID]=&env[API_HASH]=&env[BOT_TOKEN]=&env[BIN_CHANNEL]=&env[OWNER_ID]=&env[DATABASE_URL]=&env[FQDN]=)
+
+
+After deployment, to add any additional environment variables, use the Koyeb dashboard under **Settings** → **Environment Variables**.
+
+### Deploy to Render
+
+1. Open [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
+2. Choose **Existing Image**: `fyaz05/thunder:latest`
+3. Add your environment variables
+4. Click **Deploy**
+
+### Deploy to Railway
+
+1. Open [Railway](https://railway.app) → **New Project** → **Deploy Service**
+2. Choose **Docker Image**: `fyaz05/thunder:latest`
+3. Add your environment variables
+4. Click **Deploy**
+
+> **Note:** See the [Configuration](#configuration) section for required environment variables.
+
+## Reverse Proxy Setup
+
+<details>
+<summary>Reverse Proxy Guide</summary>
 
 This guide will help you set up a secure reverse proxy using **NGINX** for your file streaming bot with **Cloudflare SSL protection**.
 
@@ -433,23 +454,54 @@ Your reverse proxy is now securely streaming files behind Cloudflare!
 
 ### Troubleshooting & FAQ
 
-**Bot not responding?**
+#### **Initial Setup**
 
--   Check if the `BOT_TOKEN` is correct in your `config.env`.
--   Ensure your server's firewall is not blocking the bot's port.
--   View bot logs for any error messages.
+**Q: Why isn't my bot responding after setup?**
+A: This is usually a configuration issue. Please check the following:
+1.  **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) are filled in correctly.
+2.  **Use `config.env` Only**: Do not edit `vars.py` or `config_sample.env`. The bot is designed to only read your settings from `config.env`.
+3.  **Check Logs**: Review the console logs on your server or hosting platform (Koyeb, Render, Heroku) for any startup errors.
 
-**Links not working?**
+**Q: What do I use for the `FQDN` variable?**
+A: It's the public URL or IP address of your bot.
+-   **With a Domain**: Use your subdomain (e.g., `f2l.thunder.com`).
+-   **On Koyeb/Render/Heroku**: Use the public URL provided by the platform.
+-   **On a VPS**: Use your server's public IP address.
 
--   Verify your `FQDN` and `PORT` settings are correct.
--   If using SSL (`HAS_SSL=True`), ensure your reverse proxy and certificates are set up correctly.
--   Check that the bot has admin rights in the `BIN_CHANNEL` and can forward messages there.
+**Q: Why are my links not working on a VPS?**
+A: For links to work on a VPS, the URL must include the port number (e.g., `http://YOUR_VPS_IP:8080`). Ensure that `NO_PORT` is set to `False` in `config.env` and that your server is configured to allow traffic through that port.
 
-**Q: How do I get my API credentials?**
-A: Visit [my.telegram.org/apps](https://my.telegram.org/apps) to get your `API_ID` and `API_HASH`.
+#### **Common Errors**
 
-**Q: Where can I create a bot token?**
-A: Use [@BotFather](https://t.me/BotFather) on Telegram to create and manage your bot.
+**Q: Why are my links showing a "Resource Not Found" error or not working?**
+A: This error means the bot can't access the file. Check these three things:
+1.  **Invalid Token**: Your `BOT_TOKEN` or one of the `MULTI_TOKEN`s might be wrong. Double-check them with @BotFather.
+2.  **Missing Admin Rights**: The bot and **all** your client accounts must be **administrators** in the `BIN_CHANNEL`.
+3.  **File Deleted**: The link will break if the file was deleted from your `BIN_CHANNEL`.
+
+**Q: Why isn't video or audio playing correctly in my browser?**
+A: Your browser likely doesn't support the file's audio or video format (codec). This is a browser limitation, not a bot issue.
+-   **Solution**: For perfect playback, copy the link and play it in a dedicated media player. Recommended players include **VLC Media Player**, **MX Player**, **PotPlayer**, **IINA**, and **MPV**.
+
+**Q: Why does the bot sometimes become unresponsive?**
+A: This is likely a **Telegram Flood Wait**. To prevent spam, Telegram temporarily limits accounts that make too many requests. The bot is designed to handle this automatically by pausing and will resume on its own once the limit is lifted.
+
+#### **Performance**
+
+**Q: How can I fix slow download and streaming speeds?**
+A: If your speeds are slow, here’s how to fix it:
+-   **Add More Clients**: This is the best solution. Add `MULTI_TOKEN`s to your `config.env` to distribute the workload and increase throughput.
+-   **Use DC4 Accounts**: For top performance, use Telegram accounts from **Data Center 4 (DC4)**, as they often have the fastest connection. Use `/dc` to check an account's data center.
+-   **Upgrade Your Server**: A server with a slow network will bottleneck your speeds. Consider upgrading your VPS plan.
+
+#### **Bot Usage**
+
+**Q: How do I generate links for multiple files at once?**
+A: The `/link` command can process multiple files sent in sequence. To use it, **reply to the first file** of the series with the command and the total count.
+-   **Example**: For a series of 5 files, reply to the very first file with `/link 5`.
+
+**Q: Can I mix tokens from different accounts and data centers?**
+A: Yes. Mixing clients from different accounts and data centers (like DC1, DC4, and DC5) is a great way to improve bot performance and reliability.
 
 ### Contributing
 
@@ -469,7 +521,7 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 -   [Pyrofork](https://github.com/Mayuri-Chan/pyrofork) - Telegram MTProto API Framework
 -   [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
--   [Motor](https://github.com/mongodb/motor) - Asynchronous MongoDB Driver
+-   [PyMongo](https://github.com/mongodb/mongo-python-driver) - Asynchronous MongoDB Driver
 -   [TgCrypto](https://github.com/pyrogram/tgcrypto) - High-performance cryptography library
 
 ## ⚠️ Disclaimer

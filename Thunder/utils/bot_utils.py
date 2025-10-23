@@ -6,12 +6,12 @@ from urllib.parse import quote
 
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus
+from pyrogram.errors import FloodWait
 from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             Message, User)
 
 from Thunder.utils.database import db
 from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (MSG_BUTTON_GET_HELP, MSG_DC_UNKNOWN,
@@ -24,24 +24,43 @@ from Thunder.vars import Var
 async def notify_ch(cli: Client, txt: str):
     if not (hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0):
         return
-    await handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=txt)
+    try:
+        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
 
 
 async def notify_own(cli: Client, txt: str):
     o_ids = Var.OWNER_ID if isinstance(Var.OWNER_ID, (list, tuple, set)) else [Var.OWNER_ID]
-    tasks = [handle_flood_wait(cli.send_message, chat_id=oid, text=txt) for oid in o_ids]
+    
+    async def send_with_flood_wait(chat_id: int):
+        try:
+            await cli.send_message(chat_id=chat_id, text=txt)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await cli.send_message(chat_id=chat_id, text=txt)
+    
+    tasks = [send_with_flood_wait(oid) for oid in o_ids]
     if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        tasks.append(handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=txt))
+        tasks.append(send_with_flood_wait(Var.BIN_CHANNEL))
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def reply_user_err(msg: Message, err_txt: str):
-    await handle_flood_wait(
-        msg.reply_text,
-        text=err_txt,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
-        disable_web_page_preview=True
-    )
+    try:
+        await msg.reply_text(
+            text=err_txt,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
+            disable_web_page_preview=True
+        )
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await msg.reply_text(
+            text=err_txt,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
+            disable_web_page_preview=True
+        )
 
 
 async def log_newusr(cli: Client, uid: int, fname: str):
@@ -50,7 +69,11 @@ async def log_newusr(cli: Client, uid: int, fname: str):
             return
         await db.add_user(uid)
         if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-            await handle_flood_wait(cli.send_message, chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
+            try:
+                await cli.send_message(chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await cli.send_message(chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
     except Exception as e:
         logger.error(f"Database error in log_newusr for user {uid}: {e}")
 
@@ -91,20 +114,40 @@ async def gen_dc_txt(usr: User) -> str:
 async def get_user(cli: Client, qry: Any) -> Optional[User]:
     if isinstance(qry, str):
         if qry.startswith('@'):
-            return await handle_flood_wait(cli.get_users, qry)
+            try:
+                return await cli.get_users(qry)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                return await cli.get_users(qry)
         elif qry.isdigit():
-            return await handle_flood_wait(cli.get_users, int(qry))
+            try:
+                return await cli.get_users(int(qry))
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                return await cli.get_users(int(qry))
     elif isinstance(qry, int):
-        return await handle_flood_wait(cli.get_users, qry)
+        try:
+            return await cli.get_users(qry)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            return await cli.get_users(qry)
     return None
 
 
 async def is_admin(cli: Client, chat_id_val: int) -> bool:
-    member = await handle_flood_wait(cli.get_chat_member, chat_id_val, cli.me.id)
+    try:
+        member = await cli.get_chat_member(chat_id_val, cli.me.id)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        member = await cli.get_chat_member(chat_id_val, cli.me.id)
     if member is None:
         return False
     return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
 
 
 async def reply(msg: Message, **kwargs):
-    return await handle_flood_wait(msg.reply_text, **kwargs, quote=True, disable_web_page_preview=True)
+    try:
+        return await msg.reply_text(**kwargs, quote=True, disable_web_page_preview=True)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        return await msg.reply_text(**kwargs, quote=True, disable_web_page_preview=True)

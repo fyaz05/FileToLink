@@ -1,14 +1,15 @@
 # Thunder/utils/file_properties.py
 
+import asyncio
 from datetime import datetime as dt
 from typing import Any, Optional
 
 from pyrogram.client import Client
+from pyrogram.errors import FloodWait
 from pyrogram.file_id import FileId
 from pyrogram.types import Message
 
 from Thunder.server.exceptions import FileNotFound
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.logger import logger
 
 
@@ -78,7 +79,11 @@ def get_fname(msg: Message) -> str:
 
 async def get_fids(client: Client, chat_id: int, message_id: int) -> FileId:
     try:
-        msg = await handle_flood_wait(client.get_messages, chat_id, message_id)
+        try:
+            msg = await client.get_messages(chat_id, message_id)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            msg = await client.get_messages(chat_id, message_id)
         
         if not msg or getattr(msg, 'empty', False):
             raise FileNotFound("Message not found")

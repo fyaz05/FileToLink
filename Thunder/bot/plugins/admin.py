@@ -12,6 +12,7 @@ import psutil
 from pyrogram import filters
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
+from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder import StartTime, __version__
@@ -19,7 +20,6 @@ from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.utils.bot_utils import reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
-from Thunder.utils.handler import handle_flood_wait
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import LOG_FILE, logger
 from Thunder.utils.messages import (
@@ -156,9 +156,12 @@ async def send_logs(client: Client, message: Message):
         return
     
     try:
-        await handle_flood_wait(
-            message.reply_document, LOG_FILE,
-            caption=MSG_LOG_FILE_CAPTION)
+        try:
+            await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
+        except FloodWait as e:
+            logger.debug(f"FloodWait in log file sending, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
     except Exception as e:
         logger.error(f"Error sending log file: {e}", exc_info=True)
         await reply(message, text=MSG_ERROR_GENERIC)
@@ -246,7 +249,12 @@ async def ban_command(client: Client, message: Message):
                 text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=reason)
             await reply(message, text=text)
             try:
-                await handle_flood_wait(client.leave_chat, target_id)
+                try:
+                    await client.leave_chat(target_id)
+                except FloodWait as e:
+                    logger.debug(f"FloodWait in leave_chat, sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    await client.leave_chat(target_id)
             except Exception as e:
                 logger.warning(f"Could not leave banned channel {target_id}: {e}", exc_info=True)
         else:
@@ -260,7 +268,12 @@ async def ban_command(client: Client, message: Message):
                 text += MSG_BAN_REASON_SUFFIX.format(reason=reason)
             await reply(message, text=text)
             try:
-                await handle_flood_wait(client.send_message, target_id, MSG_USER_BANNED_NOTIFICATION)
+                try:
+                    await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
+                except FloodWait as e:
+                    logger.debug(f"FloodWait in ban notification, sleeping for {e.value}s")
+                    await asyncio.sleep(e.value)
+                    await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
             except Exception as e:
                 logger.warning(f"Could not notify banned user {target_id}: {e}", exc_info=True)
 
@@ -288,7 +301,12 @@ async def unban_command(client: Client, message: Message):
             if await db.remove_banned_user(user_id=target_id):
                 await reply(message, text=MSG_ADMIN_USER_UNBANNED.format(user_id=target_id))
                 try:
-                    await handle_flood_wait(client.send_message, target_id, MSG_USER_UNBANNED_NOTIFICATION)
+                    try:
+                        await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
+                    except FloodWait as e:
+                        logger.debug(f"FloodWait in unban notification, sleeping for {e.value}s")
+                        await asyncio.sleep(e.value)
+                        await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
                 except Exception as e:
                     logger.warning(f"Could not notify unbanned user {target_id}: {e}", exc_info=True)
             else:
@@ -331,24 +349,45 @@ async def run_shell_command(client: Client, message: Message):
         
         output = output.strip() or MSG_SHELL_NO_OUTPUT
         
-        await handle_flood_wait(status_msg.delete)
+        try:
+            await status_msg.delete()
+        except FloodWait as e:
+            logger.debug(f"FloodWait in shell status message delete, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await status_msg.delete()
         
         if len(output) > 4096:
             file = BytesIO(output.encode())
             file.name = "shell_output.txt"
-            await handle_flood_wait(
-                message.reply_document, file,
-                caption=MSG_SHELL_OUTPUT.format(
-                    command=html.escape(command)))
+            try:
+                await message.reply_document(
+                    file,
+                    caption=MSG_SHELL_OUTPUT.format(
+                        command=html.escape(command)))
+            except FloodWait as e:
+                logger.debug(f"FloodWait in shell output document, sleeping for {e.value}s")
+                await asyncio.sleep(e.value)
+                await message.reply_document(
+                    file,
+                    caption=MSG_SHELL_OUTPUT.format(
+                        command=html.escape(command)))
         else:
             await reply(message, text=output, parse_mode=ParseMode.HTML)
             
     except Exception as e:
         try:
-            await handle_flood_wait(
-                status_msg.edit_text,
-                MSG_SHELL_ERROR.format(error=html.escape(str(e))),
-                parse_mode=ParseMode.HTML)
+            try:
+                await status_msg.edit_text(
+                    MSG_SHELL_ERROR.format(error=html.escape(str(e))),
+                    parse_mode=ParseMode.HTML)
+            except FloodWait as e:
+                logger.debug(f"FloodWait in shell error message edit, sleeping for {e.value}s")
+                await asyncio.sleep(e.value)
+                await status_msg.edit_text(
+                    MSG_SHELL_ERROR.format(error=html.escape(str(e))),
+                    parse_mode=ParseMode.HTML)
+            except MessageNotModified:
+                pass
         except Exception:
             await reply(
                 message,
@@ -362,7 +401,14 @@ async def speedtest_command(client: Client, message: Message):
     try:
         result_dict, image_url = await run_speedtest()
         if result_dict is None:
-            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+            try:
+                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
+            except FloodWait as e:
+                logger.debug(f"FloodWait in speedtest error edit, sleeping for {e.value}s")
+                await asyncio.sleep(e.value)
+                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
+            except MessageNotModified:
+                pass
             return
         
         result_text = _format_speedtest_result(result_dict)
@@ -370,7 +416,14 @@ async def speedtest_command(client: Client, message: Message):
     except Exception as e:
         logger.error(f"Error in speedtest_command: {e}", exc_info=True)
         try:
-            await handle_flood_wait(status_msg.edit_text, MSG_SPEEDTEST_ERROR)
+            try:
+                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
+            except FloodWait as e:
+                logger.debug(f"FloodWait in speedtest exception error edit, sleeping for {e.value}s")
+                await asyncio.sleep(e.value)
+                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
+            except MessageNotModified:
+                pass
         except Exception:
             await reply(message, text=MSG_SPEEDTEST_ERROR)
 
@@ -403,10 +456,27 @@ def _format_speedtest_result(result_dict: dict) -> str:
 
 async def _send_result(message: Message, status_msg: Message, result_text: str, image_url: str):
     if image_url:
-        await handle_flood_wait(message.reply_photo, image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
-        await handle_flood_wait(status_msg.delete)
+        try:
+            await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
+        except FloodWait as e:
+            logger.debug(f"FloodWait in speedtest photo reply, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await status_msg.delete()
+        except FloodWait as e:
+            logger.debug(f"FloodWait in speedtest status delete, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await status_msg.delete()
     else:
-        await handle_flood_wait(status_msg.edit_text, result_text, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
+        except FloodWait as e:
+            logger.debug(f"FloodWait in speedtest result edit, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
+            await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
+        except MessageNotModified:
+            pass
 
 
 def _fmt(value, decimals: int = 2) -> str:
