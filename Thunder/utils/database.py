@@ -70,11 +70,41 @@ class Database:
             logger.error(f"Error in total_users_count: {e}", exc_info=True)
             return 0
 
+    async def get_authorized_users_count(self) -> int:
+        try:
+            return await self.authorized_users_col.count_documents({})
+        except Exception as e:
+            logger.error(f"Error in get_authorized_users_count: {e}", exc_info=True)
+            return 0
+
+    async def get_regular_users_count(self) -> int:
+        try:
+            auth_ids = await self.authorized_users_col.distinct("user_id")
+            return await self.col.count_documents({"id": {"$nin": auth_ids}})
+        except Exception as e:
+            logger.error(f"Error in get_regular_users_count: {e}", exc_info=True)
+            return 0
+
     def get_all_users(self):
         try:
             return self.col.find({})
         except Exception as e:
             logger.error(f"Error in get_all_users: {e}", exc_info=True)
+            return self.col.find({"_id": {"$exists": False}})
+
+    def get_authorized_users_cursor(self):
+        try:
+            return self.authorized_users_col.find({})
+        except Exception as e:
+            logger.error(f"Error in get_authorized_users_cursor: {e}", exc_info=True)
+            return self.authorized_users_col.find({"_id": {"$exists": False}})
+
+    async def get_regular_users_cursor(self):
+        try:
+            auth_ids = await self.authorized_users_col.distinct("user_id")
+            return self.col.find({"id": {"$nin": auth_ids}})
+        except Exception as e:
+            logger.error(f"Error in get_regular_users_cursor: {e}", exc_info=True)
             return self.col.find({"_id": {"$exists": False}})
 
     async def delete_user(self, user_id: int):

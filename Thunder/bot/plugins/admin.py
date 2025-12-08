@@ -65,7 +65,15 @@ async def get_total_users(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("broadcast") & owner_filter)
 async def broadcast_handler(client: Client, message: Message):
-    await broadcast_message(client, message)
+    mode = "all"
+    if len(message.command) > 1:
+        arg = message.command[1].lower()
+        if arg == "authorized":
+            mode = "authorized"
+        elif arg == "regular":
+            mode = "regular"
+
+    await broadcast_message(client, message, mode=mode)
 
 
 @StreamBot.on_message(filters.command("status") & owner_filter)
