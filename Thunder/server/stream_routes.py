@@ -26,6 +26,13 @@ PATTERN_HASH_FIRST = re.compile(
 PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
 VALID_HASH_REGEX = re.compile(r'^[a-zA-Z0-9_-]+$')
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Range, Content-Type, *",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
+}
+
 streamers = {}
 
 
@@ -101,7 +108,8 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
             raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
         suffix_len = int(end_str)
         if suffix_len <= 0:
-            raise web.HTTPRequestRangeNotSatisfiable(headers={"Content-Range": f"bytes */{file_size}"})
+            raise web.HTTPRequestRangeNotSatisfiable(
+                headers={"Content-Range": f"bytes */{file_size}"})
         start = max(file_size - suffix_len, 0)
         end = file_size - 1
 
@@ -114,7 +122,6 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
 
 @routes.get("/", allow_head=True)
-
 async def root_redirect(request):
     raise web.HTTPFound("https://github.com/fyaz05/FileToLink")
 
@@ -126,21 +133,39 @@ async def status_endpoint(request):
 
     workload_distribution = {str(k): v for k, v in sorted(work_loads.items())}
 
-    return web.json_response({
-        "server": {
-            "status": "operational",
-            "version": __version__,
-            "uptime": get_readable_time(uptime)
+    return web.json_response(
+        {
+            "server": {
+                "status": "operational",
+                "version": __version__,
+                "uptime": get_readable_time(uptime)
+            },
+            "telegram_bot": {
+                "username": f"@{StreamBot.username}",
+                "active_clients": len(multi_clients)
+            },
+            "resources": {
+                "total_workload": total_load,
+                "workload_distribution": workload_distribution
+            }
         },
-        "telegram_bot": {
-            "username": f"@{StreamBot.username}",
-            "active_clients": len(multi_clients)
-        },
-        "resources": {
-            "total_workload": total_load,
-            "workload_distribution": workload_distribution
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
-        }
+
+@routes.options("/status")
+async def status_options(request: web.Request):
+    return web.Response(headers={
+        **CORS_HEADERS,
+        "Access-Control-Max-Age": "86400"
+    })
+
+
+@routes.options(r"/{path:.+}")
+async def media_options(request: web.Request):
+    return web.Response(headers={
+        **CORS_HEADERS,
+        "Access-Control-Max-Age": "86400"
     })
 
 
@@ -152,7 +177,18 @@ async def media_preview(request: web.Request):
 
         rendered_page = await render_page(
             message_id, secure_hash, requested_action='stream')
-        return web.Response(text=rendered_page, content_type='text/html')
+
+        response = web.Response(
+            text=rendered_page,
+            content_type='text/html',
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Range, Content-Type, *",
+                "X-Content-Type-Options": "nosniff",
+            }
+        )
+        response.enable_compression()
+        return response
 
     except (InvalidHash, FileNotFound) as e:
         logger.debug(
@@ -160,7 +196,6 @@ async def media_preview(request: web.Request):
             exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
-
         error_id = secrets.token_hex(6)
         logger.error(f"Preview error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
@@ -201,8 +236,13 @@ async def media_delivery(request: web.Request):
 
             mime_type = (
                 file_info.get('mime_type') or 'application/octet-stream')
-            filename = (
-                file_info.get('file_name') or f"file_{secrets.token_hex(4)}")
+
+            filename = file_info.get('file_name')
+            if not filename:
+                ext = mime_type.split('/')[-1] if '/' in mime_type else 'bin'
+                ext_map = {'jpeg': 'jpg', 'mpeg': 'mp3', 'octet-stream': 'bin'}
+                ext = ext_map.get(ext, ext)
+                filename = f"file_{secrets.token_hex(4)}.{ext}"
 
             headers = {
                 "Content-Type": mime_type,
@@ -211,7 +251,12 @@ async def media_delivery(request: web.Request):
                     f"inline; filename*=UTF-8''{quote(filename)}"),
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "public, max-age=31536000",
-                "Connection": "keep-alive"
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Range, Content-Type, *",
+                "Access-Control-Expose-Headers": (
+                    "Content-Length, Content-Range, Content-Disposition"),
+                "X-Content-Type-Options": "nosniff"
             }
 
             if range_header:
@@ -250,6 +295,7 @@ async def media_delivery(request: web.Request):
                             break
                 finally:
                     work_loads[client_id] -= 1
+
             return web.Response(
                 status=206 if range_header else 200,
                 body=stream_generator(),

@@ -280,6 +280,13 @@ MSG_BROADCAST_COMPLETE = (
 )
 MSG_BROADCAST_CANCEL = "🛑 **Cancelling Broadcast:** `{broadcast_id}`\n\n> ⏳ Stopping operations..."
 MSG_INVALID_BROADCAST_CMD = "Please reply to the message you want to broadcast."
+MSG_BROADCAST_USAGE = (
+    "📣 **Broadcast Command Usage:**\n\n"
+    "`/broadcast` - Broadcast to all users\n"
+    "`/broadcast authorized` - Broadcast to authorized users only\n"
+    "`/broadcast regular` - Broadcast to regular (non-authorized) users only\n\n"
+    "**Note:** Reply to the message you want to broadcast."
+)
 
 # =====================================================================================
 # ====== PERMISSION MESSAGES ======

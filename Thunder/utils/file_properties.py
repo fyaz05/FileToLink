@@ -17,8 +17,6 @@ def get_media(message: Message) -> Optional[Any]:
     for attr in ("audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"):
         media = getattr(message, attr, None)
         if media:
-            if hasattr(media, 'thumbs') and media.thumbs:
-                pass
             return media
     return None
 
@@ -50,30 +48,30 @@ def parse_fid(message: Message) -> Optional[FileId]:
 
 def get_fname(msg: Message) -> str:
     media = get_media(msg)
-    fname = None
-    
-    if media:
-        fname = getattr(media, 'file_name', None)
-    
+    fname = getattr(media, 'file_name', None) if media else None
+
     if not fname:
         ext = "bin"
-        if media and hasattr(media, '_file_type'):
-            file_type = media._file_type
-            if file_type == "photo":
-                ext = "jpg"
-            elif file_type == "audio":
-                ext = "mp3"
-            elif file_type == "voice":
-                ext = "ogg"
-            elif file_type in ["video", "animation", "video_note"]:
-                ext = "mp4"
-            elif file_type == "sticker":
-                ext = "webp"
-            else:
-                ext = "bin"
+        if media:
+            media_types = {
+                "photo": "jpg",
+                "audio": "mp3",
+                "voice": "ogg",
+                "video": "mp4",
+                "animation": "mp4",
+                "video_note": "mp4",
+                "sticker": "webp"
+            }
+
+            # Check which attribute type the message has
+            for attr, extension in media_types.items():
+                if getattr(msg, attr, None) is not None:
+                    ext = extension
+                    break
+
         timestamp = dt.now().strftime("%Y%m%d%H%M%S")
         fname = f"Thunder File To Link_{timestamp}.{ext}"
-    
+
     return fname
 
 
@@ -84,18 +82,18 @@ async def get_fids(client: Client, chat_id: int, message_id: int) -> FileId:
         except FloodWait as e:
             await asyncio.sleep(e.value)
             msg = await client.get_messages(chat_id, message_id)
-        
+
         if not msg or getattr(msg, 'empty', False):
             raise FileNotFound("Message not found")
-        
+
         media = get_media(msg)
         if media:
             if not hasattr(media, 'file_id') or not hasattr(media, 'file_unique_id'):
                 raise FileNotFound("Media metadata incomplete")
             return FileId.decode(media.file_id)
-        
+
         raise FileNotFound("No media in message")
-        
+
     except Exception as e:
         logger.error(f"Error in get_fids: {e}", exc_info=True)
         raise FileNotFound(str(e))

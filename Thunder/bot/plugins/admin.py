@@ -26,13 +26,14 @@ from Thunder.utils.messages import (
     MSG_ADMIN_AUTH_LIST_HEADER, MSG_ADMIN_NO_BAN_REASON,
     MSG_ADMIN_USER_BANNED, MSG_ADMIN_USER_UNBANNED, MSG_AUTHORIZE_FAILED,
     MSG_AUTHORIZE_SUCCESS, MSG_AUTHORIZE_USAGE, MSG_AUTH_USER_INFO,
-    MSG_BAN_REASON_SUFFIX, MSG_BAN_USAGE, MSG_BUTTON_CLOSE,
-    MSG_CANNOT_BAN_OWNER, MSG_CHANNEL_BANNED, MSG_CHANNEL_BANNED_REASON_SUFFIX,
-    MSG_CHANNEL_NOT_BANNED, MSG_CHANNEL_UNBANNED, MSG_DB_ERROR, MSG_DB_STATS,
+    MSG_BAN_REASON_SUFFIX, MSG_BAN_USAGE, MSG_BROADCAST_USAGE,
+    MSG_BUTTON_CLOSE, MSG_CANNOT_BAN_OWNER, MSG_CHANNEL_BANNED,
+    MSG_CHANNEL_BANNED_REASON_SUFFIX, MSG_CHANNEL_NOT_BANNED,
+    MSG_CHANNEL_UNBANNED, MSG_DB_ERROR, MSG_DB_STATS,
     MSG_DEAUTHORIZE_FAILED, MSG_DEAUTHORIZE_SUCCESS,
-    MSG_DEAUTHORIZE_USAGE, MSG_ERROR_GENERIC, MSG_INVALID_USER_ID,
-    MSG_LOG_FILE_CAPTION, MSG_LOG_FILE_EMPTY, MSG_LOG_FILE_MISSING,
-    MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
+    MSG_DEAUTHORIZE_USAGE, MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
+    MSG_INVALID_USER_ID, MSG_LOG_FILE_CAPTION, MSG_LOG_FILE_EMPTY,
+    MSG_LOG_FILE_MISSING, MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
     MSG_SHELL_OUTPUT_STDERR, MSG_SHELL_OUTPUT_STDOUT, MSG_SHELL_USAGE,
     MSG_SPEEDTEST_ERROR, MSG_SPEEDTEST_INIT, MSG_SPEEDTEST_RESULT,
@@ -65,7 +66,28 @@ async def get_total_users(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("broadcast") & owner_filter)
 async def broadcast_handler(client: Client, message: Message):
-    await broadcast_message(client, message)
+    mode = "all"
+    if len(message.command) > 1:
+        arg = message.command[1].lower().strip()
+        if arg in ("help", "--help", "-h"):
+            return await reply(message, text=MSG_BROADCAST_USAGE, parse_mode=ParseMode.MARKDOWN)
+        if arg == "authorized":
+            mode = "authorized"
+        elif arg == "regular":
+            mode = "regular"
+        else:
+            safe_arg = arg.replace("`", "'")
+            await reply(
+                message,
+                text=f"❌ **Invalid argument:** `{safe_arg}`\n\n{MSG_BROADCAST_USAGE}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+    if not message.reply_to_message:
+        return await reply(message, text=MSG_INVALID_BROADCAST_CMD)
+
+    await broadcast_message(client, message, mode=mode)
 
 
 @StreamBot.on_message(filters.command("status") & owner_filter)
