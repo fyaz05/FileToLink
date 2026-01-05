@@ -107,13 +107,12 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                         success = True
                         break
                     except FloodWait as e:
-                        if attempt < 2:  # Don't sleep on last attempt
+                        if attempt < 2:
                             await asyncio.sleep(e.value)
                         else:
-                            raise
-                
-                if not success:
-                    stats["failed"] += 1
+                            logger.warning(f"FloodWait persisted for user {user_id} after 3 attempts, last wait: {e.value}s")
+                            stats["failed"] += 1
+                            break
 
             except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden, ChannelInvalid, InputUserDeactivated) as e:
                 if isinstance(e, ChannelInvalid):
@@ -144,6 +143,8 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                 if not is_authorized:
                     await db.delete_user(user_id)
                     stats["deleted"] += 1
+                else:
+                    stats["failed"] += 1
 
             except Exception as e:
                 logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
