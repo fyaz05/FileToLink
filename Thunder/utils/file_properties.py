@@ -63,8 +63,9 @@ def get_fname(msg: Message) -> str:
                 "sticker": "webp"
             }
 
+            # Check which attribute type the message has
             for attr, extension in media_types.items():
-                if media == getattr(msg, attr, None):
+                if getattr(msg, attr, None) is not None:
                     ext = extension
                     break
 
