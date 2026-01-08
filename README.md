@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.14%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
   <a href="https://github.com/Mayuri-Chan/pyrofork"><img src="https://img.shields.io/badge/Pyrofork-red?style=for-the-badge" alt="Pyrofork"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fyaz05/FileToLink?style=for-the-badge&color=green" alt="License"></a>
   <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
@@ -284,7 +284,7 @@ This section covers the complete setup process for deploying Thunder, from prere
 
 | Requirement | Description | Source |
 | :--- | :--- | :--- |
-| Python 3.14 | Programming language | [python.org](https://python.org) |
+| Python 3.13 | Programming language | [python.org](https://python.org) |
 | MongoDB | Database | [mongodb.com](https://mongodb.com) |
 | Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
 | Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
