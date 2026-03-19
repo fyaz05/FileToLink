@@ -25,6 +25,7 @@ PATTERN_HASH_FIRST = re.compile(
     rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
 PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
 VALID_HASH_REGEX = re.compile(r'^[a-zA-Z0-9_-]+$')
+VALID_DISPOSITIONS = {"inline", "attachment"}
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -88,6 +89,11 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
         client_id = min(work_loads, key=work_loads.get)
 
     return client_id, get_streamer(client_id)
+
+
+def get_content_disposition(request: web.Request) -> str:
+    disposition = request.query.get("disposition", "attachment").strip().lower()
+    return disposition if disposition in VALID_DISPOSITIONS else "attachment"
 
 
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
@@ -244,11 +250,13 @@ async def media_delivery(request: web.Request):
                 ext = ext_map.get(ext, ext)
                 filename = f"file_{secrets.token_hex(4)}.{ext}"
 
+            disposition = get_content_disposition(request)
+
             headers = {
                 "Content-Type": mime_type,
                 "Content-Length": str(content_length),
                 "Content-Disposition": (
-                    f"inline; filename*=UTF-8''{quote(filename)}"),
+                    f"{disposition}; filename*=UTF-8''{quote(filename)}"),
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "public, max-age=31536000",
                 "Connection": "keep-alive",
