@@ -1,7 +1,7 @@
 # Thunder/utils/database.py
 
 import datetime
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
 from Thunder.vars import Var
@@ -17,6 +17,7 @@ class Database:
         self.token_col: AsyncCollection = self.db.tokens
         self.authorized_users_col: AsyncCollection = self.db.authorized_users
         self.restart_message_col: AsyncCollection = self.db.restart_message
+        self.files_col: AsyncCollection = self.db.files
 
     async def ensure_indexes(self):
         try:
@@ -29,6 +30,11 @@ class Database:
             await self.token_col.create_index("activated")
             await self.restart_message_col.create_index("message_id", unique=True)
             await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
+            await self.files_col.create_index("file_unique_id", unique=True)
+            await self.files_col.create_index("public_hash", unique=True)
+            await self.files_col.create_index("canonical_message_id", unique=True)
+            await self.files_col.create_index("created_at")
+            await self.files_col.create_index("last_seen_at")
 
             logger.debug("Database indexes ensured.")
         except Exception as e:
@@ -244,6 +250,80 @@ class Database:
         except Exception as e:
             logger.error(f"Error in is_user_authorized for user {user_id}: {e}", exc_info=True)
             return False
+
+    async def get_file_by_unique_id(self, file_unique_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.files_col.find_one({"file_unique_id": file_unique_id})
+        except Exception as e:
+            logger.error(f"Error getting file by unique_id {file_unique_id}: {e}", exc_info=True)
+            return None
+
+    async def get_file_by_hash(self, public_hash: str) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.files_col.find_one({"public_hash": public_hash})
+        except Exception as e:
+            logger.error(f"Error getting file by hash {public_hash}: {e}", exc_info=True)
+            raise
+
+    async def get_file_by_message_id(self, canonical_message_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            return await self.files_col.find_one({"canonical_message_id": canonical_message_id})
+        except Exception as e:
+            logger.error(
+                f"Error getting file by message_id {canonical_message_id}: {e}",
+                exc_info=True
+            )
+            return None
+
+    async def create_file_record(self, file_record: Dict[str, Any]) -> None:
+        try:
+            await self.files_col.insert_one(file_record)
+        except Exception as e:
+            logger.error(
+                f"Error creating canonical file record for {file_record.get('file_unique_id')}: {e}",
+                exc_info=True
+            )
+            raise
+
+    async def replace_file_record(self, file_record: Dict[str, Any]) -> None:
+        try:
+            await self.files_col.replace_one(
+                {"file_unique_id": file_record["file_unique_id"]},
+                file_record,
+                upsert=True
+            )
+        except Exception as e:
+            logger.error(
+                f"Error replacing canonical file record for {file_record.get('file_unique_id')}: {e}",
+                exc_info=True
+            )
+            raise
+
+    async def touch_file_record(self, public_hash: str, *, reused: bool = False) -> None:
+        try:
+            update_doc: Dict[str, Any] = {
+                "$set": {"last_seen_at": datetime.datetime.utcnow()},
+                "$inc": {"seen_count": 1}
+            }
+            if reused:
+                update_doc["$inc"]["reuse_count"] = 1
+            await self.files_col.update_one({"public_hash": public_hash}, update_doc)
+        except Exception as e:
+            logger.error(f"Error touching canonical file {public_hash}: {e}", exc_info=True)
+
+    async def update_file_id(self, public_hash: str, file_id: str) -> None:
+        try:
+            await self.files_col.update_one(
+                {"public_hash": public_hash},
+                {
+                    "$set": {
+                        "file_id": file_id,
+                        "last_seen_at": datetime.datetime.utcnow()
+                    }
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error updating file_id for {public_hash}: {e}", exc_info=True)
 
     async def close(self):
         if self._client:

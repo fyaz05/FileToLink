@@ -21,6 +21,24 @@ template_env = Environment(
     optimized=True
 )
 
+async def render_media_page(file_name: str, src: str, requested_action: str | None = None) -> str:
+    safe_filename = html_module.escape(file_name)
+    if requested_action == 'stream':
+        template = template_env.get_template('req.html')
+        context = {
+            'heading': f"View {safe_filename}",
+            'file_name': safe_filename,
+            'src': f"{src}?disposition=inline"
+        }
+    else:
+        template = template_env.get_template('dl.html')
+        context = {
+            'file_name': safe_filename,
+            'src': src
+        }
+    return await template.render_async(**context)
+
+
 async def render_page(id: int, secure_hash: str, requested_action: str | None = None) -> str:
     try:
         try:
@@ -38,23 +56,9 @@ async def render_page(id: int, secure_hash: str, requested_action: str | None = 
         if not file_unique_id or file_unique_id[:6] != secure_hash:
             raise InvalidHash("File unique ID or secure hash mismatch during rendering.")
         
-        quoted_filename = urllib.parse.quote(file_name.replace('/', '_'))
+        quoted_filename = urllib.parse.quote(file_name.replace('/', '_'), safe="")
         src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{id}/{quoted_filename}')
-        safe_filename = html_module.escape(file_name)
-        if requested_action == 'stream':
-            template = template_env.get_template('req.html')
-            context = {
-                'heading': f"View {safe_filename}",
-                'file_name': safe_filename,
-                'src': f"{src}?disposition=inline"
-            }
-        else:
-            template = template_env.get_template('dl.html')
-            context = {
-                'file_name': safe_filename,
-                'src': src
-            }
-        return await template.render_async(**context)
+        return await render_media_page(file_name, src, requested_action)
     except Exception as e:
         logger.error(f"Error in render_page for ID {id} and hash {secure_hash}: {e}", exc_info=True)
         raise

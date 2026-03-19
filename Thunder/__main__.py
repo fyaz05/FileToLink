@@ -117,6 +117,9 @@ async def start_services():
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
+        await db.ensure_indexes()
+        print("   ✓ Database indexes ensured.")
+
         await set_commands()
         print("   ✓ Bot commands set successfully.")
 

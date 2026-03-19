@@ -20,6 +20,58 @@ from Thunder.utils.shortener import shorten
 from Thunder.vars import Var
 
 
+def quote_media_name(file_name: str) -> str:
+    return quote(str(file_name).replace("/", "_"), safe="")
+
+
+async def _build_links(
+    *,
+    download_path: str,
+    stream_path: str,
+    media_name: str,
+    media_size: str,
+    shortener: bool = True
+) -> Dict[str, str]:
+    base_url = Var.URL.rstrip("/")
+    slink = f"{base_url}{stream_path}"
+    olink = f"{base_url}{download_path}"
+
+    if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
+        try:
+            s_results = await asyncio.gather(shorten(slink), shorten(olink), return_exceptions=True)
+            if not isinstance(s_results[0], Exception):
+                slink = s_results[0]
+            else:
+                logger.warning(f"Failed to shorten stream_link: {s_results[0]}")
+            if not isinstance(s_results[1], Exception):
+                olink = s_results[1]
+            else:
+                logger.warning(f"Failed to shorten online_link: {s_results[1]}")
+        except Exception as e:
+            logger.error(f"Error during link shortening: {e}")
+
+    return {"stream_link": slink, "online_link": olink, "media_name": media_name, "media_size": media_size}
+
+
+async def gen_canonical_links(
+    *,
+    file_name: str,
+    file_size: int,
+    public_hash: str,
+    shortener: bool = True
+) -> Dict[str, str]:
+    media_name = str(file_name)
+    media_size = humanbytes(file_size)
+    encoded_name = quote_media_name(media_name)
+    return await _build_links(
+        download_path=f"/f/{public_hash}/{encoded_name}",
+        stream_path=f"/watch/f/{public_hash}/{encoded_name}",
+        media_name=media_name,
+        media_size=media_size,
+        shortener=shortener
+    )
+
+
 
 async def notify_ch(cli: Client, txt: str):
     if not (hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0):
@@ -79,31 +131,19 @@ async def log_newusr(cli: Client, uid: int, fname: str):
 
 
 async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
-    base_url = Var.URL.rstrip("/")
     fid = fwd_msg.id
     m_name_raw = get_fname(fwd_msg)
     m_name = m_name_raw.decode('utf-8', errors='replace') if isinstance(m_name_raw, bytes) else str(m_name_raw)
     m_size_hr = humanbytes(get_fsize(fwd_msg))
-    enc_fname = quote(m_name)
+    enc_fname = quote_media_name(m_name)
     f_hash = get_hash(fwd_msg)
-    slink = f"{base_url}/watch/{f_hash}{fid}/{enc_fname}"
-    olink = f"{base_url}/{f_hash}{fid}/{enc_fname}"
-    
-    if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
-        try:
-            s_results = await asyncio.gather(shorten(slink), shorten(olink), return_exceptions=True)
-            if not isinstance(s_results[0], Exception):
-                slink = s_results[0]
-            else:
-                logger.warning(f"Failed to shorten stream_link: {s_results[0]}")
-            if not isinstance(s_results[1], Exception):
-                olink = s_results[1]
-            else:
-                logger.warning(f"Failed to shorten online_link: {s_results[1]}")
-        except Exception as e:
-            logger.error(f"Error during link shortening: {e}")
-    
-    return {"stream_link": slink, "online_link": olink, "media_name": m_name, "media_size": m_size_hr}
+    return await _build_links(
+        download_path=f"/{f_hash}{fid}/{enc_fname}",
+        stream_path=f"/watch/{f_hash}{fid}/{enc_fname}",
+        media_name=m_name,
+        media_size=m_size_hr,
+        shortener=shortener
+    )
 
 
 async def gen_dc_txt(usr: User) -> str:
