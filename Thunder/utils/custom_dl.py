@@ -50,7 +50,10 @@ class ByteStreamer:
             chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
 
         refs: list[int | str | Message] = [media_ref]
-        if fallback_message_id is not None and fallback_message_id != media_ref:
+        media_id = media_ref if isinstance(media_ref, int) else None
+        if isinstance(media_ref, Message):
+            media_id = getattr(media_ref, "id", getattr(media_ref, "message_id", None))
+        if fallback_message_id is not None and (media_id is None or fallback_message_id != media_id):
             refs.append(fallback_message_id)
 
         last_error: Exception | None = None

@@ -341,7 +341,10 @@ async def channel_receive_handler(bot: Client, msg: Message):
 
         try:
             shortener_val = await get_shortener_status(client, message)
-            canonical_record, stored_msg, _ = await get_or_create_canonical_file(message, fwd_media)
+            canonical_record, stored_msg, reused_existing = await get_or_create_canonical_file(message, fwd_media)
+            if reused_existing and stored_msg:
+                await safe_delete_message(stored_msg)
+                stored_msg = None
             if canonical_record:
                 links = await gen_canonical_links(
                     file_name=canonical_record["file_name"],
@@ -360,6 +363,9 @@ async def channel_receive_handler(bot: Client, msg: Message):
                 links = await gen_links(stored_msg, shortener=shortener_val)
                 reply_to_message_id = stored_msg.id
             source_info = message.chat.title or "Unknown Channel"
+            # When we reused an existing canonical BIN copy, stored_msg is intentionally
+            # None so send_channel_links falls back to StreamBot.send_message(...,
+            # reply_to_message_id=...) and keeps the log threaded to the canonical message.
 
             if notification_msg:
                 try:
@@ -441,7 +447,10 @@ async def process_single(
     notification_msg: Optional[Message] = None
 ):
     try:
-        canonical_record, stored_msg, _ = await get_or_create_canonical_file(file_msg, fwd_media)
+        canonical_record, stored_msg, reused_existing = await get_or_create_canonical_file(file_msg, fwd_media)
+        if reused_existing and stored_msg:
+            await safe_delete_message(stored_msg)
+            stored_msg = None
         if canonical_record:
             links = await gen_canonical_links(
                 file_name=canonical_record["file_name"],

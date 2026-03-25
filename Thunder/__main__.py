@@ -21,6 +21,7 @@ from Thunder.server import web_server
 from Thunder.utils.commands import set_commands
 from Thunder.utils.database import db
 from Thunder.utils.keepalive import ping_server
+from Thunder.utils.canonical_files import drain_background_touch_tasks
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
 from Thunder.utils.rate_limiter import rate_limiter, request_executor
@@ -47,6 +48,25 @@ def print_banner():
 ╚═══════════════════════════════════════════════════════════════════╝
 """
     print(banner)
+
+
+def schedule_index_ensure() -> None:
+    task = asyncio.create_task(
+        db.ensure_indexes(raise_on_error=False),
+        name="ensure_database_indexes"
+    )
+
+    def _log_index_failure(done_task: asyncio.Task) -> None:
+        try:
+            created_indexes = done_task.result()
+            if created_indexes:
+                print("   ✓ Database indexes ensured.")
+            else:
+                print("   ▶ Database indexes could not be ensured during startup.")
+        except Exception as e:
+            logger.error(f"Background database index ensure failed: {e}", exc_info=True)
+
+    task.add_done_callback(_log_index_failure)
 
 
 async def import_plugins():
@@ -117,11 +137,9 @@ async def start_services():
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
-        await db.ensure_indexes()
-        print("   ✓ Database indexes ensured.")
-
         await set_commands()
         print("   ✓ Bot commands set successfully.")
+        schedule_index_ensure()
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
@@ -215,6 +233,10 @@ async def start_services():
             await rate_limiter.shutdown()
         except Exception:
             pass
+        try:
+            await drain_background_touch_tasks()
+        except Exception as e:
+            logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -254,6 +276,11 @@ async def start_services():
             await cleanup_clients()
         except Exception as e:
             logger.error(f"Error during client cleanup: {e}")
+
+        try:
+            await drain_background_touch_tasks()
+        except Exception as e:
+            logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
 
         if 'app_runner' in locals() and app_runner is not None:
             try:

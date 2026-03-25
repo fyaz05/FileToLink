@@ -18,6 +18,9 @@ from Thunder.vars import Var
 PUBLIC_HASH_LENGTH = 20
 _CACHE_TTL_SECONDS = 600
 _CACHE_MAX_ITEMS = 4096
+_INGEST_CLAIM_TTL_SECONDS = 60
+_INGEST_CLAIM_WAIT_SECONDS = 15
+_INGEST_CLAIM_POLL_SECONDS = 0.5
 
 _cache_by_unique_id: "OrderedDict[str, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 _cache_by_hash: "OrderedDict[str, Tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -26,6 +29,7 @@ _cache_by_message_id: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = Ordered
 _upload_locks: dict[str, asyncio.Lock] = {}
 _upload_lock_counts: dict[str, int] = {}
 _upload_locks_guard = asyncio.Lock()
+_background_touch_tasks: set[asyncio.Task] = set()
 
 
 def build_public_hash(file_unique_id: str) -> str:
@@ -141,11 +145,15 @@ async def get_file_by_unique_id(file_unique_id: str) -> Optional[Dict[str, Any]]
     return _remember(record) if record else None
 
 
-async def get_file_by_hash(public_hash: str) -> Optional[Dict[str, Any]]:
+async def get_file_by_hash(
+    public_hash: str,
+    *,
+    raise_on_error: bool = False
+) -> Optional[Dict[str, Any]]:
     cached = _cache_get(_cache_by_hash, public_hash)
     if cached:
         return cached
-    record = await db.get_file_by_hash(public_hash)
+    record = await db.get_file_by_hash(public_hash, raise_on_error=raise_on_error)
     return _remember(record) if record else None
 
 
@@ -165,7 +173,7 @@ async def touch_file_record(record: Dict[str, Any], *, reused: bool = False) -> 
     if reused:
         record["reuse_count"] = int(record.get("reuse_count", 0)) + 1
     _remember(record)
-    await db.touch_file_record(record["public_hash"], reused=reused)
+    await db.touch_file_record(record["public_hash"], reused=reused, raise_on_error=True)
 
 
 def schedule_touch_file_record(record: Dict[str, Any], *, reused: bool = False) -> None:
@@ -182,10 +190,16 @@ def schedule_touch_file_record(record: Dict[str, Any], *, reused: bool = False) 
         db.touch_file_record(record["public_hash"], reused=reused),
         name=f"touch_file_record:{record['public_hash']}"
     )
+    _background_touch_tasks.add(task)
 
     def _log_touch_failure(done_task: asyncio.Task) -> None:
+        _background_touch_tasks.discard(done_task)
         try:
-            done_task.result()
+            touched = done_task.result()
+            if not touched:
+                logger.error(
+                    f"Background touch did not update canonical file {record['public_hash']}"
+                )
         except Exception as e:
             logger.error(
                 f"Background touch failed for canonical file {record['public_hash']}: {e}",
@@ -195,12 +209,21 @@ def schedule_touch_file_record(record: Dict[str, Any], *, reused: bool = False) 
     task.add_done_callback(_log_touch_failure)
 
 
+async def drain_background_touch_tasks() -> None:
+    if not _background_touch_tasks:
+        return
+
+    pending = tuple(_background_touch_tasks)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 async def update_cached_file_id(record: Dict[str, Any], file_id: str) -> None:
     if not record.get("public_hash") or not file_id:
         return
     record["file_id"] = file_id
     _remember(record)
-    await db.update_file_id(record["public_hash"], file_id)
+    await db.update_file_id(record["public_hash"], file_id, raise_on_error=True)
 
 
 async def _fetch_canonical_message(record: Dict[str, Any]) -> Optional[Message]:
@@ -222,7 +245,7 @@ async def _fetch_canonical_message(record: Dict[str, Any]) -> Optional[Message]:
             )
     except Exception as e:
         logger.warning(
-            f"Transient error fetching canonical message {canonical_message_id}: {e}",
+            f"Error fetching canonical message {canonical_message_id}: {e}",
             exc_info=True
         )
         raise
@@ -235,6 +258,46 @@ async def _fetch_canonical_message(record: Dict[str, Any]) -> Optional[Message]:
 async def _is_canonical_record_valid(record: Dict[str, Any], file_unique_id: str) -> bool:
     message = await _fetch_canonical_message(record)
     return bool(message and get_uniqid(message) == file_unique_id)
+
+
+async def _get_reusable_canonical_record(
+    file_unique_id: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    existing = await get_file_by_unique_id(file_unique_id)
+    if not existing:
+        return None, None
+
+    try:
+        is_valid = await _is_canonical_record_valid(existing, file_unique_id)
+    except Exception as e:
+        logger.warning(
+            f"Falling back to BIN re-copy for {file_unique_id} after canonical validation failed: {e}",
+            exc_info=True
+        )
+        is_valid = False
+
+    if is_valid:
+        return existing, None
+
+    _forget(existing)
+    return None, existing
+
+
+async def _wait_for_other_worker_canonical_record(file_unique_id: str) -> Optional[Dict[str, Any]]:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _INGEST_CLAIM_WAIT_SECONDS
+
+    while loop.time() < deadline:
+        reusable_record, _ = await _get_reusable_canonical_record(file_unique_id)
+        if reusable_record:
+            return reusable_record
+
+        if not await db.is_file_ingest_claim_active(file_unique_id):
+            break
+
+        await asyncio.sleep(_INGEST_CLAIM_POLL_SECONDS)
+
+    return None
 
 
 def _merge_replacement_record(
@@ -265,11 +328,14 @@ async def file_ingest_lock(file_unique_id: str):
             _upload_lock_counts[file_unique_id] = 0
         _upload_lock_counts[file_unique_id] += 1
 
-    await lock.acquire()
+    acquired = False
     try:
+        await lock.acquire()
+        acquired = True
         yield
     finally:
-        lock.release()
+        if acquired:
+            lock.release()
         async with _upload_locks_guard:
             remaining = _upload_lock_counts.get(file_unique_id, 1) - 1
             if remaining <= 0:
@@ -288,46 +354,59 @@ async def get_or_create_canonical_file(
         return None, None, False
 
     async with file_ingest_lock(file_unique_id):
-        existing = await get_file_by_unique_id(file_unique_id)
-        if existing:
+        while True:
+            reusable_record, stale_record = await _get_reusable_canonical_record(file_unique_id)
+            if reusable_record:
+                schedule_touch_file_record(reusable_record, reused=True)
+                return reusable_record, None, True
+
+            claim_acquired = await db.acquire_file_ingest_claim(
+                file_unique_id,
+                ttl_seconds=_INGEST_CLAIM_TTL_SECONDS
+            )
+            if not claim_acquired:
+                reusable_record = await _wait_for_other_worker_canonical_record(file_unique_id)
+                if reusable_record:
+                    schedule_touch_file_record(reusable_record, reused=True)
+                    return reusable_record, None, True
+                continue
+
             try:
-                is_valid = await _is_canonical_record_valid(existing, file_unique_id)
-            except Exception:
-                schedule_touch_file_record(existing, reused=True)
-                return existing, None, True
-            if is_valid:
-                schedule_touch_file_record(existing, reused=True)
-                return existing, None, True
-            _forget(existing)
+                reusable_record, stale_record = await _get_reusable_canonical_record(file_unique_id)
+                if reusable_record:
+                    schedule_touch_file_record(reusable_record, reused=True)
+                    return reusable_record, None, True
 
-        stored_message = await copy_media(source_message)
-        if not stored_message:
-            return None, None, False
+                stored_message = await copy_media(source_message)
+                if not stored_message:
+                    return None, None, False
 
-        record = build_file_record(
-            stored_message,
-            source_chat_id=source_message.chat.id if source_message.chat else None,
-            source_message_id=source_message.id
-        )
-        if not record:
-            return None, stored_message, False
+                record = build_file_record(
+                    stored_message,
+                    source_chat_id=source_message.chat.id if source_message.chat else None,
+                    source_message_id=source_message.id
+                )
+                if not record:
+                    return None, stored_message, False
 
-        try:
-            if existing:
-                record = _merge_replacement_record(existing, record)
-                await db.replace_file_record(record)
-            else:
-                await db.create_file_record(record)
-            _remember(record)
-            return record, stored_message, False
-        except DuplicateKeyError:
-            existing = await get_file_by_unique_id(file_unique_id)
-            if existing:
-                schedule_touch_file_record(existing, reused=True)
-                return existing, None, True
-            raise
-        except FloodWait:
-            raise
-        except Exception as e:
-            logger.error(f"Error creating canonical file for {file_unique_id}: {e}", exc_info=True)
-            return None, stored_message, False
+                try:
+                    if stale_record:
+                        record = _merge_replacement_record(stale_record, record)
+                        await db.replace_file_record(record)
+                    else:
+                        await db.create_file_record(record)
+                    _remember(record)
+                    return record, stored_message, False
+                except DuplicateKeyError:
+                    reusable_record = await _wait_for_other_worker_canonical_record(file_unique_id)
+                    if reusable_record:
+                        schedule_touch_file_record(reusable_record, reused=True)
+                        return reusable_record, stored_message, True
+                    raise
+                except FloodWait:
+                    raise
+                except Exception as e:
+                    logger.error(f"Error creating canonical file for {file_unique_id}: {e}", exc_info=True)
+                    return None, stored_message, False
+            finally:
+                await db.release_file_ingest_claim(file_unique_id)

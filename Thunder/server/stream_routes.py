@@ -302,7 +302,7 @@ async def media_options(request: web.Request):
 async def canonical_media_preview(request: web.Request):
     try:
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash)
+        file_record = await get_file_by_hash(secure_hash, raise_on_error=True)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
@@ -368,7 +368,7 @@ async def media_preview(request: web.Request):
 async def canonical_media_delivery(request: web.Request):
     try:
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash)
+        file_record = await get_file_by_hash(secure_hash, raise_on_error=True)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
@@ -388,7 +388,13 @@ async def canonical_media_delivery(request: web.Request):
                 media = get_media(message)
                 new_file_id = getattr(media, "file_id", None) if media else None
                 if new_file_id and new_file_id != file_record.get("file_id"):
-                    await update_cached_file_id(file_record, new_file_id)
+                    try:
+                        await update_cached_file_id(file_record, new_file_id)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to refresh cached file_id for canonical file {secure_hash}: {e}",
+                            exc_info=True
+                        )
 
             return await _serve_media_response(
                 request,

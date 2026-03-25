@@ -4,6 +4,7 @@ import datetime
 from typing import Any, Dict, Optional
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
+from pymongo.errors import DuplicateKeyError
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
 
@@ -18,8 +19,9 @@ class Database:
         self.authorized_users_col: AsyncCollection = self.db.authorized_users
         self.restart_message_col: AsyncCollection = self.db.restart_message
         self.files_col: AsyncCollection = self.db.files
+        self.file_ingest_locks_col: AsyncCollection = self.db.file_ingest_locks
 
-    async def ensure_indexes(self):
+    async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
             await self.banned_users_col.create_index("user_id", unique=True)
             await self.banned_channels_col.create_index("channel_id", unique=True)
@@ -35,11 +37,15 @@ class Database:
             await self.files_col.create_index("canonical_message_id", unique=True)
             await self.files_col.create_index("created_at")
             await self.files_col.create_index("last_seen_at")
+            await self.file_ingest_locks_col.create_index("expires_at", expireAfterSeconds=0)
 
             logger.debug("Database indexes ensured.")
+            return True
         except Exception as e:
             logger.error(f"Error in ensure_indexes: {e}", exc_info=True)
-            raise
+            if raise_on_error:
+                raise
+            return False
 
     def new_user(self, user_id: int) -> dict:
         try:
@@ -258,12 +264,19 @@ class Database:
             logger.error(f"Error getting file by unique_id {file_unique_id}: {e}", exc_info=True)
             return None
 
-    async def get_file_by_hash(self, public_hash: str) -> Optional[Dict[str, Any]]:
+    async def get_file_by_hash(
+        self,
+        public_hash: str,
+        *,
+        raise_on_error: bool = False
+    ) -> Optional[Dict[str, Any]]:
         try:
             return await self.files_col.find_one({"public_hash": public_hash})
         except Exception as e:
             logger.error(f"Error getting file by hash {public_hash}: {e}", exc_info=True)
-            raise
+            if raise_on_error:
+                raise
+            return None
 
     async def get_file_by_message_id(self, canonical_message_id: int) -> Optional[Dict[str, Any]]:
         try:
@@ -299,7 +312,13 @@ class Database:
             )
             raise
 
-    async def touch_file_record(self, public_hash: str, *, reused: bool = False) -> None:
+    async def touch_file_record(
+        self,
+        public_hash: str,
+        *,
+        reused: bool = False,
+        raise_on_error: bool = False
+    ) -> bool:
         try:
             update_doc: Dict[str, Any] = {
                 "$set": {"last_seen_at": datetime.datetime.utcnow()},
@@ -308,10 +327,20 @@ class Database:
             if reused:
                 update_doc["$inc"]["reuse_count"] = 1
             await self.files_col.update_one({"public_hash": public_hash}, update_doc)
+            return True
         except Exception as e:
             logger.error(f"Error touching canonical file {public_hash}: {e}", exc_info=True)
+            if raise_on_error:
+                raise
+            return False
 
-    async def update_file_id(self, public_hash: str, file_id: str) -> None:
+    async def update_file_id(
+        self,
+        public_hash: str,
+        file_id: str,
+        *,
+        raise_on_error: bool = False
+    ) -> bool:
         try:
             await self.files_col.update_one(
                 {"public_hash": public_hash},
@@ -322,8 +351,70 @@ class Database:
                     }
                 }
             )
+            return True
         except Exception as e:
             logger.error(f"Error updating file_id for {public_hash}: {e}", exc_info=True)
+            if raise_on_error:
+                raise
+            return False
+
+    async def acquire_file_ingest_claim(
+        self,
+        file_unique_id: str,
+        *,
+        ttl_seconds: int = 60
+    ) -> bool:
+        now = datetime.datetime.utcnow()
+        claim_fields = {
+            "created_at": now,
+            "expires_at": now + datetime.timedelta(seconds=ttl_seconds)
+        }
+        try:
+            result = await self.file_ingest_locks_col.find_one_and_update(
+                {
+                    "_id": file_unique_id,
+                    "$or": [
+                        {"expires_at": {"$lte": now}},
+                        {"expires_at": {"$exists": False}}
+                    ]
+                },
+                {
+                    "$set": claim_fields
+                },
+                upsert=True,
+                return_document=False
+            )
+            # Upsert-created documents return None; replacements of stale claims return old doc.
+            # Both mean the caller now owns the claim.
+            return result is None or bool(result)
+        except DuplicateKeyError:
+            # Another worker inserted an active claim concurrently.
+            return False
+        except Exception as e:
+            logger.error(f"Error acquiring ingest claim for {file_unique_id}: {e}", exc_info=True)
+            raise
+
+    async def release_file_ingest_claim(self, file_unique_id: str) -> bool:
+        try:
+            await self.file_ingest_locks_col.delete_one({"_id": file_unique_id})
+            return True
+        except Exception as e:
+            logger.error(f"Error releasing ingest claim for {file_unique_id}: {e}", exc_info=True)
+            return False
+
+    async def is_file_ingest_claim_active(self, file_unique_id: str) -> bool:
+        try:
+            claim = await self.file_ingest_locks_col.find_one(
+                {
+                    "_id": file_unique_id,
+                    "expires_at": {"$gt": datetime.datetime.utcnow()}
+                },
+                {"_id": 1}
+            )
+            return bool(claim)
+        except Exception as e:
+            logger.error(f"Error checking ingest claim for {file_unique_id}: {e}", exc_info=True)
+            raise
 
     async def close(self):
         if self._client:
