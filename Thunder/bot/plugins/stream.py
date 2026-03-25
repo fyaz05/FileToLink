@@ -10,8 +10,9 @@ from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
                             Message)
 
 from Thunder.bot import StreamBot
-from Thunder.utils.bot_utils import (gen_links, is_admin, log_newusr, notify_own,
-                                     reply_user_err)
+from Thunder.utils.bot_utils import (gen_canonical_links, gen_links, is_admin,
+                                     log_newusr, notify_own, reply_user_err)
+from Thunder.utils.canonical_files import get_or_create_canonical_file
 from Thunder.utils.database import db
 from Thunder.utils.decorators import (check_banned, get_shortener_status,
                                       require_token)
@@ -71,30 +72,55 @@ async def validate_request_common(client: Client, message: Message) -> Optional[
     return await get_shortener_status(client, message)
 
 
-async def send_channel_links(target_msg: Message, links: Dict[str, Any], source_info: str, source_id: int):
+async def send_channel_links(
+    links: Dict[str, Any],
+    source_info: str,
+    source_id: int,
+    *,
+    target_msg: Optional[Message] = None,
+    reply_to_message_id: Optional[int] = None
+):
     try:
-        await target_msg.reply_text(
-            MSG_NEW_FILE_REQUEST.format(
-                source_info=source_info,
-                id_=source_id,
-                online_link=links['online_link'],
-                stream_link=links['stream_link']
-            ),
-            disable_web_page_preview=True,
-            quote=True
+        text = MSG_NEW_FILE_REQUEST.format(
+            source_info=source_info,
+            id_=source_id,
+            online_link=links['online_link'],
+            stream_link=links['stream_link']
         )
+        if target_msg:
+            await target_msg.reply_text(
+                text,
+                disable_web_page_preview=True,
+                quote=True
+            )
+        else:
+            await StreamBot.send_message(
+                chat_id=Var.BIN_CHANNEL,
+                text=text,
+                disable_web_page_preview=True,
+                reply_to_message_id=reply_to_message_id
+            )
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        await target_msg.reply_text(
-            MSG_NEW_FILE_REQUEST.format(
-                source_info=source_info,
-                id_=source_id,
-                online_link=links['online_link'],
-                stream_link=links['stream_link']
-            ),
-            disable_web_page_preview=True,
-            quote=True
+        text = MSG_NEW_FILE_REQUEST.format(
+            source_info=source_info,
+            id_=source_id,
+            online_link=links['online_link'],
+            stream_link=links['stream_link']
         )
+        if target_msg:
+            await target_msg.reply_text(
+                text,
+                disable_web_page_preview=True,
+                quote=True
+            )
+        else:
+            await StreamBot.send_message(
+                chat_id=Var.BIN_CHANNEL,
+                text=text,
+                disable_web_page_preview=True,
+                reply_to_message_id=reply_to_message_id
+            )
 
 
 async def safe_edit_message(message: Message, text: str, **kwargs):
@@ -314,14 +340,32 @@ async def channel_receive_handler(bot: Client, msg: Message):
             return
 
         try:
-            stored_msg = await fwd_media(message)
-            if not stored_msg:
-                logger.error(
-                    f"Failed to forward media from channel {message.chat.id}. Ignoring.")
-                return
             shortener_val = await get_shortener_status(client, message)
-            links = await gen_links(stored_msg, shortener=shortener_val)
+            canonical_record, stored_msg, reused_existing = await get_or_create_canonical_file(message, fwd_media)
+            if reused_existing and stored_msg:
+                await safe_delete_message(stored_msg)
+                stored_msg = None
+            if canonical_record:
+                links = await gen_canonical_links(
+                    file_name=canonical_record["file_name"],
+                    file_size=int(canonical_record.get("file_size", 0) or 0),
+                    public_hash=canonical_record["public_hash"],
+                    shortener=shortener_val
+                )
+                reply_to_message_id = int(canonical_record["canonical_message_id"])
+            else:
+                if not stored_msg:
+                    stored_msg = await fwd_media(message)
+                    if not stored_msg:
+                        logger.error(
+                            f"Failed to forward media from channel {message.chat.id}. Ignoring.")
+                        return
+                links = await gen_links(stored_msg, shortener=shortener_val)
+                reply_to_message_id = stored_msg.id
             source_info = message.chat.title or "Unknown Channel"
+            # When we reused an existing canonical BIN copy, stored_msg is intentionally
+            # None so send_channel_links falls back to StreamBot.send_message(...,
+            # reply_to_message_id=...) and keeps the log threaded to the canonical message.
 
             if notification_msg:
                 try:
@@ -348,9 +392,21 @@ async def channel_receive_handler(bot: Client, msg: Message):
                         )
                 except Exception as e:
                     logger.error(f"Error editing notification message with links: {e}", exc_info=True)
-                    await send_channel_links(stored_msg, links, source_info, message.chat.id)
+                    await send_channel_links(
+                        links,
+                        source_info,
+                        message.chat.id,
+                        target_msg=stored_msg,
+                        reply_to_message_id=reply_to_message_id
+                    )
             else:
-                await send_channel_links(stored_msg, links, source_info, message.chat.id)
+                await send_channel_links(
+                    links,
+                    source_info,
+                    message.chat.id,
+                    target_msg=stored_msg,
+                    reply_to_message_id=reply_to_message_id
+                )
 
             try:
                 try:
@@ -391,11 +447,26 @@ async def process_single(
     notification_msg: Optional[Message] = None
 ):
     try:
-        stored_msg = await fwd_media(file_msg)
-        if not stored_msg:
-            logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
-            return None
-        links = await gen_links(stored_msg, shortener=shortener_val)
+        canonical_record, stored_msg, reused_existing = await get_or_create_canonical_file(file_msg, fwd_media)
+        if reused_existing and stored_msg:
+            await safe_delete_message(stored_msg)
+            stored_msg = None
+        if canonical_record:
+            links = await gen_canonical_links(
+                file_name=canonical_record["file_name"],
+                file_size=int(canonical_record.get("file_size", 0) or 0),
+                public_hash=canonical_record["public_hash"],
+                shortener=shortener_val
+            )
+            canonical_reply_id = int(canonical_record["canonical_message_id"])
+        else:
+            if not stored_msg:
+                stored_msg = await fwd_media(file_msg)
+                if not stored_msg:
+                    logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
+                    return None
+            links = await gen_links(stored_msg, shortener=shortener_val)
+            canonical_reply_id = stored_msg.id
         if notification_msg:
             await safe_edit_message(
                 notification_msg,
@@ -426,27 +497,21 @@ async def process_single(
             source_id = source_msg.chat.id
         if source_info and source_id:
             try:
-                await stored_msg.reply_text(
-                    MSG_NEW_FILE_REQUEST.format(
-                        source_info=source_info,
-                        id_=source_id,
-                        online_link=links['online_link'],
-                        stream_link=links['stream_link']
-                    ),
-                    disable_web_page_preview=True,
-                    quote=True
+                await send_channel_links(
+                    links,
+                    source_info,
+                    source_id,
+                    target_msg=stored_msg,
+                    reply_to_message_id=canonical_reply_id
                 )
             except FloodWait as e:
                 await asyncio.sleep(e.value)
-                await stored_msg.reply_text(
-                    MSG_NEW_FILE_REQUEST.format(
-                        source_info=source_info,
-                        id_=source_id,
-                        online_link=links['online_link'],
-                        stream_link=links['stream_link']
-                    ),
-                    disable_web_page_preview=True,
-                    quote=True
+                await send_channel_links(
+                    links,
+                    source_info,
+                    source_id,
+                    target_msg=stored_msg,
+                    reply_to_message_id=canonical_reply_id
                 )
         if status_msg:
             await safe_delete_message(status_msg)
