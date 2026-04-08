@@ -102,7 +102,7 @@ async def start_command(bot: Client, msg: Message):
     btns = [
         [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
          InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command")],
-        [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),
+        [InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://t.me/bothelpersosupport/33"),
          InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
     ]
     
