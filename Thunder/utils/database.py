@@ -51,7 +51,7 @@ class Database:
         try:
             return {
                 'id': user_id,
-                'join_date': datetime.datetime.utcnow()
+                'join_date': datetime.datetime.now(datetime.timezone.utc)
             }
         except Exception as e:
             logger.error(f"Error in new_user for user {user_id}: {e}", exc_info=True)
@@ -135,7 +135,7 @@ class Database:
         try:
             ban_data = {
                 "user_id": user_id,
-                "banned_at": datetime.datetime.utcnow(),
+                "banned_at": datetime.datetime.now(datetime.timezone.utc),
                 "banned_by": banned_by,
                 "reason": reason
             }
@@ -174,7 +174,7 @@ class Database:
         try:
             ban_data = {
                 "channel_id": channel_id,
-                "banned_at": datetime.datetime.utcnow(),
+                "banned_at": datetime.datetime.now(datetime.timezone.utc),
                 "banned_by": banned_by,
                 "reason": reason
             }
@@ -229,7 +229,7 @@ class Database:
             await self.restart_message_col.insert_one({
                 "message_id": message_id,
                 "chat_id": chat_id,
-                "timestamp": datetime.datetime.utcnow()
+                "timestamp": datetime.datetime.now(datetime.timezone.utc)
             })
             logger.debug(f"Added restart message {message_id} for chat {chat_id}.")
         except Exception as e:
@@ -268,7 +268,7 @@ class Database:
         self,
         public_hash: str,
         *,
-        raise_on_error: bool = False
+        raise_on_error: bool = True
     ) -> Optional[Dict[str, Any]]:
         try:
             return await self.files_col.find_one({"public_hash": public_hash})
@@ -321,7 +321,7 @@ class Database:
     ) -> bool:
         try:
             update_doc: Dict[str, Any] = {
-                "$set": {"last_seen_at": datetime.datetime.utcnow()},
+                "$set": {"last_seen_at": datetime.datetime.now(datetime.timezone.utc)},
                 "$inc": {"seen_count": 1}
             }
             if reused:
@@ -347,7 +347,7 @@ class Database:
                 {
                     "$set": {
                         "file_id": file_id,
-                        "last_seen_at": datetime.datetime.utcnow()
+                        "last_seen_at": datetime.datetime.now(datetime.timezone.utc)
                     }
                 }
             )
@@ -364,32 +364,36 @@ class Database:
         *,
         ttl_seconds: int = 60
     ) -> bool:
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc)
         claim_fields = {
             "created_at": now,
             "expires_at": now + datetime.timedelta(seconds=ttl_seconds)
         }
         try:
-            result = await self.file_ingest_locks_col.find_one_and_update(
-                {
-                    "_id": file_unique_id,
-                    "$or": [
-                        {"expires_at": {"$lte": now}},
-                        {"expires_at": {"$exists": False}}
-                    ]
-                },
-                {
-                    "$set": claim_fields
-                },
-                upsert=True,
-                return_document=False
-            )
-            # Upsert-created documents return None; replacements of stale claims return old doc.
-            # Both mean the caller now owns the claim.
-            return result is None or bool(result)
+            await self.file_ingest_locks_col.insert_one({
+                "_id": file_unique_id,
+                **claim_fields
+            })
+            return True
         except DuplicateKeyError:
-            # Another worker inserted an active claim concurrently.
-            return False
+            try:
+                result = await self.file_ingest_locks_col.find_one_and_update(
+                    {
+                        "_id": file_unique_id,
+                        "$or": [
+                            {"expires_at": {"$lte": now}},
+                            {"expires_at": {"$exists": False}}
+                        ]
+                    },
+                    {
+                        "$set": claim_fields
+                    },
+                    return_document=False
+                )
+                return bool(result)
+            except Exception as e:
+                logger.error(f"Error updating ingest claim for {file_unique_id}: {e}", exc_info=True)
+                raise
         except Exception as e:
             logger.error(f"Error acquiring ingest claim for {file_unique_id}: {e}", exc_info=True)
             raise
@@ -407,7 +411,7 @@ class Database:
             claim = await self.file_ingest_locks_col.find_one(
                 {
                     "_id": file_unique_id,
-                    "expires_at": {"$gt": datetime.datetime.utcnow()}
+                    "expires_at": {"$gt": datetime.datetime.now(datetime.timezone.utc)}
                 },
                 {"_id": 1}
             )

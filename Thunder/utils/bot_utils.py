@@ -179,7 +179,12 @@ async def is_admin(cli: Client, chat_id_val: int) -> bool:
         member = await cli.get_chat_member(chat_id_val, cli.me.id)
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        member = await cli.get_chat_member(chat_id_val, cli.me.id)
+        try:
+            member = await cli.get_chat_member(chat_id_val, cli.me.id)
+        except Exception:
+            return False
+    except Exception:
+        return False
     if member is None:
         return False
     return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]

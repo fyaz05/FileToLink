@@ -607,13 +607,13 @@ async def process_batch(
                 pass
     for i in range(0, len(links_list), LINK_CHUNK_SIZE):
         chunk = links_list[i:i+LINK_CHUNK_SIZE]
-        chunk_text = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n`{chr(10).join(chunk)}`"
+        chunk_text = MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n<code>{chr(10).join(chunk)}</code>"
         try:
             await msg.reply_text(
                 chunk_text,
                 quote=True,
                 disable_web_page_preview=True,
-                parse_mode=enums.ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.HTML
             )
         except FloodWait as e:
             await asyncio.sleep(e.value)
@@ -621,7 +621,7 @@ async def process_batch(
                 chunk_text,
                 quote=True,
                 disable_web_page_preview=True,
-                parse_mode=enums.ParseMode.MARKDOWN
+                parse_mode=enums.ParseMode.HTML
             )
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
             try:
@@ -630,7 +630,7 @@ async def process_batch(
                         chat_id=msg.from_user.id,
                         text=MSG_DM_BATCH_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + chunk_text,
                         disable_web_page_preview=True,
-                        parse_mode=enums.ParseMode.MARKDOWN
+                        parse_mode=enums.ParseMode.HTML
                     )
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
@@ -638,7 +638,7 @@ async def process_batch(
                         chat_id=msg.from_user.id,
                         text=MSG_DM_BATCH_PREFIX.format(chat_title=msg.chat.title or "the chat") + "\n" + chunk_text,
                         disable_web_page_preview=True,
-                        parse_mode=enums.ParseMode.MARKDOWN
+                        parse_mode=enums.ParseMode.HTML
                     )
             except Exception as e:
                 logger.error(f"Error sending DM in batch: {e}", exc_info=True)

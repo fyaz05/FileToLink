@@ -22,6 +22,7 @@ template_env = Environment(
 )
 
 async def render_media_page(file_name: str, src: str, requested_action: str | None = None) -> str:
+    # NOTE: src must be a pre-encoded URL. Templates use |safe to avoid double-encoding.
     if requested_action == 'stream':
         template = template_env.get_template('req.html')
         context = {

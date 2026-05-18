@@ -38,7 +38,7 @@ class ByteStreamer:
 
     async def stream_file(
         self,
-        media_ref: int | str | Message,
+        media_ref: int | Message,
         offset: int = 0,
         limit: int = 0,
         fallback_message_id: int | None = None,
@@ -49,7 +49,7 @@ class ByteStreamer:
         if limit > 0:
             chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
 
-        refs: list[int | str | Message] = [media_ref]
+        refs: list[int | Message] = [media_ref]
         media_id = media_ref if isinstance(media_ref, int) else None
         if isinstance(media_ref, Message):
             media_id = getattr(media_ref, "id", getattr(media_ref, "message_id", None))

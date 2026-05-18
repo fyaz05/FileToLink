@@ -302,7 +302,7 @@ async def media_options(request: web.Request):
 async def canonical_media_preview(request: web.Request):
     try:
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash, raise_on_error=True)
+        file_record = await get_file_by_hash(secure_hash, raise_on_error=False)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
@@ -368,7 +368,7 @@ async def media_preview(request: web.Request):
 async def canonical_media_delivery(request: web.Request):
     try:
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash, raise_on_error=True)
+        file_record = await get_file_by_hash(secure_hash, raise_on_error=False)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
@@ -378,8 +378,6 @@ async def canonical_media_delivery(request: web.Request):
         try:
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
-            if client_id == 0 and file_record.get("file_id"):
-                media_ref = file_record["file_id"]
             fallback_message_id = int(file_record["canonical_message_id"])
 
             async def persist_refreshed_file_id(message):

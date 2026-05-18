@@ -6,10 +6,16 @@ import importlib.util
 import sys
 from datetime import datetime
 
-from uvloop import install
 from pathlib import Path
 
-install()
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+try:
+    from uvloop import install
+    install()
+except ImportError:
+    pass
 from aiohttp import web
 from pyrogram import idle
 from pyrogram.errors import FloodWait, MessageNotModified
@@ -288,6 +294,12 @@ async def start_services():
             except Exception as e:
                 logger.error(f"Error during web server cleanup: {e}")
 
+        try:
+            await db.close()
+            print("   ✓ Database connection closed")
+        except Exception as e:
+            logger.error(f"Error during database cleanup: {e}")
+
 
 async def schedule_token_cleanup():
     while True:
@@ -301,8 +313,8 @@ async def schedule_token_cleanup():
             logger.error(f"Token cleanup error: {e}", exc_info=True)
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
     try:
+        loop = asyncio.get_event_loop()
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
         print("╔═══════════════════════════════════════════════════════════╗")
@@ -310,5 +322,3 @@ if __name__ == '__main__':
         print("╚═══════════════════════════════════════════════════════════╝")
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
-    finally:
-        loop.close()

@@ -115,7 +115,7 @@
         <!-- Command Bar -->
         <nav class="command-bar">
             <div class="command-glass">
-                <a href="{{ src }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
+                <a href="{{ src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
                     <svg viewBox="0 0 24 24">
                         <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                     </svg>
@@ -155,63 +155,63 @@
                 <div class="player-group" id="androidGroup">
                     <div class="group-label">Android</div>
                     <div class="player-grid">
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             VLC
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title={{ file_name }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             MX Player
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;S.title={{ file_name }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             MX Player Pro
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.young.simple.player;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.young.simple.player;end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Splayer
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=dev.anilbeesetti.nextplayer;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=dev.anilbeesetti.nextplayer;S.title={{ file_name }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Next Player
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.courville.nova;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.courville.nova;S.title={{ file_name }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Nova Player
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=is.xyz.mpv;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=is.xyz.mpv;S.title={{ file_name }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             MPV-Android
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.brouken.player;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.brouken.player;end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Just Player
                         </a>
-                        <a href="intent:{{ src }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.newin.nplayer.pro;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.newin.nplayer.pro;end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
@@ -225,31 +225,31 @@
                 <div class="player-group" id="iosGroup">
                     <div class="group-label">iOS / iPadOS</div>
                     <div class="player-grid">
-                        <a href="vlc-x-callback://x-callback-url/stream?url={{ src }}" class="player-link">
+                        <a href="vlc-x-callback://x-callback-url/stream?url={{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             VLC
                         </a>
-                        <a href="infuse://x-callback-url/play?url={{ src }}" class="player-link">
+                        <a href="infuse://x-callback-url/play?url={{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Infuse
                         </a>
-                        <a href="nplayer://weblink?url={{ src }}" class="player-link">
+                        <a href="nplayer://weblink?url={{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             nPlayer
                         </a>
-                        <a href="outplayer://{{ src }}" class="player-link">
+                        <a href="outplayer://{{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Outplayer
                         </a>
-                        <a href="oplayer://{{ src }}" class="player-link">
+                        <a href="oplayer://{{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
@@ -262,31 +262,31 @@
                 <div class="player-group" id="desktopGroup">
                     <div class="group-label">Desktop</div>
                     <div class="player-grid">
-                        <a href="vlc://{{ src }}" class="player-link">
+                        <a href="vlc://{{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             VLC
                         </a>
-                        <a href="potplayer://{{ src }}" class="player-link" data-os="windows">
+                        <a href="potplayer://{{ src|safe }}" class="player-link" data-os="windows">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             PotPlayer
                         </a>
-                        <a href="iina://weblink?url={{ src }}" class="player-link" data-os="mac">
+                        <a href="iina://weblink?url={{ src|safe }}" class="player-link" data-os="mac">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             IINA
                         </a>
-                        <a href="mpv://{{ src }}" class="player-link">
+                        <a href="mpv://{{ src|safe }}" class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             MPV
                         </a>
-                        <a href="kmplayer://{{ src }}" class="player-link" data-os="windows">
+                        <a href="kmplayer://{{ src|safe }}" class="player-link" data-os="windows">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
@@ -350,7 +350,7 @@
 
     <!-- Config for external script (template injection happens here) -->
     <script>
-        window.__CINEMA_CONFIG__ = { src: '{{ src }}' };
+        window.__CINEMA_CONFIG__ = { src: {{ src | tojson }} };
     </script>
     <!-- Main Script (CDN-hosted) -->
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/script.js"></script>

@@ -21,6 +21,8 @@ _CACHE_MAX_ITEMS = 4096
 _INGEST_CLAIM_TTL_SECONDS = 60
 _INGEST_CLAIM_WAIT_SECONDS = 15
 _INGEST_CLAIM_POLL_SECONDS = 0.5
+_MAX_INGEST_RETRIES = 10
+_CACHE_PRUNE_INTERVAL = 50
 
 _cache_by_unique_id: "OrderedDict[str, Tuple[float, Dict[str, Any]]]" = OrderedDict()
 _cache_by_hash: "OrderedDict[str, Tuple[float, Dict[str, Any]]]" = OrderedDict()
@@ -29,7 +31,10 @@ _cache_by_message_id: "OrderedDict[int, Tuple[float, Dict[str, Any]]]" = Ordered
 _upload_locks: dict[str, asyncio.Lock] = {}
 _upload_lock_counts: dict[str, int] = {}
 _upload_locks_guard = asyncio.Lock()
-_background_touch_tasks: set[asyncio.Task] = set()
+_insert_counter: int = 0
+_pending_touches: Dict[str, Tuple[Dict[str, Any], bool]] = {}
+_flush_task: Optional[asyncio.Task] = None
+_FLUSH_DELAY_SECONDS = 10
 
 
 def build_public_hash(file_unique_id: str) -> str:
@@ -60,7 +65,7 @@ def build_file_record(
     if not media or not file_unique_id:
         return None
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     return {
         "file_unique_id": file_unique_id,
         "public_hash": build_public_hash(file_unique_id),
@@ -104,23 +109,30 @@ def _cache_get(
 
 
 def _remember(record: Dict[str, Any]) -> Dict[str, Any]:
+    global _insert_counter
     now = asyncio.get_running_loop().time()
     file_unique_id = record.get("file_unique_id")
     public_hash = record.get("public_hash")
     canonical_message_id = record.get("canonical_message_id")
 
+    _insert_counter += 1
+    should_prune = (_insert_counter % _CACHE_PRUNE_INTERVAL == 0)
+
     if file_unique_id:
         _cache_by_unique_id[file_unique_id] = (now, record)
         _cache_by_unique_id.move_to_end(file_unique_id)
-        _prune_cache(_cache_by_unique_id)
+        if should_prune:
+            _prune_cache(_cache_by_unique_id)
     if public_hash:
         _cache_by_hash[public_hash] = (now, record)
         _cache_by_hash.move_to_end(public_hash)
-        _prune_cache(_cache_by_hash)
+        if should_prune:
+            _prune_cache(_cache_by_hash)
     if canonical_message_id is not None:
         _cache_by_message_id[canonical_message_id] = (now, record)
         _cache_by_message_id.move_to_end(canonical_message_id)
-        _prune_cache(_cache_by_message_id)
+        if should_prune:
+            _prune_cache(_cache_by_message_id)
     return record
 
 
@@ -148,7 +160,7 @@ async def get_file_by_unique_id(file_unique_id: str) -> Optional[Dict[str, Any]]
 async def get_file_by_hash(
     public_hash: str,
     *,
-    raise_on_error: bool = False
+    raise_on_error: bool = True
 ) -> Optional[Dict[str, Any]]:
     cached = _cache_get(_cache_by_hash, public_hash)
     if cached:
@@ -168,7 +180,7 @@ async def get_file_by_message_id(canonical_message_id: int) -> Optional[Dict[str
 async def touch_file_record(record: Dict[str, Any], *, reused: bool = False) -> None:
     if not record.get("public_hash"):
         return
-    record["last_seen_at"] = datetime.datetime.utcnow()
+    record["last_seen_at"] = datetime.datetime.now(datetime.timezone.utc)
     record["seen_count"] = int(record.get("seen_count", 0)) + 1
     if reused:
         record["reuse_count"] = int(record.get("reuse_count", 0)) + 1
@@ -176,46 +188,74 @@ async def touch_file_record(record: Dict[str, Any], *, reused: bool = False) -> 
     await db.touch_file_record(record["public_hash"], reused=reused, raise_on_error=True)
 
 
+async def _flush_pending_touches() -> None:
+    global _flush_task
+    flushed = False
+    try:
+        await asyncio.sleep(_FLUSH_DELAY_SECONDS)
+        
+        items = list(_pending_touches.items())
+        _pending_touches.clear()
+            
+        for public_hash, (record, reused) in items:
+            try:
+                await db.touch_file_record(public_hash, reused=reused)
+            except Exception as e:
+                logger.error(f"Failed to flush touch for {public_hash}: {e}", exc_info=True)
+        flushed = True
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if not flushed and _pending_touches:
+            items = list(_pending_touches.items())
+            _pending_touches.clear()
+                
+            for public_hash, (record, reused) in items:
+                try:
+                    await db.touch_file_record(public_hash, reused=reused)
+                except Exception as e:
+                    logger.error(f"Failed to flush touch for {public_hash}: {e}", exc_info=True)
+        _flush_task = None
+
+
 def schedule_touch_file_record(record: Dict[str, Any], *, reused: bool = False) -> None:
+    global _flush_task
     if not record.get("public_hash"):
         return
 
-    record["last_seen_at"] = datetime.datetime.utcnow()
+    record["last_seen_at"] = datetime.datetime.now(datetime.timezone.utc)
     record["seen_count"] = int(record.get("seen_count", 0)) + 1
     if reused:
         record["reuse_count"] = int(record.get("reuse_count", 0)) + 1
     _remember(record)
 
-    task = asyncio.create_task(
-        db.touch_file_record(record["public_hash"], reused=reused),
-        name=f"touch_file_record:{record['public_hash']}"
-    )
-    _background_touch_tasks.add(task)
+    public_hash = record["public_hash"]
+    if public_hash in _pending_touches:
+        _, existing_reused = _pending_touches[public_hash]
+        _pending_touches[public_hash] = (record, existing_reused or reused)
+    else:
+        _pending_touches[public_hash] = (record, reused)
 
-    def _log_touch_failure(done_task: asyncio.Task) -> None:
-        _background_touch_tasks.discard(done_task)
-        try:
-            touched = done_task.result()
-            if not touched:
-                logger.error(
-                    f"Background touch did not update canonical file {record['public_hash']}"
-                )
-        except Exception as e:
-            logger.error(
-                f"Background touch failed for canonical file {record['public_hash']}: {e}",
-                exc_info=True
-            )
-
-    task.add_done_callback(_log_touch_failure)
+    if _flush_task is None or _flush_task.done():
+        _flush_task = asyncio.create_task(_flush_pending_touches())
 
 
 async def drain_background_touch_tasks() -> None:
-    if not _background_touch_tasks:
-        return
-
-    pending = tuple(_background_touch_tasks)
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
+    if _flush_task and not _flush_task.done():
+        _flush_task.cancel()
+        try:
+            await _flush_task
+        except asyncio.CancelledError:
+            pass
+            
+    items = list(_pending_touches.items())
+    _pending_touches.clear()
+        
+    for public_hash, (record, reused) in items:
+        try:
+            await db.touch_file_record(public_hash, reused=reused)
+        except Exception as e:
+            logger.error(f"Failed to flush touch for {public_hash}: {e}", exc_info=True)
 
 
 async def update_cached_file_id(record: Dict[str, Any], file_id: str) -> None:
@@ -354,7 +394,10 @@ async def get_or_create_canonical_file(
         return None, None, False
 
     async with file_ingest_lock(file_unique_id):
-        while True:
+        for _attempt in range(_MAX_INGEST_RETRIES):
+            if _attempt > 0:
+                await asyncio.sleep(min(0.5 * (2 ** (_attempt - 1)), 5.0))
+            
             reusable_record, stale_record = await _get_reusable_canonical_record(file_unique_id)
             if reusable_record:
                 schedule_touch_file_record(reusable_record, reused=True)
@@ -402,6 +445,11 @@ async def get_or_create_canonical_file(
                     if reusable_record:
                         schedule_touch_file_record(reusable_record, reused=True)
                         return reusable_record, stored_message, True
+                    if stored_message:
+                        try:
+                            await stored_message.delete()
+                        except Exception:
+                            pass
                     raise
                 except FloodWait:
                     raise
@@ -410,3 +458,6 @@ async def get_or_create_canonical_file(
                     return None, stored_message, False
             finally:
                 await db.release_file_ingest_claim(file_unique_id)
+
+        logger.error(f"Max ingest retries ({_MAX_INGEST_RETRIES}) exhausted for {file_unique_id}")
+        return None, None, False
