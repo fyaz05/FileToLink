@@ -28,7 +28,7 @@ routes = web.RouteTableDef()
 SECURE_HASH_LENGTH = 6
 CHUNK_SIZE = 1024 * 1024
 MAX_CONCURRENT_PER_CLIENT = 8
-RANGE_REGEX = re.compile(r"bytes=(?P<start>\d*)-(?P<end>\d*)")
+RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 PATTERN_HASH_FIRST = re.compile(
     rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
 PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
@@ -116,7 +116,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if not range_header:
         return 0, file_size - 1
 
-    match = RANGE_REGEX.match(range_header)
+    match = RANGE_REGEX.fullmatch(range_header)
     if not match:
         raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
 

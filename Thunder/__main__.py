@@ -240,6 +240,10 @@ async def start_services():
         except Exception:
             pass
         try:
+            await db.close()
+        except Exception as e:
+            logger.error(f"Error during database cleanup: {e}", exc_info=True)
+        try:
             await drain_background_touch_tasks()
         except Exception as e:
             logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
@@ -298,7 +302,7 @@ async def start_services():
             await db.close()
             print("   ✓ Database connection closed")
         except Exception as e:
-            logger.error(f"Error during database cleanup: {e}")
+            logger.error("Error during database cleanup", exc_info=True)
 
 
 async def schedule_token_cleanup():

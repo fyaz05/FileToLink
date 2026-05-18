@@ -448,8 +448,8 @@ async def get_or_create_canonical_file(
                     if stored_message:
                         try:
                             await stored_message.delete()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Failed to delete stored message {stored_message.id} in BIN_CHANNEL: {e}", exc_info=True)
                     raise
                 except FloodWait:
                     raise

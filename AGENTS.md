@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 ## Project Structure
 
-```
+```text
 Thunder/
 ├── __init__.py              # __version__, StartTime
 ├── __main__.py              # Entry: start_services() via asyncio

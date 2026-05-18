@@ -162,14 +162,14 @@
                             </svg>
                             VLC
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title={{ file_name | urlencode }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             MX Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;S.title={{ file_name | urlencode }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
@@ -183,21 +183,21 @@
                             </svg>
                             Splayer
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=dev.anilbeesetti.nextplayer;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=dev.anilbeesetti.nextplayer;S.title={{ file_name | urlencode }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Next Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.courville.nova;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.courville.nova;S.title={{ file_name | urlencode }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />
                             </svg>
                             Nova Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=is.xyz.mpv;S.title={{ file_name }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=is.xyz.mpv;S.title={{ file_name | urlencode }};end"
                             class="player-link">
                             <svg viewBox="0 0 24 24">
                                 <circle cx="12" cy="12" r="10" />

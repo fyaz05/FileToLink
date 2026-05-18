@@ -468,7 +468,7 @@ async def process_single(
             links = await gen_links(stored_msg, shortener=shortener_val)
             canonical_reply_id = stored_msg.id
         if notification_msg:
-            await safe_edit_message(
+            result = await safe_edit_message(
                 notification_msg,
                 MSG_LINKS.format(
                     file_name=links['media_name'],
@@ -480,6 +480,8 @@ async def process_single(
                 disable_web_page_preview=True,
                 reply_markup=get_link_buttons(links)
             )
+            if not result:
+                await send_link(msg, links)
         elif not original_request_msg:
             await send_link(msg, links)
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user and not original_request_msg:
