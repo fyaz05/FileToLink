@@ -117,9 +117,9 @@ async def reply_user_err(msg: Message, err_txt: str):
 
 async def log_newusr(cli: Client, uid: int, fname: str):
     try:
-        if await db.is_user_exist(uid):
+        is_new = await db.add_user(uid)
+        if not is_new:
             return
-        await db.add_user(uid)
         if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
             try:
                 await cli.send_message(chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))

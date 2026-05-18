@@ -21,13 +21,32 @@ class Database:
         self.files_col: AsyncCollection = self.db.files
         self.file_ingest_locks_col: AsyncCollection = self.db.file_ingest_locks
 
+    async def _deduplicate_users(self) -> None:
+        pipeline = [
+            {"$sort": {"join_date": 1}},
+            {"$group": {"_id": "$id", "doc_id": {"$first": "$_id"}}},
+            {"$project": {"_id": "$doc_id"}}
+        ]
+        keep_ids = []
+        async for doc in self.col.aggregate(pipeline):
+            keep_ids.append(doc["_id"])
+        if keep_ids:
+            result = await self.col.delete_many({"_id": {"$nin": keep_ids}})
+            if result.deleted_count > 0:
+                logger.warning(f"Deduplicated {result.deleted_count} duplicate user documents.")
+
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
             await self.banned_users_col.create_index("user_id", unique=True)
             await self.banned_channels_col.create_index("channel_id", unique=True)
             await self.token_col.create_index("token", unique=True)
             await self.authorized_users_col.create_index("user_id", unique=True)
-            await self.col.create_index("id", unique=True)
+            try:
+                await self.col.create_index("id", unique=True)
+            except DuplicateKeyError:
+                logger.warning("Duplicate users found, deduplicating...")
+                await self._deduplicate_users()
+                await self.col.create_index("id", unique=True)
             await self.token_col.create_index("expires_at", expireAfterSeconds=0)
             await self.token_col.create_index("activated")
             await self.restart_message_col.create_index("message_id", unique=True)
@@ -57,17 +76,24 @@ class Database:
             logger.error(f"Error in new_user for user {user_id}: {e}", exc_info=True)
             raise
 
-    async def add_user(self, user_id: int):
+    async def add_user(self, user_id: int) -> bool:
         try:
-            if not await self.is_user_exist(user_id):
-                await self.col.insert_one(self.new_user(user_id))
+            result = await self.col.update_one(
+                {'id': user_id},
+                {'$setOnInsert': self.new_user(user_id)},
+                upsert=True
+            )
+            if result.upserted_id:
                 logger.debug(f"Added new user {user_id} to database.")
+                return True
+            return False
         except Exception as e:
             logger.error(f"Error in add_user for user {user_id}: {e}", exc_info=True)
             raise
 
 
     async def is_user_exist(self, user_id: int) -> bool:
+        """Read-only existence check. For user registration, use add_user() instead."""
         try:
             user = await self.col.find_one({'id': user_id}, {'_id': 1})
             return bool(user)
