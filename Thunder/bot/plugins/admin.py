@@ -17,7 +17,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.utils.bot_utils import reply
+from Thunder.utils.bot_utils import get_user, reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
 from Thunder.utils.human_readable import humanbytes
@@ -48,6 +48,19 @@ from Thunder.utils.speedtest import run_speedtest
 from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
+
+_MARKDOWN_ESCAPE_TRANS = str.maketrans({
+    "\\": "\\\\",
+    "_": "\\_",
+    "*": "\\*",
+    "[": "\\[",
+    "]": "\\]",
+    "`": "\\`",
+})
+
+
+def _escape_markdown(text: str) -> str:
+    return text.translate(_MARKDOWN_ESCAPE_TRANS)
 
 
 @StreamBot.on_message(filters.command("users") & owner_filter)
@@ -236,12 +249,10 @@ async def list_authorized_command(client: Client, message: Message):
     for i, user in enumerate(users, 1):
         display_name = "Unknown"
         try:
-            try:
-                tg_user = await client.get_users(user['user_id'])
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                tg_user = await client.get_users(user['user_id'])
-            display_name = f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
+            tg_user = await get_user(client, user['user_id'])
+            if tg_user is not None:
+                raw_display_name = f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
+                display_name = _escape_markdown(raw_display_name)
         except Exception:
             logger.error("Failed to fetch tg_user for user_id=%s", user['user_id'], exc_info=True)
 
