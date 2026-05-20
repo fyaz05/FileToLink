@@ -234,8 +234,21 @@ async def list_authorized_command(client: Client, message: Message):
     
     text = MSG_ADMIN_AUTH_LIST_HEADER
     for i, user in enumerate(users, 1):
+        display_name = "Unknown"
+        try:
+            try:
+                tg_user = await client.get_users(user['user_id'])
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                tg_user = await client.get_users(user['user_id'])
+            display_name = f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
+        except Exception:
+            logger.error("Failed to fetch tg_user for user_id=%s", user['user_id'], exc_info=True)
+
         text += MSG_AUTH_USER_INFO.format(
-            i=i, user_id=user['user_id'],
+            i=i,
+            display_name=display_name,
+            user_id=user['user_id'],
             authorized_by=user['authorized_by'],
             auth_time=user['authorized_at']
         )
