@@ -1,35 +1,35 @@
-# Thunder/utils/broadcast.py
-
 import asyncio
 import os
 import time
 
-from pyrogram.client import Client
-from pyrogram.enums import ParseMode
-from pyrogram.errors import (ChatWriteForbidden, FloodWait, PeerIdInvalid, UserDeactivated,
-                             UserIsBlocked, ChannelInvalid, InputUserDeactivated)
-from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            Message)
+import pytdbot
+from pytdbot import types
 
 from Thunder.utils.database import db
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
-    MSG_INVALID_BROADCAST_CMD,
+    MSG_BROADCAST_COMPLETE,
     MSG_BROADCAST_START,
     MSG_BUTTON_CANCEL_BROADCAST,
-    MSG_BROADCAST_COMPLETE
+    MSG_INVALID_BROADCAST_CMD,
 )
 from Thunder.utils.time_format import get_readable_time
 
-
 broadcast_ids = {}
 
-async def broadcast_message(client: Client, message: Message, mode: str = "all"):
-    if not message.reply_to_message:
+
+async def broadcast_message(client: pytdbot.Client, message: types.Message, mode: str = "all"):
+    reply_to = getattr(message, "reply_to", None)
+    replied_msg = None
+    if reply_to and hasattr(reply_to, "message_id"):
+        replied_msg = await client.getMessage(
+            chat_id=message.chat_id, message_id=reply_to.message_id
+        )
+        if isinstance(replied_msg, types.Error):
+            replied_msg = None
+
+    if not replied_msg:
         try:
-            await message.reply_text(MSG_INVALID_BROADCAST_CMD)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
             await message.reply_text(MSG_INVALID_BROADCAST_CMD)
         except Exception as e:
             logger.error(f"Error sending invalid broadcast message: {e}", exc_info=True)
@@ -39,23 +39,21 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
     stats = {"total": 0, "success": 0, "failed": 0, "deleted": 0, "cancelled": False}
     broadcast_ids[broadcast_id] = stats
 
+    cancel_button = types.InlineKeyboardButton(
+        text=MSG_BUTTON_CANCEL_BROADCAST,
+        type=types.InlineKeyboardButtonTypeCallback(data=f"cancel_{broadcast_id}".encode())
+    )
     try:
         status_msg = await message.reply_text(
             MSG_BROADCAST_START,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}")
-            ]])
-        )
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        status_msg = await message.reply_text(
-            MSG_BROADCAST_START,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}")
-            ]])
+            reply_markup=types.ReplyMarkupInlineKeyboard(rows=[[cancel_button]])
         )
     except Exception as e:
         logger.error(f"Error starting broadcast: {e}", exc_info=True)
+        del broadcast_ids[broadcast_id]
+        return
+
+    if isinstance(status_msg, types.Error):
         del broadcast_ids[broadcast_id]
         return
 
@@ -73,18 +71,10 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             cursor = await db.get_all_users()
     except Exception as e:
         logger.error(f"Error getting user cursor for mode '{mode}': {e}", exc_info=True)
-        try:
-            await status_msg.edit_text(f"❌ **Broadcast Failed:** Unable to fetch users for mode '{mode}'.")
-        except Exception:
-            pass
         del broadcast_ids[broadcast_id]
         return
-    
+
     if stats["total"] == 0:
-        try:
-            await status_msg.edit_text(f"ℹ️ **No users found for broadcast mode:** `{mode}`")
-        except Exception:
-            pass
         del broadcast_ids[broadcast_id]
         return
 
@@ -95,69 +85,32 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
 
             user_id = user.get('id') or user.get('user_id')
             if not user_id:
-                logger.warning(f"Skipping user with no ID: {user}")
                 continue
 
             try:
-                success = False
-                for attempt in range(3):
-                    try:
-                        await message.reply_to_message.copy(user_id)
-                        stats["success"] += 1
-                        success = True
-                        break
-                    except FloodWait as e:
-                        if attempt < 2:
-                            await asyncio.sleep(e.value)
+                result = await client.sendCopy(
+                    chat_id=user_id,
+                    from_chat_id=message.chat_id,
+                    message_id=replied_msg.id
+                )
+                if isinstance(result, types.Error):
+                    if result.code in [400, 403]:
+                        is_authorized = await db.is_user_authorized(user_id)
+                        if not is_authorized:
+                            await db.delete_user(user_id)
+                            stats["deleted"] += 1
                         else:
-                            logger.warning(f"FloodWait persisted for user {user_id} after 3 attempts, last wait: {e.value}s")
                             stats["failed"] += 1
-                            break
-
-            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden, ChannelInvalid, InputUserDeactivated) as e:
-                if isinstance(e, ChannelInvalid):
-                    recipient_type = "Channel"
-                    reason = "invalid channel"
-                elif isinstance(e, InputUserDeactivated):
-                    recipient_type = "User"
-                    reason = "deactivated account"
-                elif isinstance(e, UserIsBlocked):
-                    recipient_type = "User"
-                    reason = "blocked the bot"
-                elif isinstance(e, UserDeactivated):
-                    recipient_type = "User"
-                    reason = "deactivated account"
-                elif isinstance(e, PeerIdInvalid):
-                    recipient_type = "Recipient"
-                    reason = "invalid ID"
-                elif isinstance(e, ChatWriteForbidden):
-                    recipient_type = "Chat"
-                    reason = "write forbidden"
+                    else:
+                        stats["failed"] += 1
                 else:
-                    recipient_type = "Recipient"
-                    reason = f"error: {type(e).__name__}"
-
-                logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
-
-                is_authorized = await db.is_user_authorized(user_id)
-                if not is_authorized:
-                    await db.delete_user(user_id)
-                    stats["deleted"] += 1
-                else:
-                    stats["failed"] += 1
-
+                    stats["success"] += 1
             except Exception as e:
                 logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
                 stats["failed"] += 1
 
         try:
             await status_msg.delete()
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
         except Exception as e:
             logger.debug(f"Could not delete status message: {e}")
 
@@ -168,18 +121,12 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             failures=stats["failed"],
             deleted_accounts=stats["deleted"]
         )
-        
+
         if stats["cancelled"]:
             completion_msg = "🛑 **Broadcast Cancelled**\n\n" + completion_msg
-        
+
         try:
-            await message.reply_text(completion_msg, parse_mode=ParseMode.MARKDOWN)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try:
-                await message.reply_text(completion_msg, parse_mode=ParseMode.MARKDOWN)
-            except Exception as e:
-                logger.error(f"Failed to send completion message after FloodWait: {e}", exc_info=True)
+            await message.reply_text(completion_msg)
         except Exception as e:
             logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 

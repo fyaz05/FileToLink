@@ -1,10 +1,10 @@
+aiofiles>=25.1.0
 aiohttp
 cloudscraper
 Jinja2
-pyrofork
+pytdbot[tdjson]
 pymongo
-psutil
+psutil>=5.9
 python-dotenv
 speedtest-cli
-tgcrypto
-uvloop==0.21.0
+uvloop>=0.21,<0.22; sys_platform != 'win32'

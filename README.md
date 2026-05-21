@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
-  <a href="https://github.com/Mayuri-Chan/pyrofork"><img src="https://img.shields.io/badge/Pyrofork-red?style=for-the-badge" alt="Pyrofork"></a>
+  <a href="https://github.com/pytdbot/client"><img src="https://img.shields.io/badge/Pytdbot(TDLib)-blue?style=for-the-badge" alt="Pytdbot"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fyaz05/FileToLink?style=for-the-badge&color=green" alt="License"></a>
   <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
 </p>
@@ -263,9 +263,9 @@ Thunder implements a sophisticated multi-tier rate limiting system designed for 
 
 #### **Smart Queue Management**
 
-- **Automatic Re-queuing**: Failed requests due to rate limits are intelligently re-queued.
+- **Automatic Re-queuing**: Failed requests due to rate limits are intelligently re-queued with exponential backoff.
 - **Queue Size Limits**: Configurable maximum queue size.
-- **Flood Protection**: Built-in protection against Telegram flood waits.
+- **Head-of-Line Blocking Avoidance**: Scans queue for ready requests to prevent blocking.
 
 ### Network Speed Testing
 
@@ -564,10 +564,9 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 ## Acknowledgments
 
-- [Pyrofork](https://github.com/Mayuri-Chan/pyrofork) - Telegram MTProto API Framework
+- [Pytdbot](https://github.com/pytdbot/client) - Telegram TDLib API Framework
 - [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
 - [PyMongo](https://github.com/mongodb/mongo-python-driver) - Asynchronous MongoDB Driver
-- [TgCrypto](https://github.com/pyrogram/tgcrypto) - High-performance cryptography library
 
 ## ⚠️ Disclaimer
 

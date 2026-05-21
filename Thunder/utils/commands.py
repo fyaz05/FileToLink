@@ -1,8 +1,9 @@
-from pyrogram.types import BotCommand
+from pytdbot import types
 
 from Thunder.bot import StreamBot
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
+
 
 def get_commands():
     command_descriptions = {
@@ -26,13 +27,20 @@ def get_commands():
         "deauthorize": "(Admin) Remove permanent access from a user",
         "listauth": "(Admin) List all authorized users"
     }
-    return [BotCommand(name, desc) for name, desc in command_descriptions.items()]
+    return [types.BotCommand(command=name, description=desc) for name, desc in command_descriptions.items()]
+
 
 async def set_commands():
     if Var.SET_COMMANDS:
         try:
             commands = get_commands()
             if commands:
-                await StreamBot.set_bot_commands(commands)
+                result = await StreamBot.setCommands(
+                    scope=types.BotCommandScopeDefault(),
+                    language_code="",
+                    commands=commands
+                )
+                if isinstance(result, types.Error):
+                    logger.error(f"Failed to set bot commands: {result.message}")
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}", exc_info=True)

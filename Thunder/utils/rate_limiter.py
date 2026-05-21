@@ -1,19 +1,21 @@
 # Thunder/utils/rate_limiter.py
 
-import time
-import math
 import asyncio
+import math
+import time
 from collections import deque
-from typing import Callable, Dict, Optional, Tuple
-from pyrogram import Client
-from pyrogram.types import Message
-from pyrogram.errors import FloodWait, RPCError
-from Thunder.utils.logger import logger
+from collections.abc import Callable
+
+import pytdbot
+from pytdbot import types
+
+from Thunder.utils.compat import _get_file_unique_id
 from Thunder.utils.database import db
+from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
+    MSG_RATE_LIMIT_QUEUE_FULL,
     MSG_RATE_LIMIT_QUEUE_PRIORITY,
     MSG_RATE_LIMIT_QUEUE_REGULAR,
-    MSG_RATE_LIMIT_QUEUE_FULL
 )
 from Thunder.vars import Var
 
@@ -26,20 +28,27 @@ class RateLimiter:
     def __init__(self):
         self.request_queue: deque = deque()
         self.priority_queue: deque = deque()
-        self.user_queue_counts: Dict[int, int] = {}
+        self.user_queue_counts: dict[int, int] = {}
 
         self.request_event: asyncio.Event = asyncio.Event()
         self.request_lock: asyncio.Lock = asyncio.Lock()
 
-        self.user_requests: Dict[int, deque] = {}
+        self.user_requests: dict[int, deque] = {}
         self.global_requests: deque = deque()
 
         self.processing_times: deque = deque(maxlen=100)
-        self.file_processing_times: Dict[str, deque] = {}
+        self.file_processing_times: dict[str, deque] = {}
         self.average_processing_time: float = 1.0
 
-        self.auth_cache: Dict[int, Tuple[bool, float]] = {}
+        self.auth_cache: dict[int, tuple[bool, float]] = {}
         self.auth_cache_ttl_seconds: int = 300
+
+        self._request_counter: int = 0
+        self._requeue_counts: dict[int, int] = {}
+        self._max_requeues: int = 5
+        self._base_requeue_delay: float = 0.5
+        self._last_cleanup: float = time.time()
+        self._cleanup_interval: float = 300.0
 
         self._initialization_error = False
         self._load_configuration()
@@ -140,20 +149,69 @@ class RateLimiter:
         return True
 
     async def _requeue_request(self, request_data: dict, queue_type: str):
+        request_id = request_data.get('request_id', id(request_data))
+        requeue_count = self._requeue_counts.get(request_id, 0)
+        user_id = request_data['user_id']
+
+        if requeue_count >= self._max_requeues:
+            logger.warning(f"Max requeues ({self._max_requeues}) reached for user {user_id}, request {request_id}, dropping.")
+            self._requeue_counts.pop(request_id, None)
+            async with self.request_lock:
+                if user_id in self.user_queue_counts:
+                    self.user_queue_counts[user_id] -= 1
+                    if self.user_queue_counts[user_id] <= 0:
+                        self.user_queue_counts.pop(user_id, None)
+            return
+
+        self._requeue_counts[request_id] = requeue_count + 1
+        delay = self._base_requeue_delay * (2 ** requeue_count)
         async with self.request_lock:
             if queue_type == "priority":
                 self.priority_queue.appendleft(request_data)
             else:
                 self.request_queue.appendleft(request_data)
             self.request_event.set()
-        logger.debug(f"Re-queued request for user {request_data['user_id']} to {queue_type} queue.")
+        logger.debug(f"Re-queued request for user {user_id} to {queue_type} queue (attempt {requeue_count + 1}, delay {delay:.1f}s).")
+        request_data['not_before'] = time.time() + delay
 
-    async def add_to_queue(self, func: Callable, user_id: int, file_identifier: Optional[str] = None, *args, **kwargs):
+    def _cleanup_stale_entries(self):
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+
+        stale_users = [
+            uid for uid, timestamps in self.user_requests.items()
+            if not timestamps
+        ]
+        for uid in stale_users:
+            del self.user_requests[uid]
+
+        stale_auth = [
+            uid for uid, (_, ts) in self.auth_cache.items()
+            if now - ts > self.auth_cache_ttl_seconds
+        ]
+        for uid in stale_auth:
+            del self.auth_cache[uid]
+
+        stale_files = [
+            fid for fid, times in self.file_processing_times.items()
+            if not times
+        ]
+        for fid in stale_files:
+            del self.file_processing_times[fid]
+
+        if stale_users or stale_auth or stale_files:
+            logger.debug(f"Cleaned up stale rate limiter entries: {len(stale_users)} users, {len(stale_auth)} auth, {len(stale_files)} files.")
+
+    async def add_to_queue(self, func: Callable, user_id: int, file_identifier: str | None = None, *args, **kwargs):
         if not self.enabled:
             await func(*args, **kwargs)
             return
 
+        self._request_counter += 1
         request_data = {
+            'request_id': self._request_counter,
             'func': func, 'user_id': user_id, 'args': args, 'kwargs': kwargs,
             'timestamp': time.time(), 'user_priority': await self.get_user_priority(user_id),
             'file_identifier': file_identifier
@@ -181,19 +239,46 @@ class RateLimiter:
             try:
                 await self.request_event.wait()
 
+                self._cleanup_stale_entries()
+
                 async with self.request_lock:
                     queue, queue_type = (self.priority_queue, "priority") if self.priority_queue else (self.request_queue, "regular")
                     if not queue:
                         self.request_event.clear()
                         continue
-                    request_data = queue.popleft()
+
+                    # Find the first ready request (not_before has passed) to avoid head-of-line blocking
+                    now = time.time()
+                    ready_idx = None
+                    earliest_not_before = None
+                    for i, req in enumerate(queue):
+                        nb = req.get('not_before', 0)
+                        if not nb or now >= nb:
+                            ready_idx = i
+                            break
+                        if earliest_not_before is None or nb < earliest_not_before:
+                            earliest_not_before = nb
+
+                    if ready_idx is not None:
+                        request_data = queue[ready_idx]
+                        del queue[ready_idx]
+                    else:
+                        # No ready requests — wait until the earliest not_before
+                        self.request_event.clear()
+                        sleep_time = max(0.1, (earliest_not_before or now) - now)
+                        try:
+                            await asyncio.wait_for(self.request_event.wait(), timeout=sleep_time)
+                        except asyncio.TimeoutError:
+                            pass
+                        self.request_event.set()
+                        continue
 
                 user_id = request_data['user_id']
+                request_id = request_data.get('request_id', id(request_data))
                 processed = False
                 if not self.is_owner(user_id):
                     if not await self.check_limits(user_id, record=True):
                         await self._requeue_request(request_data, queue_type)
-                        await asyncio.sleep(0.5)
                         continue
 
                 logger.debug(f"Processing request for user {user_id} from {queue_type} queue.")
@@ -211,14 +296,12 @@ class RateLimiter:
                         file_times.append(processing_time)
 
                     processed = True
+                    self._requeue_counts.pop(request_id, None)
 
-                except FloodWait as e:
-                    logger.warning(f"FloodWait for user {user_id}, waiting {e.value}s before re-queuing.")
-                    await asyncio.sleep(e.value)
-                    await self._requeue_request(request_data, queue_type)
                 except Exception as e:
                     logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
                     processed = True
+                    self._requeue_counts.pop(request_id, None)
                 finally:
                     async with self.request_lock:
                         if processed and user_id in self.user_queue_counts:
@@ -256,7 +339,7 @@ class RateLimiter:
         user_priority = await self.get_user_priority(user_id)
         position = -1
         queue_to_search = self.priority_queue if user_priority == 'authorized' else self.request_queue
-        
+
         for idx, req in enumerate(queue_to_search):
             if req.get('user_id') == user_id:
                 position = idx + 1
@@ -275,7 +358,7 @@ class RateLimiter:
             'bypasses_rate_limit': user_priority == 'owner'
         }
 
-    def _get_base_processing_time(self, file_identifier: Optional[str]) -> float:
+    def _get_base_processing_time(self, file_identifier: str | None) -> float:
         if file_identifier and file_identifier in self.file_processing_times:
             file_times = self.file_processing_times[file_identifier]
             if file_times:
@@ -301,21 +384,21 @@ class RateLimiter:
             return 0.0
 
         future_global_requests = deque(ts for ts in self.global_requests if ts > future_time - 60)
-        
+
         if len(future_global_requests) >= self.max_global_requests_per_minute:
             oldest_request_time = future_global_requests[0]
             reset_time = oldest_request_time + 60
             return max(0.0, reset_time - future_time)
         return 0.0
 
-    async def estimate_wait_time(self, user_id: int, file_identifier: Optional[str] = None) -> float:
+    async def estimate_wait_time(self, user_id: int, file_identifier: str | None = None) -> float:
         if self.is_owner(user_id):
             return 0.0
 
         base_processing_time = self._get_base_processing_time(file_identifier)
         min_time_per_request = self.rate_limit_period_seconds / self.max_requests_per_period if self.max_requests_per_period > 0 else 0
         effective_processing_time = max(base_processing_time, min_time_per_request)
-        
+
         if self.global_rate_limit_enabled and self.max_global_requests_per_minute > 0:
             min_time_per_global = 60 / self.max_global_requests_per_minute
             effective_processing_time = max(effective_processing_time, min_time_per_global)
@@ -336,14 +419,15 @@ async def request_executor():
     await rate_limiter.request_executor()
 
 
-async def handle_rate_limited_request(bot: Client, message: Message, handler: Callable, *args, **kwargs):
+async def handle_rate_limited_request(bot: pytdbot.Client, message: types.Message, handler: Callable, *args, **kwargs):
     rl_user_id = kwargs.pop('rl_user_id', None)
-    user_id = rl_user_id if rl_user_id is not None else (message.from_user.id if message and message.from_user else None)
+    from_id = getattr(message, "from_id", None)
+    user_id = rl_user_id if rl_user_id is not None else (from_id if from_id else None)
     if not isinstance(user_id, int):
         logger.error(f"Invalid user_id provided for rate limiting: {user_id}")
         return
 
-    file_identifier = message.document.file_unique_id if message and message.document else None
+    file_identifier = _get_file_unique_id(message) if message else None
 
     if rate_limiter.is_owner(user_id):
         logger.debug(f"Owner {user_id} bypassing rate limit.")
@@ -380,40 +464,44 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler: Ca
             await send_queue_full_message(bot, message, file_identifier)
 
 
-async def _send_notification(bot: Client, message: Message, template: str, file_identifier: Optional[str], **format_kwargs):
+async def _send_notification(bot: pytdbot.Client, message: types.Message, template: str, file_identifier: str | None, **format_kwargs):
     try:
-        if message.from_user:
-            user_id = message.from_user.id
-            wait_seconds = await rate_limiter.estimate_wait_time(user_id, file_identifier)
-            wait_estimate = max(1, math.ceil(wait_seconds / 60))
-
-            text = template.format(wait_estimate=wait_estimate, s="s" if wait_estimate > 1 else "", **format_kwargs)
-
-            try:
-                return await bot.send_message(
-                    chat_id=message.chat.id,
-                    text=text,
-                    reply_to_message_id=message.id
-                )
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                return await bot.send_message(
-                    chat_id=message.chat.id,
-                    text=text,
-                    reply_to_message_id=message.id
-                )
-        else:
-            logger.debug("Skipping notification for channel message (no from_user)")
+        from_id = getattr(message, "from_id", None)
+        if not from_id:
+            logger.debug("Skipping notification for channel message (no from_id)")
             return None
-    except (FloodWait, RPCError) as e:
-        user_id = message.from_user.id if message.from_user else "channel"
-        logger.warning(f"Error sending notification to user {user_id}: {e}")
+
+        wait_seconds = await rate_limiter.estimate_wait_time(from_id, file_identifier)
+        wait_estimate = max(1, math.ceil(wait_seconds / 60))
+
+        text = template.format(wait_estimate=wait_estimate, s="s" if wait_estimate > 1 else "", **format_kwargs)
+
+        for attempt in range(3):
+            result = await bot.sendTextMessage(
+                chat_id=message.chat_id,
+                text=text,
+                reply_to_message_id=message.id
+            )
+            if not isinstance(result, types.Error):
+                return result
+
+            if hasattr(result, "code") and result.code == 429:
+                retry_after = getattr(result, "retry_after", 5)
+                logger.warning(f"FloodWait on notification for user {from_id}, retrying in {retry_after}s (attempt {attempt + 1})")
+                await asyncio.sleep(retry_after)
+            else:
+                logger.warning(f"Error sending notification to user {from_id}: {result}")
+                return None
+
+        logger.warning(f"Failed to send notification to user {from_id} after 3 attempts")
+        return None
     except Exception as e:
-        logger.error(f"Unexpected error sending notification: {e}", exc_info=True)
+        from_id = getattr(message, "from_id", "channel")
+        logger.warning(f"Error sending notification to user {from_id}: {e}")
     return None
 
 
-async def send_queue_notification(bot: Client, message: Message, is_priority: bool, file_identifier: Optional[str]):
+async def send_queue_notification(bot: pytdbot.Client, message: types.Message, is_priority: bool, file_identifier: str | None):
     if is_priority:
         template = MSG_RATE_LIMIT_QUEUE_PRIORITY
         params = {}
@@ -426,12 +514,12 @@ async def send_queue_notification(bot: Client, message: Message, is_priority: bo
             "s1": "s" if rate_limiter.max_requests_per_period > 1 else "",
             "s2": "s" if time_window > 1 else ""
         }
-    user_id = message.from_user.id if message.from_user else "channel"
-    logger.debug(f"Sending {'priority' if is_priority else 'regular'} queue notification to user {user_id}")
+    from_id = getattr(message, "from_id", "channel")
+    logger.debug(f"Sending {'priority' if is_priority else 'regular'} queue notification to user {from_id}")
     return await _send_notification(bot, message, template, file_identifier, **params)
 
 
-async def send_queue_full_message(bot: Client, message: Message, file_identifier: Optional[str]):
-    user_id = message.from_user.id if message.from_user else "channel"
-    logger.debug(f"Sending queue full message to user {user_id}")
+async def send_queue_full_message(bot: pytdbot.Client, message: types.Message, file_identifier: str | None):
+    from_id = getattr(message, "from_id", "channel")
+    logger.debug(f"Sending queue full message to user {from_id}")
     await _send_notification(bot, message, MSG_RATE_LIMIT_QUEUE_FULL, file_identifier)

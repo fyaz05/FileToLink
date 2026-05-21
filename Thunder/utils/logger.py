@@ -1,11 +1,11 @@
 # Thunder/utils/logger.py
 
+import atexit
 import logging
-from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 import os
 import queue
-import atexit
 import sys
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -13,7 +13,7 @@ LOG_FILE = os.path.join(LOG_DIR, 'bot.txt')
 
 logging._srcfile = None
 logging.logThreads = 0
-logging.logProcesses = 0 
+logging.logProcesses = 0
 
 log_queue = queue.Queue(maxsize=10000)
 

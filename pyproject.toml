@@ -1,0 +1,56 @@
+[project]
+name = "thunder-f2l"
+version = "2.1.0"
+description = "High-performance Telegram File-to-Link Bot for direct downloads and streaming"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.13"
+authors = [{ name = "fyaz05" }]
+homepage = "https://github.com/fyaz05/FileToLink"
+repository = "https://github.com/fyaz05/FileToLink"
+
+dependencies = [
+    "aiohttp>=3.9",
+    "cloudscraper>=1.2",
+    "jinja2>=3.1",
+    "pytdbot[tdjson]>=0.9",
+    "pymongo>=4.7",
+    "psutil>=5.9",
+    "python-dotenv>=1.0",
+    "speedtest-cli>=2.1",
+    "uvloop>=0.21,<0.22; sys_platform != 'win32'",
+    "aiofiles>=25.1.0",
+]
+
+[project.scripts]
+thunder = "Thunder.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.4", "pyright>=1.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["Thunder"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["Thunder"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+reportMissingModuleSource = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

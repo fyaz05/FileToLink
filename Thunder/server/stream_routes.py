@@ -1,4 +1,4 @@
-# Thunder/server/stream_routes.py
+from __future__ import annotations
 
 import re
 import secrets
@@ -6,19 +6,22 @@ import time
 from urllib.parse import quote, unquote
 
 from aiohttp import web
+from pytdbot import types
 
-from Thunder import __version__, StartTime
+from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.server.exceptions import FileNotFound, InvalidHash
+from Thunder.server.exceptions import FileNotFound, InvalidHash, RateLimited
 from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.canonical_files import (
     PUBLIC_HASH_LENGTH,
     get_file_by_hash,
     update_cached_file_id,
 )
+from Thunder.utils.compat import _get_media_file
 from Thunder.utils.custom_dl import ByteStreamer
-from Thunder.utils.file_properties import get_media
 from Thunder.utils.logger import logger
+from Thunder.utils.media_helpers import _get_extension_for_content_type
+from Thunder.utils.metrics import get_metrics_text
 from Thunder.utils.render_template import render_media_page, render_page
 from Thunder.utils.time_format import get_readable_time
 from Thunder.vars import Var
@@ -36,14 +39,8 @@ VALID_HASH_REGEX = re.compile(r'^[a-zA-Z0-9_-]+$')
 VALID_PUBLIC_HASH_REGEX = re.compile(rf'^[0-9a-f]{{{PUBLIC_HASH_LENGTH}}}$')
 VALID_DISPOSITIONS = {"inline", "attachment"}
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-    "Access-Control-Allow-Headers": "Range, Content-Type, *",
-    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
-}
-
 streamers = {}
+_cached_bot_username: str | None = None
 
 
 def get_streamer(client_id: int) -> ByteStreamer:
@@ -92,8 +89,7 @@ def validate_public_hash(public_hash: str) -> str:
 def select_optimal_client() -> tuple[int, ByteStreamer]:
     if not work_loads:
         raise web.HTTPInternalServerError(
-            text=("No available clients to handle the request. "
-                  "Please try again later."))
+            text="No available clients to handle the request. Please try again later.")
 
     available_clients = [
         (cid, load) for cid, load in work_loads.items()
@@ -101,9 +97,10 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
 
     if available_clients:
         client_id = min(available_clients, key=lambda x: x[1])[0]
-    else:
-        client_id = min(work_loads, key=work_loads.get)
+        return client_id, get_streamer(client_id)
 
+    # Graceful degradation: pick least-loaded even at capacity
+    client_id = min(work_loads.items(), key=lambda x: x[1])[0]
     return client_id, get_streamer(client_id)
 
 
@@ -150,15 +147,37 @@ def _resolve_unique_id(file_info: dict) -> str:
     return unique_id
 
 
-def _resolve_filename(file_info: dict, mime_type: str) -> str:
+def _resolve_filename(file_info: dict) -> str:
     filename = file_info.get("file_name")
     if filename:
         return filename
 
-    ext = mime_type.split('/')[-1] if '/' in mime_type else 'bin'
-    ext_map = {'jpeg': 'jpg', 'mpeg': 'mp3', 'octet-stream': 'bin'}
-    ext = ext_map.get(ext, ext)
+    content_type = file_info.get("media_type", "")
+    ext = _get_extension_for_content_type(content_type).lstrip(".")
     return f"file_{secrets.token_hex(4)}.{ext}"
+
+
+async def _get_cached_bot_username() -> str:
+    global _cached_bot_username
+    if _cached_bot_username:
+        return _cached_bot_username
+    me = await StreamBot.getMe()
+    if isinstance(me, types.Error):
+        return "unknown"
+    if hasattr(me, "usernames") and me.usernames:
+        _cached_bot_username = me.usernames.editable_username or "unknown"
+    else:
+        _cached_bot_username = getattr(me, "username", "unknown")
+    return _cached_bot_username
+
+
+def _require_admin_token(request: web.Request) -> None:
+    admin_token = getattr(Var, "ADMIN_TOKEN", "")
+    if not admin_token:
+        return
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header != f"Bearer {admin_token}":
+        raise web.HTTPUnauthorized(text="Missing or invalid authorization token.")
 
 
 async def _serve_media_response(
@@ -169,7 +188,8 @@ async def _serve_media_response(
     client_id: int,
     media_ref: int | str,
     fallback_message_id: int | None = None,
-    on_fallback_message=None
+    on_fallback_message=None,
+    extra_headers: dict | None = None,
 ):
     file_size = int(file_info.get('file_size', 0) or 0)
     if file_size == 0:
@@ -183,7 +203,7 @@ async def _serve_media_response(
         range_header = ""
 
     mime_type = file_info.get('mime_type') or 'application/octet-stream'
-    filename = _resolve_filename(file_info, mime_type)
+    filename = _resolve_filename(file_info)
     disposition = get_content_disposition(request)
 
     headers = {
@@ -194,12 +214,11 @@ async def _serve_media_response(
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000",
         "Connection": "keep-alive",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Range, Content-Type, *",
-        "Access-Control-Expose-Headers": (
-            "Content-Length, Content-Range, Content-Disposition"),
         "X-Content-Type-Options": "nosniff"
     }
+
+    if extra_headers:
+        headers.update(extra_headers)
 
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
@@ -214,8 +233,6 @@ async def _serve_media_response(
     async def stream_generator():
         try:
             bytes_sent = 0
-            bytes_to_skip = start % CHUNK_SIZE
-
             async for chunk in streamer.stream_file(
                 media_ref,
                 offset=start,
@@ -223,21 +240,12 @@ async def _serve_media_response(
                 fallback_message_id=fallback_message_id,
                 on_fallback_message=on_fallback_message
             ):
-                if bytes_to_skip > 0:
-                    if len(chunk) <= bytes_to_skip:
-                        bytes_to_skip -= len(chunk)
-                        continue
-                    chunk = chunk[bytes_to_skip:]
-                    bytes_to_skip = 0
-
                 remaining = content_length - bytes_sent
                 if len(chunk) > remaining:
                     chunk = chunk[:remaining]
-
                 if chunk:
                     yield chunk
                     bytes_sent += len(chunk)
-
                 if bytes_sent >= content_length:
                     break
         finally:
@@ -255,47 +263,37 @@ async def root_redirect(request):
     raise web.HTTPFound("https://github.com/fyaz05/FileToLink")
 
 
-@routes.get("/status", allow_head=True)
-async def status_endpoint(request):
-    uptime = time.time() - StartTime
-    total_load = sum(work_loads.values())
+@routes.get("/health", allow_head=True)
+async def health_endpoint(request):
+    return web.json_response({"status": "ok"})
 
-    workload_distribution = {str(k): v for k, v in sorted(work_loads.items())}
 
-    return web.json_response(
-        {
-            "server": {
-                "status": "operational",
-                "version": __version__,
-                "uptime": get_readable_time(uptime)
-            },
-            "telegram_bot": {
-                "username": f"@{StreamBot.username}",
-                "active_clients": len(multi_clients)
-            },
-            "resources": {
-                "total_workload": total_load,
-                "workload_distribution": workload_distribution
-            }
-        },
-        headers={"Access-Control-Allow-Origin": "*"}
+@routes.get("/metrics", allow_head=True)
+async def metrics_endpoint(request):
+    _require_admin_token(request)
+    return web.Response(
+        text=get_metrics_text(),
+        content_type="text/plain; version=0.0.4",
     )
 
 
-@routes.options("/status")
-async def status_options(request: web.Request):
-    return web.Response(headers={
-        **CORS_HEADERS,
-        "Access-Control-Max-Age": "86400"
-    })
+@routes.get("/status", allow_head=True)
+async def status_endpoint(request):
+    _require_admin_token(request)
+    uptime = time.time() - StartTime
+    total_load = sum(work_loads.values())
+    workload_distribution = {str(k): v for k, v in sorted(work_loads.items())}
+    bot_username = await _get_cached_bot_username()
 
-
-@routes.options(r"/{path:.+}")
-async def media_options(request: web.Request):
-    return web.Response(headers={
-        **CORS_HEADERS,
-        "Access-Control-Max-Age": "86400"
-    })
+    return web.json_response(
+        {
+            "status": "operational",
+            "version": __version__,
+            "uptime": get_readable_time(uptime),
+            "active_clients": len(multi_clients),
+            "total_workload": total_load,
+        }
+    )
 
 
 @routes.get(r"/watch/f/{secure_hash}/{name:.+}", allow_head=True)
@@ -313,22 +311,16 @@ async def canonical_media_preview(request: web.Request):
         response = web.Response(
             text=rendered_page,
             content_type='text/html',
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type, *",
-                "X-Content-Type-Options": "nosniff",
-            }
+            headers={"X-Content-Type-Options": "nosniff"}
         )
         response.enable_compression()
         return response
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Canonical preview error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Canonical preview error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"Server error occurred: {error_id}") from e
+        raise web.HTTPInternalServerError(text=f"Server error: {error_id}") from e
 
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
@@ -336,32 +328,23 @@ async def media_preview(request: web.Request):
     try:
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
-
-        rendered_page = await render_page(
-            message_id, secure_hash, requested_action='stream')
+        rendered_page = await render_page(message_id, secure_hash, requested_action='stream')
 
         response = web.Response(
             text=rendered_page,
             content_type='text/html',
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type, *",
-                "X-Content-Type-Options": "nosniff",
-            }
+            headers={"X-Content-Type-Options": "nosniff"}
         )
         response.enable_compression()
         return response
-
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(
-            f"Client error in preview: {type(e).__name__} - {e}",
-            exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
+    except RateLimited as e:
+        raise web.HTTPTooManyRequests(text=str(e)) from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Preview error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"Server error occurred: {error_id}") from e
+        raise web.HTTPInternalServerError(text=f"Server error: {error_id}") from e
 
 
 @routes.get(r"/f/{secure_hash}/{name:.+}", allow_head=True)
@@ -373,27 +356,24 @@ async def canonical_media_delivery(request: web.Request):
             raise FileNotFound("Canonical file not found")
 
         client_id, streamer = select_optimal_client()
+        overloaded = work_loads[client_id] >= MAX_CONCURRENT_PER_CLIENT
         work_loads[client_id] += 1
+        extra_headers = {"Retry-After": "5"} if overloaded else None
+
+        media_ref = int(file_record["canonical_message_id"])
+        fallback_message_id = int(file_record["canonical_message_id"])
+
+        async def persist_refreshed_file_id(message):
+            if client_id != 0:
+                return
+            new_file_id = getattr(message, "remote_file_id", None)
+            if new_file_id and new_file_id != file_record.get("file_id"):
+                try:
+                    await update_cached_file_id(file_record, new_file_id)
+                except Exception as e:
+                    logger.warning(f"Failed to refresh cached file_id for {secure_hash}: {e}", exc_info=True)
 
         try:
-            _resolve_unique_id(file_record)
-            media_ref = int(file_record["canonical_message_id"])
-            fallback_message_id = int(file_record["canonical_message_id"])
-
-            async def persist_refreshed_file_id(message):
-                if client_id != 0:
-                    return
-                media = get_media(message)
-                new_file_id = getattr(media, "file_id", None) if media else None
-                if new_file_id and new_file_id != file_record.get("file_id"):
-                    try:
-                        await update_cached_file_id(file_record, new_file_id)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to refresh cached file_id for canonical file {secure_hash}: {e}",
-                            exc_info=True
-                        )
-
             return await _serve_media_response(
                 request,
                 file_info=file_record,
@@ -401,25 +381,21 @@ async def canonical_media_delivery(request: web.Request):
                 client_id=client_id,
                 media_ref=media_ref,
                 fallback_message_id=fallback_message_id,
-                on_fallback_message=persist_refreshed_file_id
+                on_fallback_message=persist_refreshed_file_id,
+                extra_headers=extra_headers,
             )
         except (FileNotFound, InvalidHash):
             work_loads[client_id] -= 1
             raise
-        except Exception as e:
+        except Exception:
             work_loads[client_id] -= 1
-            error_id = secrets.token_hex(6)
-            logger.error(f"Canonical stream error {error_id}: {e}", exc_info=True)
-            raise web.HTTPInternalServerError(
-                text=f"Server error during streaming: {error_id}") from e
+            raise
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Canonical client error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
-        logger.error(f"Canonical server error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}") from e
+        logger.error(f"Canonical stream error {error_id}: {e}", exc_info=True)
+        raise web.HTTPInternalServerError(text=f"Server error: {error_id}") from e
 
 
 @routes.get(r"/{path:.+}", allow_head=True)
@@ -429,41 +405,36 @@ async def media_delivery(request: web.Request):
         message_id, secure_hash = parse_media_request(path, request.query)
 
         client_id, streamer = select_optimal_client()
-
+        overloaded = work_loads[client_id] >= MAX_CONCURRENT_PER_CLIENT
         work_loads[client_id] += 1
+        extra_headers = {"Retry-After": "5"} if overloaded else None
 
         try:
             file_info = await streamer.get_file_info(message_id)
             unique_id = _resolve_unique_id(file_info)
 
             if unique_id[:SECURE_HASH_LENGTH] != secure_hash:
-                raise InvalidHash(
-                    "Provided hash does not match file's unique ID.")
+                raise InvalidHash("Provided hash does not match file's unique ID.")
+
             return await _serve_media_response(
                 request,
                 file_info=file_info,
                 streamer=streamer,
                 client_id=client_id,
-                media_ref=message_id
+                media_ref=message_id,
+                extra_headers=extra_headers,
             )
-
         except (FileNotFound, InvalidHash):
             work_loads[client_id] -= 1
             raise
-        except Exception as e:
+        except Exception:
             work_loads[client_id] -= 1
-            error_id = secrets.token_hex(6)
-            logger.error(
-                f"Stream error {error_id}: {e}",
-                exc_info=True)
-            raise web.HTTPInternalServerError(
-                text=f"Server error during streaming: {error_id}") from e
-
+            raise
     except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}") from e
+        raise web.HTTPInternalServerError(text=f"Server error: {error_id}") from e
+
+

@@ -26,3 +26,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+Thunder/logs/
+.pytest_cache/
+tdlib_data/

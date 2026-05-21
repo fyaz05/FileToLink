@@ -5,3 +5,6 @@ class InvalidHash(Exception):
 
 class FileNotFound(Exception):
     pass
+
+class RateLimited(Exception):
+    pass

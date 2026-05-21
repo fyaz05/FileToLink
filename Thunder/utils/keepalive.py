@@ -1,9 +1,12 @@
 # Thunder/utils/keepalive.py
 
 import asyncio
+
 import aiohttp
-from Thunder.vars import Var
+
 from Thunder.utils.logger import logger
+from Thunder.vars import Var
+
 
 async def ping_server():
     try:

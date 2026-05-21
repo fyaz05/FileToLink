@@ -1,14 +1,15 @@
 # Thunder/utils/tokens.py
 
-import secrets
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
 import asyncio
 import random
-import pyrogram.errors
+import secrets
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from Thunder.utils.database import db
-from Thunder.vars import Var
 from Thunder.utils.logger import logger
+from Thunder.vars import Var
+
 
 async def check(user_id: int) -> bool:
     try:
@@ -19,7 +20,7 @@ async def check(user_id: int) -> bool:
         if user_id == Var.OWNER_ID:
             logger.debug("Owner access granted")
             return True
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         auth_result = await db.authorized_users_col.find_one(
             {"user_id": user_id},
             {"_id": 1}
@@ -41,7 +42,7 @@ async def generate(user_id: int) -> str:
     try:
         logger.debug(f"Token generation started for user: {user_id}")
         existing_token_doc = await db.token_col.find_one(
-            {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.utcnow()}},
+            {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.now(UTC)}},
             {"token": 1}
         )
         if existing_token_doc:
@@ -55,7 +56,7 @@ async def generate(user_id: int) -> str:
         for attempt in range(max_retries):
             try:
                 ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
-                created_at = datetime.utcnow()
+                created_at = datetime.now(UTC)
                 expires_at = created_at + timedelta(hours=ttl_hours)
                 await db.save_main_token(
                     user_id=user_id,
@@ -66,9 +67,6 @@ async def generate(user_id: int) -> str:
                 )
                 logger.debug(f"New token generated and saved successfully for user: {user_id}")
                 return token_str
-            except pyrogram.errors.RPCError as e:
-                logger.error(f"Telegram API error while generating new token for user {user_id}: {e}", exc_info=True)
-                raise
             except Exception as e:
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
@@ -98,7 +96,7 @@ async def authorize(user_id: int, authorized_by: int) -> bool:
         auth_data = {
             "user_id": user_id,
             "authorized_by": authorized_by,
-            "authorized_at": datetime.utcnow()
+            "authorized_at": datetime.now(UTC)
         }
         await db.authorized_users_col.update_one(
             {"user_id": user_id},
@@ -118,14 +116,14 @@ async def deauthorize(user_id: int) -> bool:
         logger.error(f"Error in deauthorize for user {user_id}: {e}", exc_info=True)
         raise
 
-async def get_user(user_id: int) -> Optional[Dict[str, Any]]:
+async def get_user(user_id: int) -> dict[str, Any] | None:
     try:
         return await db.token_col.find_one({"user_id": user_id})
     except Exception as e:
         logger.error(f"Error in get_user for user {user_id}: {e}", exc_info=True)
         return None
 
-async def list_allowed() -> List[Dict[str, Any]]:
+async def list_allowed() -> list[dict[str, Any]]:
     try:
         cursor = db.authorized_users_col.find(
             {},
@@ -136,9 +134,9 @@ async def list_allowed() -> List[Dict[str, Any]]:
         logger.error(f"Error in list_allowed: {e}", exc_info=True)
         return []
 
-async def list_tokens() -> List[Dict[str, Any]]:
+async def list_tokens() -> list[dict[str, Any]]:
     try:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         cursor = db.token_col.find(
             {"expires_at": {"$gt": current_time}},
             {"user_id": 1, "expires_at": 1, "created_at": 1, "activated": 1}
@@ -150,7 +148,7 @@ async def list_tokens() -> List[Dict[str, Any]]:
 
 async def cleanup_expired_tokens() -> int:
     try:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         logger.debug("Cleaning up expired tokens")
         result = await db.token_col.delete_many({"expires_at": {"$lte": current_time}})
         logger.debug(f"Cleaned up {result.deleted_count} expired tokens")

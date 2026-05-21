@@ -1,11 +1,7 @@
-# Thunder/utils/force_channel.py
+import pytdbot
+from pytdbot import types
 
-import asyncio
-
-from pyrogram import Client
-from pyrogram.errors import FloodWait, UserNotParticipant
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-
+from Thunder.utils.compat import ChatMemberStatus, get_member_status
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_COMMUNITY_CHANNEL
 from Thunder.vars import Var
@@ -13,77 +9,104 @@ from Thunder.vars import Var
 _force_link = None
 _force_title = None
 
-async def get_force_info(bot: Client):
+
+async def get_force_info(bot: pytdbot.Client):
     global _force_link, _force_title
-    
+
     if not Var.FORCE_CHANNEL_ID:
         return None, None
-    
+
     if _force_link is not None and _force_title is not None:
         return _force_link, _force_title
-    
+
     try:
-        try:
-            chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
+        chat = await bot.getChat(chat_id=Var.FORCE_CHANNEL_ID)
+        if isinstance(chat, types.Error):
+            logger.error(f"Force channel error: {chat.message}")
+            return None, None
         if chat:
-            _force_link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
+            invite_link = None
+            if hasattr(chat, "invite_link") and chat.invite_link:
+                invite_link = chat.invite_link
+            if not invite_link:
+                username = None
+                if hasattr(chat, "type") and isinstance(chat.type, types.ChatTypeSupergroup):
+                    username = getattr(chat.type, "supergroup_id", None)
+                invite_link = f"https://t.me/c/{username}" if username else None
+            _force_link = invite_link
             _force_title = chat.title or "Channel"
         return _force_link, _force_title
     except Exception as e:
         logger.error(f"Force channel error: {e}", exc_info=True)
         return None, None
 
-async def force_channel_check(client: Client, message: Message):
+
+async def force_channel_check(client: pytdbot.Client, message: types.Message):
     if not Var.FORCE_CHANNEL_ID:
         return True
-    
-    if message.from_user is None:
+
+    from_id = getattr(message, "from_id", None)
+    if from_id is None:
         return True
 
     try:
-        while True:
-            try:
-                member = await client.get_chat_member(Var.FORCE_CHANNEL_ID, message.from_user.id)
-                if member is None:
-                    logger.error(f"Failed to get chat member for {message.from_user.id} in force channel {Var.FORCE_CHANNEL_ID} after retries.")
-                    return False
-                return True
-            except FloodWait as e:
-                logger.debug(f"FloodWait in force_channel_check, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-    except UserNotParticipant:
-        link, title = await get_force_info(client)
-        if link and title:
-            try:
-                await message.reply_text(
-                    MSG_COMMUNITY_CHANNEL.format(channel_title=title),
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Join", url=link)
-                    ]])
+        member = await client.getChatMember(
+            chat_id=Var.FORCE_CHANNEL_ID,
+            member_id=types.MessageSenderUser(user_id=from_id)
+        )
+        if isinstance(member, types.Error):
+            if member.code != 404:
+                logger.error(f"Error checking force channel: {member.message}")
+                return False
+
+        if isinstance(member, types.Error):
+            link, title = await get_force_info(client)
+            if link and title:
+                button = types.InlineKeyboardButton(
+                    text="Join",
+                    type=types.InlineKeyboardButtonTypeUrl(url=link)
                 )
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await message.reply_text(
-                    MSG_COMMUNITY_CHANNEL.format(channel_title=title),
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Join", url=link)
-                    ]])
+                try:
+                    await message.reply_text(
+                        MSG_COMMUNITY_CHANNEL.format(channel_title=title),
+                        reply_markup=types.ReplyMarkupInlineKeyboard(rows=[[button]])
+                    )
+                except Exception:
+                    logger.debug(f"Failed to send force channel join prompt to user {from_id}")
+            else:
+                try:
+                    await message.reply_text("You must join the channel to use this bot.")
+                except Exception:
+                    logger.debug(f"Failed to send plain join channel message to user {from_id}")
+            return False
+
+        status = get_member_status(member)
+        if status in [ChatMemberStatus.LEFT, ChatMemberStatus.BANNED]:
+            link, title = await get_force_info(client)
+            if link and title:
+                button = types.InlineKeyboardButton(
+                    text="Join",
+                    type=types.InlineKeyboardButtonTypeUrl(url=link)
                 )
-        else:
-            try:
-                await message.reply_text("You must join the channel to use this bot.")
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await message.reply_text("You must join the channel to use this bot.")
-        return False
+                try:
+                    await message.reply_text(
+                        MSG_COMMUNITY_CHANNEL.format(channel_title=title),
+                        reply_markup=types.ReplyMarkupInlineKeyboard(rows=[[button]])
+                    )
+                except Exception:
+                    logger.debug(f"Failed to send force channel join prompt to user {from_id} (left/banned)")
+            else:
+                try:
+                    await message.reply_text("You must join the channel to use this bot.")
+                except Exception:
+                    logger.debug(f"Failed to send plain join channel message to user {from_id} (left/banned)")
+            return False
+
+        return True
     except Exception as e:
         logger.error(f"Error checking force channel: {e}", exc_info=True)
         try:
-            await message.reply_text("An unexpected error occurred while checking channel membership. Please try again.")
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await message.reply_text("An unexpected error occurred while checking channel membership. Please try again.")
+            await message.reply_text("An unexpected error occurred while checking channel membership.")
+        except Exception:
+            logger.debug(f"Failed to send unexpected error message to user {from_id}")
         return False

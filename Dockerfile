@@ -10,14 +10,26 @@ RUN apt-get update && \
         git \
         build-essential \
         libssl-dev \
+        curl \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
 
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY . .
 
-CMD ["bash", "thunder.sh"]
+ENV PATH="/app/.venv/bin:$PATH"
+
+RUN addgroup --system thunder && adduser --system --ingroup thunder thunder && \
+    chown -R thunder:thunder /app
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
+
+USER thunder
+
+CMD ["python3", "-m", "Thunder"]

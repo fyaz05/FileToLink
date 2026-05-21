@@ -1,25 +1,21 @@
-# Thunder/bot/clients.py
-
 import asyncio
+import os
 
-from pyrogram import Client
-from pyrogram.errors import FloodWait
+import pytdbot
 
-from Thunder.bot import StreamBot, multi_clients, work_loads
+from Thunder.bot import StreamBot, multi_clients, work_loads, _ENCRYPTION_KEY
 from Thunder.utils.config_parser import TokenParser
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
 
+
 async def cleanup_clients():
     for client in multi_clients.values():
         try:
-            try:
-                await client.stop()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.stop()
+            await client.stop()
         except Exception as e:
             logger.error(f"Error stopping client: {e}", exc_info=True)
+
 
 async def initialize_clients():
     print("╠══════════════════ INITIALIZING CLIENTS ═══════════════════╣")
@@ -40,21 +36,17 @@ async def initialize_clients():
         try:
             if client_id == len(all_tokens):
                 await asyncio.sleep(2)
-            client = Client(
-                api_hash=Var.API_HASH,
+            client = pytdbot.Client(
+                token=token,
                 api_id=Var.API_ID,
-                bot_token=token,
-                in_memory=True,
-                name=str(client_id),
+                api_hash=Var.API_HASH,
+                files_directory=os.path.join("tdlib_data", str(client_id)),
+                database_encryption_key=_ENCRYPTION_KEY,
                 no_updates=True,
-                max_concurrent_transmissions=1000,
-                sleep_threshold=Var.SLEEP_THRESHOLD
+                workers=Var.WORKERS,
+                td_verbosity=0,
             )
-            try:
-                await client.start()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.start()
+            await client.start()
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client
@@ -66,16 +58,16 @@ async def initialize_clients():
     clients = [client for client in clients if client]
 
     multi_clients.update(dict(clients))
-    
+
     if len(multi_clients) > 1:
         Var.MULTI_CLIENT = True
         print("╠══════════════════════ MULTI-CLIENT ═══════════════════════╣")
         print(f"   ◎ Total Clients: {len(multi_clients)} (Including primary client)")
-        
+
         print("   ▶ Initial workload distribution:")
         for client_id, load in work_loads.items():
             print(f"   • Client {client_id}: {load} tasks")
-            
+
     else:
         print("╠═══════════════════════════════════════════════════════════╣")
         print("   ▶ No additional clients were initialized")
