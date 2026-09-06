@@ -131,8 +131,11 @@ async def start_services():
     try:
         await tg_call(StreamBot.start)
         bot_info = await tg_call(StreamBot.get_me)
-        StreamBot.username = bot_info.username
-        print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
+        # pyrogram exposes Client.username dynamically (set during sign-in),
+        # so mypy cannot see it; pin it explicitly for /status consumers.
+        username = bot_info.username
+        StreamBot.username = username  # type: ignore[attr-defined]
+        print(f"   ✓ Bot initialized successfully as @{username}")
 
         await set_commands()
         print("   ✓ Bot commands set successfully.")

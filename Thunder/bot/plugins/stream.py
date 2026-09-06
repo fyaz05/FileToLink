@@ -484,7 +484,7 @@ async def process_single(
     bot: Client,
     msg: Message,
     file_msg: Message,
-    status_msg: Message,
+    status_msg: Message | None,
     shortener_val: bool,
     original_request_msg: Message | None = None,
     notification_msg: Message | None = None,

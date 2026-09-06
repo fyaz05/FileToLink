@@ -52,7 +52,7 @@ ignore = [
 [tool.mypy]
 python_version = "3.13"
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
 warn_unused_ignores = false
 exclude = ["tests/"]
 
