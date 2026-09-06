@@ -40,8 +40,7 @@ def format_link_message(links: dict[str, str]) -> str:
     text = MSG_LINKS.format(
         file_name=html.escape(str(links["media_name"])),
         file_size=links["media_size"],
-        # shortener responses are external data: escape them too, or one
-        # hostile/buggy shortener breaks Telegram entity parsing entirely
+        # shortener output is external data: escape it or entity parsing breaks
         download_link=html.escape(str(links["online_link"])),
         stream_link=html.escape(str(links["stream_link"])),
     )
@@ -180,8 +179,7 @@ async def gen_dc_txt(usr: User) -> str:
 
 
 async def get_user(cli: Client, qry: Any) -> User | None:
-    # @username stays a str; numeric strings become ints -- then one shared
-    # lookup path (the two blocks below used to be copy-pasted verbatim)
+    # @username stays a str; numeric strings become ints -- one shared lookup path
     if isinstance(qry, str) and not qry.startswith("@") and qry.isdigit():
         qry = int(qry)
     if isinstance(qry, (str, int)):
@@ -198,8 +196,7 @@ async def get_user(cli: Client, qry: Any) -> User | None:
 
 async def is_admin(cli: Client, chat_id_val: int) -> bool:
     try:
-        # cli.me is always populated after client.start(); fall back to an id
-        # that cannot match any chat member if it somehow is not.
+        # cli.me is populated after client.start(); id 0 matches no chat member
         me_id = cli.me.id if cli.me else 0
         member = await tg_call(cli.get_chat_member, chat_id_val, me_id, retries=1)
     except Exception:

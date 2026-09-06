@@ -31,9 +31,8 @@ async def get_force_info(bot: Client):
     if not Var.FORCE_CHANNEL_ID:
         return None, None
 
-    # resolved-once (a numeric channel's invite link/title does not change
-    # between messages) -- the old guard re-fetched get_chat on EVERY
-    # message whenever the channel had no link, the bot's busiest path
+    # resolved-once: a numeric channel's invite link/title does not change
+    # between messages
     if _force_resolved:
         return _force_link, _force_title
     if time.monotonic() < _negative_until:
@@ -42,9 +41,8 @@ async def get_force_info(bot: Client):
     try:
         chat = await tg_call(bot.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
         if chat:
-            # Var.FORCE_CHANNEL_ID is a numeric channel id: get_chat always
-            # resolves a full Chat there (ChatPreview only comes from link
-            # resolution), so the stub-union members are unreachable.
+            # numeric channel id: get_chat always resolves a full Chat
+            # (ChatPreview only comes from link resolution), hence the ignores
             _force_link = chat.invite_link or (  # type: ignore[union-attr]
                 f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
             )

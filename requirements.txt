@@ -1,7 +1,5 @@
-# Generated export of pyproject [project.dependencies] (H1).
-# CI sync gate: this file must stay set-equal to pyproject dependencies.
-# The Docker image consumes requirements.lock (a hash-pinned export of
-# uv.lock); this file is the human-readable direct-dependency surface.
+# Human-readable export of pyproject [project.dependencies] (H1); CI keeps this
+# set-equal to pyproject. Docker consumes requirements.lock (hash-pinned uv.lock export).
 aiohttp==3.14.3
 pyrofork==2.3.69
 tgcrypto-pyrofork==1.2.8

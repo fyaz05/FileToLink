@@ -1,8 +1,6 @@
 # Thunder/utils/messages.py
 
-# =====================================================================================
 # ====== ERROR MESSAGES ======
-# =====================================================================================
 
 # ------ General Errors ------
 MSG_ERROR_GENERIC = (
@@ -71,9 +69,7 @@ MSG_CRITICAL_ERROR = (
     "Please investigate immediately! (ID: {error_id})"
 )
 
-# =====================================================================================
 # ====== ADMIN MESSAGES ======
-# =====================================================================================
 
 # ------ Ban/Unban (HTML for reason surfaces: reason is user-controlled, M7) ------
 MSG_DECORATOR_BANNED = (
@@ -139,9 +135,7 @@ MSG_LOG_FILE_CAPTION = "📄 **System Logs**"
 MSG_LOG_FILE_EMPTY = "ℹ️ **Log File Empty:** No data found in the log file."
 MSG_LOG_FILE_MISSING = "⚠️ **Log File Missing:** Could not find the log file."
 
-# =====================================================================================
 # ====== BUTTON TEXTS (User-facing) ======
-# =====================================================================================
 
 MSG_BUTTON_STREAM_NOW = "🖥️ Stream"
 MSG_BUTTON_DOWNLOAD = "🚀 Download"
@@ -155,9 +149,7 @@ MSG_BUTTON_START_CHAT = "📩 Start Chat"
 MSG_BUTTON_CLOSE = "✖ Close"
 
 
-# =====================================================================================
 # ====== COMMAND RESPONSES (User-facing) ======
-# =====================================================================================
 
 # M7: welcome/help/about are HTML and interpolate html.escape()d values.
 MSG_WELCOME = (
@@ -262,9 +254,7 @@ MSG_LINKS = (
 MSG_FILE_EXPIRY_NOTE = "⏳ <b>Files expire after {days} of inactivity.</b>"
 MSG_FILE_TTL_DAYS_LABEL = "{days} day(s)"
 
-# =====================================================================================
 # ====== USER NOTIFICATIONS ======
-# =====================================================================================
 
 MSG_NEW_USER = (
     "✨ <b>New User Alert!</b> ✨\n"
@@ -273,9 +263,7 @@ MSG_NEW_USER = (
 )
 MSG_COMMUNITY_CHANNEL = "📢 <b>{channel_title}:</b> 🔒 Join this channel to use the bot."
 
-# =====================================================================================
 # ====== PROCESSING MESSAGES ======
-# =====================================================================================
 
 # ------ General File Processing ------
 MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
@@ -296,9 +284,7 @@ MSG_PROCESSING_RESULT = (
     "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
 )
 
-# =====================================================================================
 # ====== BROADCAST MESSAGES ======
-# =====================================================================================
 
 MSG_BROADCAST_START = "📣 **Starting Broadcast...**\n\n> ⏳ Please wait for completion."
 MSG_BROADCAST_COMPLETE = (
@@ -325,9 +311,7 @@ MSG_BROADCAST_NO_USERS = "ℹ️ **No users found for broadcast mode:** `{mode}`
 MSG_BROADCAST_CANCELLED_PREFIX = "🛑 **Broadcast Cancelled**\n\n"
 MSG_BROADCAST_PROGRESS = "📣 **Broadcasting...** ✅ {success} / {total} delivered"
 
-# =====================================================================================
 # ====== PERMISSION MESSAGES ======
-# =====================================================================================
 
 MSG_ERROR_UNAUTHORIZED = "You are not authorized to view this information."
 MSG_ERROR_BROADCAST_RESTART = "Please use the /broadcast command to start a new broadcast."
@@ -337,9 +321,7 @@ MSG_ERROR_CLOSE_NOT_ALLOWED = (
     "⚠️ Only the person who triggered this panel (or the owner) can close it."
 )
 
-# =====================================================================================
 # ====== RATE LIMITING MESSAGES ======
-# =====================================================================================
 
 MSG_RATE_LIMIT_QUEUE_PRIORITY = (
     "⚡ You're in the **Priority Queue!**\n\n"
@@ -371,9 +353,7 @@ MSG_ERROR_TOKEN_LINK_FAILED = (
 MSG_ERROR_UNEXPECTED = "Sorry, an unexpected error occurred. Please try again later."
 
 
-# =====================================================================================
 # ====== FILE TYPE DESCRIPTIONS ======
-# =====================================================================================
 MSG_FILE_TYPE_DOCUMENT = "📄 Document"
 MSG_FILE_TYPE_PHOTO = "🖼️ Photo"
 MSG_FILE_TYPE_VIDEO = "🎬 Video"
@@ -384,9 +364,7 @@ MSG_FILE_TYPE_ANIMATION = "🎞️ Animation (GIF)"
 MSG_FILE_TYPE_VIDEO_NOTE = "📹 Video Note"
 MSG_FILE_TYPE_UNKNOWN = "❓ Unknown File Type"
 
-# =====================================================================================
 # ====== SYSTEM & STATUS MESSAGES ======
-# =====================================================================================
 
 MSG_SYSTEM_STATUS = (
     "✅ **System Status:** Operational\n\n"

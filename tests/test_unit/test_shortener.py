@@ -1,4 +1,3 @@
-# tests/test_unit/test_shortener.py
 """H5b/M5: plugin registry lookup, offline builders, host validation."""
 
 import pytest

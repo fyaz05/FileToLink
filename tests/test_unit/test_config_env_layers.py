@@ -1,6 +1,4 @@
-# tests/test_unit/test_config_env_layers.py
-"""config.env.local must actually override config.env (documented precedence:
-real environment > config.env.local > config.env)."""
+"""config.env.local must override config.env (precedence: env > local > base)."""
 
 import os
 import subprocess
@@ -15,9 +13,8 @@ _PROBE = "import Thunder.vars as v; print(int(v.Var.PRIVATE_MODE), v.Var.MAX_BAT
 
 
 def _run_in(tmp_path, extra_env=None):
-    # These tests exercise the config-file layers themselves, so they must
-    # opt back OUT of the conftest's THUNDER_SKIP_CONFIG_FILES hermeticity
-    # switch before spawning the probe process.
+    # Exercises the config-file layers, so opt back OUT of the conftest's
+    # THUNDER_SKIP_CONFIG_FILES hermeticity switch before spawning the probe.
     env = {
         k: v
         for k, v in os.environ.items()

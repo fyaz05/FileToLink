@@ -11,11 +11,9 @@
     <!-- M2: per-file player pages must never be indexed -->
     <meta name="robots" content="noindex, nofollow">
 
-    <!-- Logo & Favicon -->
     <link rel="icon" type="image/jpeg" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- SEO & Social Sharing (Open Graph) -->
     <meta name="description"
         content="A premium cinema experience for '{{ file_name }}'. Stream in high quality with advanced controls.">
     <meta property="og:type" content="website">
@@ -24,17 +22,16 @@
         content="Stream '{{ file_name }}' in a beautiful, atmospheric environment with professional playback controls.">
     <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- Twitter Cards -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{ file_name }} — Cinema">
     <meta name="twitter:description" content="Stream '{{ file_name }}' in a beautiful, atmospheric environment.">
     <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- L7: preconnect hints on the remaining CDN origins -->
+    <!-- L7: preconnect hints for CDN origins -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://cdn.vidstack.io" crossorigin>
 
-    <!-- Vidstack Player (video layout only) -->
+    <!-- Vidstack Player -->
     {% if kind == 'video' %}
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
@@ -45,7 +42,6 @@
     <script type="module" src="https://cdn.vidstack.io/player"></script>
     {% endif %}
 
-    <!-- Typography: Outfit (geometric display) + DM Sans (refined body) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -61,8 +57,7 @@
     <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/styles.css">
 
-    <!-- L7: minimal inline fallback so the page stays usable with all
-         CDNs blocked (title + download button + basic layout). -->
+    <!-- L7: inline fallback keeps the page usable when all CDNs are blocked. -->
     <style>
         body { margin:0; min-height:100vh; display:flex; flex-direction:column;
                align-items:center; justify-content:center; gap:1.25rem;
@@ -88,16 +83,13 @@
             JavaScript is disabled — direct playback is unavailable, but the download link below still works.
         </div>
     </noscript>
-    <!-- Atmospheric Background -->
     <div class="atmosphere" aria-hidden="true">
         <div class="gradient-mesh"></div>
         <div class="noise"></div>
         <div class="vignette"></div>
     </div>
 
-    <!-- Main Viewport -->
     <main class="viewport">
-        <!-- Masthead -->
         <header class="masthead">
             <div class="title-group">
                 <h1 class="title">{{ file_name }}</h1>
@@ -132,7 +124,6 @@
             </button>
         </header>
 
-        <!-- Cinema Screen -->
         <section class="cinema">
             <div class="screen">
                 <div class="player-background-message">
@@ -169,7 +160,6 @@
             </div>
         </section>
 
-        <!-- Command Bar -->
         <nav class="command-bar">
             <div class="command-glass">
                 <a href="{{ src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
@@ -205,10 +195,8 @@
             </div>
         </nav>
 
-        <!-- External Players Drawer -->
         <aside class="drawer" id="playersDrawer">
             <div class="drawer-panel" id="drawerPanel" role="region" aria-labelledby="playersToggle">
-                <!-- Android -->
                 <div class="player-group" id="androidGroup">
                     <div class="group-label">Android</div>
                     <div class="player-grid">
@@ -278,7 +266,6 @@
                     </div>
                 </div>
 
-                <!-- iOS -->
                 <div class="player-group" id="iosGroup">
                     <div class="group-label">iOS / iPadOS</div>
                     <div class="player-grid">
@@ -315,7 +302,6 @@
                     </div>
                 </div>
 
-                <!-- Desktop -->
                 <div class="player-group" id="desktopGroup">
                     <div class="group-label">Desktop</div>
                     <div class="player-grid">
@@ -354,9 +340,7 @@
             </div>
         </aside>
 
-        <!-- Footer Group -->
         <footer class="footer-group">
-            <!-- Keyboard Hints -->
             <div class="keyboard-hints" id="keyboardHints">
                 <div class="hints-row">
                     <div class="hint">
@@ -386,7 +370,6 @@
                 </div>
             </div>
 
-            <!-- Copyright -->
             <div class="copyright-footer">
                 <span>&copy; <span id="copyrightYear"></span> Thunder</span>
                 <span class="footer-separator">•</span>
@@ -402,7 +385,6 @@
         </footer>
     </main>
 
-    <!-- Toast Stack -->
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <!-- Config for external script (template injection happens here) -->
@@ -410,7 +392,6 @@
     <script>
         window.__CINEMA_CONFIG__ = { src: {{ src | tojson }} };
     </script>
-    <!-- Main Script (CDN-hosted) -->
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/script.js"></script>
     {% endif %}
     <!-- L7 fallback: copy-link without the CDN script -->

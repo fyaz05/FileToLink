@@ -84,7 +84,7 @@ from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
-# H10: /log tail cap (mirrors ThunderGo handlers_owner.go handleLog)
+# H10: /log tail cap
 _LOG_TAIL_BYTES = 45 * 1024 * 1024
 
 
@@ -185,10 +185,9 @@ async def show_stats(client: Client, message: Message):
         ram_used = humanbytes(ram_info.used)
         ram_free = humanbytes(ram_info.free)
 
-        # one psutil call yields all four values (was: shutil + psutil)
         disk = await asyncio.to_thread(psutil.disk_usage, ".")
         total_disk, used_disk, free_disk = disk.total, disk.used, disk.free
-        # H8: the synchronous psutil call is off the event loop
+        # H8: sync psutil stays off the event loop
         disk_percent = disk.percent
 
         limiter_line = (
@@ -230,9 +229,8 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
-    # mirror __main__ teardown ordering (M13): the touch buffer batches view
-    # counts for up to a few seconds -- execv skips every finally block, so
-    # drain it here or the restart loses those increments
+    # M13 teardown ordering: execv skips every finally block, so drain the
+    # touch buffer here or the restart loses pending view-count increments
     from Thunder.utils.canonical_files import drain_background_touch_tasks
 
     await drain_background_touch_tasks()
@@ -249,9 +247,9 @@ async def send_logs(client: Client, message: Message):
         return
 
     try:
-        # H10: never upload raw logs -- stream the (capped) tail through the
-        # shared redaction regexes so bot tokens / Mongo URIs cannot leak.
-        # File IO + regex over megabytes must not run on the event loop (H8).
+        # H10: never upload raw logs -- capped tail through the shared redaction
+        # regexes so bot tokens / Mongo URIs cannot leak.
+        # H8: file IO + regex over megabytes off the event loop.
         def _read_redacted_tail() -> str:
             with open(LOG_FILE, "rb") as f:
                 f.seek(0, os.SEEK_END)
@@ -325,8 +323,8 @@ async def list_authorized_command(client: Client, message: Message):
     if not users:
         return await reply(message, text=MSG_NO_AUTH_USERS)
 
-    # M7: HTML + html.escape for user-controlled display names.
-    # One batched get_users RPC instead of one per row (N+1 FloodWait risk).
+    # M7: user-controlled display names get html.escape()d; one batched
+    # get_users RPC avoids N+1 FloodWaits.
     id_to_user: dict[int, Any] = {}
     try:
         tg_users = await tg_call(client.get_users, [u["user_id"] for u in users], retries=1)
@@ -371,7 +369,7 @@ async def ban_command(client: Client, message: Message):
 
     try:
         target_id = int(message.command[1])
-        # M7: reason is user-controlled and the ban messages are HTML now
+        # M7: user-controlled reason; ban messages are HTML
         reason = html.escape(" ".join(message.command[2:])) or MSG_ADMIN_NO_BAN_REASON
         banned_by_id = message.from_user.id if message.from_user else None
 
@@ -443,7 +441,7 @@ async def unban_command(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
-    # L10: env kill-switch -- the powerful command is opt-in.
+    # L10: env kill-switch -- /shell is opt-in.
     if not Var.ENABLE_SHELL:
         return await reply(message, text=MSG_SHELL_DISABLED, parse_mode=ParseMode.HTML)
 

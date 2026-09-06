@@ -131,16 +131,14 @@ async def start_services():
     try:
         await tg_call(StreamBot.start)
         bot_info = await tg_call(StreamBot.get_me)
-        # pyrogram exposes Client.username dynamically (set during sign-in),
-        # so mypy cannot see it; pin it explicitly for /status consumers.
+        # pyrogram sets Client.username dynamically, so mypy cannot see it; pin it for /status.
         username = bot_info.username
         StreamBot.username = username  # type: ignore[attr-defined]
         print(f"   ✓ Bot initialized successfully as @{username}")
 
         await set_commands()
         print("   ✓ Bot commands set successfully.")
-        # managed background task: cancelled + awaited at shutdown (the old
-        # fire-and-forget version leaked as a pending task)
+        # managed background task: cancelled + awaited at shutdown
         background_tasks.append(schedule_index_ensure())
         _harden_session_files()
 
@@ -162,8 +160,7 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
-        # M13 contract: a failed boot must exit non-zero, or container
-        # restart policies never fire and the box sits dead but "healthy".
+        # M13: a failed boot must exit non-zero or container restart policies never fire.
         raise SystemExit(1) from e
 
     print("   ▶ Starting Client initialization...")
@@ -216,9 +213,8 @@ async def start_services():
             t.cancel()
         if background_tasks:
             await asyncio.gather(*background_tasks, return_exceptions=True)
-        # mirror shutdown_services ordering: the touch buffer must flush
-        # BEFORE db.close, or _bulk_flush runs against a closed client and
-        # silently discards every pending increment
+        # ordering: the touch buffer must flush BEFORE db.close, or _bulk_flush
+        # runs against a closed client and silently discards pending increments
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         await _safe_teardown_step(cleanup_clients, "clients")
@@ -264,8 +260,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         if not task.done():
             task.cancel()
 
-    # one bounded wait for the WHOLE batch (the old per-task wait_for(x, 10)
-    # could stack to ~80s worst-case before teardown ever started)
+    # one bounded wait for the WHOLE batch (per-task waits could stack ~80s before teardown)
     if background_tasks:
         done, pending = await asyncio.wait(background_tasks, timeout=10)
         for t in done:
@@ -342,8 +337,8 @@ async def schedule_limiter_sweep():
 
 
 if __name__ == "__main__":
-    # L5: session files carry bearer-equivalent auth keys -- a restrictive
-    # umask covers the window between file creation and _harden_session_files
+    # L5: session files carry bearer-equivalent auth keys -- the restrictive umask
+    # covers the window before _harden_session_files runs.
     os.umask(0o077)
     try:
         asyncio.run(start_services())

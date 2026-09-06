@@ -1,4 +1,3 @@
-# tests/test_unit/test_redaction.py
 """H10: shared redaction regexes."""
 
 import pytest

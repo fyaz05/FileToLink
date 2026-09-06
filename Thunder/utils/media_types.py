@@ -1,14 +1,11 @@
 # Thunder/utils/media_types.py
 
-"""Single source of truth for media-type -> extension / mime / display maps.
+"""Single source of truth for media-type -> extension / mime maps (plan H4c).
 
-Historically three drifted copies existed (``custom_dl.get_file_info_sync``,
-``file_properties.get_fname``, ``common.send_file_dc``); this module replaces
-the two mime/extension-driven ones (plan H4c).  ``common.send_file_dc`` keeps
-its own display-name map, which is a presentation concern, not a mime/ext one.
-Both naming families are keyed: pyrogram class names come out lower-cased with
-no underscore (``videonote``) while message attribute names use ``video_note``
--- both are accepted everywhere.
+``common.send_file_dc`` keeps its own display-name map (presentation, not a
+mime/ext concern).  Both naming families are keyed: pyrogram class names are
+lower-cased with no underscore (``videonote``) while message attribute names
+use ``video_note`` -- both are accepted everywhere.
 """
 
 # message attribute name -> stable canonical key

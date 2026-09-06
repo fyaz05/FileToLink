@@ -2,16 +2,10 @@
 
 """Central configuration (plan M6).
 
-Boot behaviour:
-
-* loads ``config.env`` then ``config.env.local`` (local layer wins);
-* validates **all** variables and prints every problem together before
-  failing -- instead of the historical first-bad-``int()`` traceback;
-* names the offending variable on conversion failure and enforces bounds;
-* hard-fails on missing ``OWNER_ID`` (plan H7 -- the old warning meant every
-  owner check silently matched nobody).
-
-The ``Var`` facade is kept so no import site changes.
+Loads ``config.env`` then ``config.env.local`` (local layer wins), validates
+all variables and reports every problem together before failing, enforces
+bounds, and hard-fails on missing ``OWNER_ID`` (H7).  The ``Var`` facade is
+kept so no import site changes.
 """
 
 import os
@@ -22,18 +16,14 @@ from Thunder.utils.logger import logger
 
 
 def _load_env_layers() -> None:
-    """Load ``config.env`` then ``config.env.local`` with REAL precedence.
+    """Load ``config.env`` then ``config.env.local`` with real precedence.
 
-    ``load_dotenv(override=False)`` (the historical behaviour) never lets a
-    later file override keys an earlier file already set, so the documented
-    "local layer wins" was inverted -- operator edits in config.env.local
-    were silently ignored.  Precedence now is: real environment >
-    config.env.local > config.env; existing os.environ entries still win
-    (same contract as load_dotenv's default).
+    Precedence: real environment > config.env.local > config.env (existing
+    os.environ entries still win).  ``load_dotenv(override=False)`` silently
+    inverted the documented "local layer wins".
 
-    ``THUNDER_SKIP_CONFIG_FILES=1`` disables both files entirely -- the test
-    tiers use it so a developer's own config.env cannot leak values into a
-    run that is supposed to be hermetic.
+    ``THUNDER_SKIP_CONFIG_FILES=1`` disables both files so test tiers stay
+    hermetic against a developer's own config.env.
     """
     if os.environ.get("THUNDER_SKIP_CONFIG_FILES") == "1":
         return
@@ -128,7 +118,7 @@ class Var:
     PING_INTERVAL: int = _get_int("PING_INTERVAL", "840", min_val=30)
     NO_PORT: bool = str_to_bool(os.getenv("NO_PORT", "True"))
 
-    # H7: missing OWNER_ID is fatal -- every owner check matched nobody before.
+    # H7: missing OWNER_ID is fatal -- every owner check would match nobody.
     OWNER_ID: int = _get_int("OWNER_ID", "0", min_val=1)
     _require(OWNER_ID, "OWNER_ID", "your Telegram user id (get from @userinfobot)")
 
@@ -219,9 +209,8 @@ class Var:
     TG_RPC_TIMEOUT_SECONDS: float = _get_float("TG_RPC_TIMEOUT_SECONDS", "30", min_val=0)
 
 
-# Cross-flag validation (M6): with both gates on, a non-allowlisted user's
-# activation deep-link is rejected by the private-mode gate BEFORE the token
-# consume path in /start can run -- token-gated access becomes unreachable.
+# M6: with both gates on, the private-mode gate rejects a token activation
+# deep-link before /start's consume path runs -- token access becomes unreachable.
 if Var.PRIVATE_MODE and Var.TOKEN_ENABLED:
     _config_errors.append(
         "PRIVATE_MODE and TOKEN_ENABLED cannot both be enabled: token "

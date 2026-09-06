@@ -1,23 +1,13 @@
 # Thunder/utils/rate_limiter.py
 
-"""Queue + rate limiting (plan H6).
+"""Queue + rate limiting (plan H6); users keep the queue / wait-estimate UX.
 
-Protected UX (report §4.2 keep-list): users still get the queue /
-wait-estimate messages; only the internals changed.
-
-H6a: bounded structures + periodic sweep (no unbounded deques/dicts).
-H6b: a small worker pool replaces the single executor, so one user's long
-FloodWait no longer stalls every other queued request; the sliding window
-is charged at *execution* time (the old code charged at enqueue AND again
-inside the executor, double-charging every queued request); FloodWait
-inside a worker requeues the request with an attempt counter instead of
-sleeping the worker.
-H6c: a global RPS token-bucket breaker (§5.1b) shapes bursts through the
-queue: the immediate path also consumes a breaker token, and when the
-bucket is dry the request falls through to the queue instead of being
-dropped -- queued workers consume tokens at exec time, so bursts of
-distinct users are spread out instead of all hitting Telegram-side
-FLOOD_WAIT at once.
+H6a: bounded bookkeeping + periodic sweep.
+H6b: worker pool -- the sliding window is charged at execution time (not
+enqueue), and FloodWait requeues the request instead of sleeping the worker.
+H6c: a global RPS token-bucket breaker shapes bursts through the queue: a
+dry bucket routes the request into the queue (workers consume tokens at
+exec time) instead of dropping it.
 """
 
 import asyncio
@@ -41,8 +31,7 @@ from Thunder.utils.safe_call import edit_safe, send_safe
 from Thunder.utils.tokens import allowed
 from Thunder.vars import Var
 
-# A queued request is requeued at most this many times (FloodWait storms,
-# breaker shedding) before it is dropped and the user notified.
+# max FloodWait/breaker requeues before a request is dropped and the user notified
 MAX_REQUEST_ATTEMPTS = 5
 # Bounded bookkeeping
 MAX_TRACKED_USERS = 4096
@@ -126,9 +115,8 @@ class RateLimiter:
             self.global_rate_limit_enabled = Var.GLOBAL_RATE_LIMIT
             self.max_global_requests_per_minute = Var.MAX_GLOBAL_REQUESTS_PER_MINUTE
             if Var.GLOBAL_RPS_LIMIT and not self.global_rate_limit_enabled:
-                # M6 philosophy: surface dead knobs instead of silently
-                # ignoring them -- the RPS cap only bites when the breaker
-                # itself is enabled (see _breaker_rate)
+                # M6: surface dead knobs -- the RPS cap only bites when the
+                # breaker is enabled (see _breaker_rate)
                 logger.warning(
                     "GLOBAL_RPS_LIMIT is set but GLOBAL_RATE_LIMIT is disabled; "
                     "the per-second cap has no effect until the global breaker is enabled."
@@ -233,8 +221,7 @@ class RateLimiter:
                 self.user_requests.pop(user_id, None)
                 dropped_users += 1
         if len(self.user_requests) > MAX_TRACKED_USERS:
-            # evict least-recently-active first -- dict-order eviction could
-            # wipe an active user's window and grant an instant quota burst
+            # evict least-recently-active first; dict-order eviction could reset an active user's window
             by_recency = sorted(
                 self.user_requests.items(),
                 key=lambda kv: kv[1][-1] if kv[1] else 0.0,
@@ -278,19 +265,15 @@ class RateLimiter:
         if delay > 0:
             request_data["not_before"] = time.time() + delay
         async with self.request_lock:
-            # Re-insertion policy (deliberate, bounded by MAX_REQUEST_ATTEMPTS):
-            # FloodWait/breaker requeues go to the FRONT -- those requests have
-            # already waited (their delay has elapsed by the time they run
-            # again), while not-yet-executed peers have not.  Deferred
-            # rotations in _process_one go to the BACK -- they have not waited
-            # yet and must not jump the queue.
+            # Ordering contract: FloodWait/breaker requeues go to the FRONT
+            # (their delay has already elapsed); deferred rotations from
+            # _process_one go to the BACK -- they have not waited yet.
             if queue_type == "priority":
                 self.priority_queue.appendleft(request_data)
             else:
                 self.request_queue.appendleft(request_data)
             self.request_event.set()
-            # A pure requeue (nothing else runnable) must re-park the pool,
-            # or the workers spin on the deferred item until not_before.
+            # a pure requeue must re-park the pool or workers spin until not_before
             if delay > 0:
                 self._park_if_all_deferred()
         logger.debug(
@@ -361,8 +344,8 @@ class RateLimiter:
         user_id = request_data["user_id"]
 
         # charge-at-exec: the sliding window is charged exactly once, here.
-        # Retries (FloodWait/breaker requeues) must not re-charge, or one
-        # upload can burn a user's entire window on server-side failures.
+        # Retries must not re-charge, or one upload can burn a user's entire
+        # window on server-side failures.
         if not self.is_owner(user_id):
             record = not request_data.get("charged")
             if not await self.check_limits(user_id, record=record):
@@ -375,9 +358,8 @@ class RateLimiter:
             if record:
                 request_data["charged"] = True
             if self.breaker.rate > 0 and not self.breaker.allow():
-                # breaker is active via GLOBAL_RPS_LIMIT or the derived
-                # per-minute rate -- same shaping at exec time, same requeue
-                # discipline for both sources
+                # breaker active via GLOBAL_RPS_LIMIT or the derived per-minute rate:
+                # same exec-time shaping and requeue discipline for both sources
                 retry = max(self.breaker.retry_after(), 0.5)
                 await self._requeue_request(request_data, queue_type, delay=retry)
                 return True
@@ -401,8 +383,7 @@ class RateLimiter:
                 file_times.append(processing_time)
 
         except FloodWait as e:
-            # H6b: requeue with an attempt counter instead of stalling the
-            # whole worker pool with a sleep.
+            # H6b: requeue with an attempt counter instead of stalling a worker with a sleep.
             attempts = request_data.get("attempts", 0) + 1
             request_data["attempts"] = attempts
             if attempts > MAX_REQUEST_ATTEMPTS:
@@ -415,8 +396,7 @@ class RateLimiter:
                 logger.warning(f"FloodWait for user {user_id}, requeueing (attempt {attempts}).")
                 await self._requeue_request(request_data, queue_type, delay=min(e.value, 300.0))
         except asyncio.CancelledError:
-            # Shutdown/cancellation: propagate; the queue item is already
-            # popped, so nothing further to release.
+            # cancellation: propagate; the item is already popped, nothing to release.
             raise
         except Exception as e:
             logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
@@ -432,15 +412,13 @@ class RateLimiter:
             logger.debug("Could not notify user about dropped request", exc_info=True)
 
     def _park_if_all_deferred(self) -> None:
-        """Stop the busy-spin when every queued request is deferred.
+        """Park the pool when every queued request is deferred.
 
-        On Python 3.13, ``Event.wait()`` on a set event and an uncontended
-        ``Lock.acquire()`` return WITHOUT yielding.  Workers rotating only
-        deferred items therefore had zero yield points and froze the whole
-        event loop (all handlers, streams, sweepers) until the earliest
-        ``not_before`` passed -- up to 300s at 100% CPU.  Parking clears the
-        wakeup event and arms a timer for the earliest deferred request;
-        any new enqueue re-sets the event and wakes the pool immediately.
+        Python 3.13 pitfall: ``Event.wait()`` on a set event and an
+        uncontended ``Lock.acquire()`` return WITHOUT yielding, so a pool
+        rotating only deferred items freezes the loop until the earliest
+        ``not_before``. Parking clears the wakeup event and arms a timer for
+        the earliest deferred request; any new enqueue re-sets the event.
         Caller must hold ``request_lock``.
         """
         now = time.time()
@@ -612,12 +590,8 @@ async def handle_rate_limited_request(
         await handler(bot, message, *args, **kwargs)
         return
 
-    # H6c (revised): the immediate path now consumes a breaker token too.
-    # Bursts of distinct within-window users were exactly the traffic that
-    # produced Telegram-side FLOOD_WAITs, and it never touched the bucket
-    # (tokens were consumed only by the queued exec path).  A dry bucket no
-    # longer sheds: the request falls through to the queue, where workers
-    # consume tokens at exec time, so bursts are shaped instead of dropped.
+    # H6c: the immediate path consumes a breaker token too -- bursts of
+    # within-window users never touched the bucket; a dry bucket queues, not drops.
     immediate = await rate_limiter.check_limits(user_id, record=False)
     if immediate and rate_limiter.breaker.rate > 0:
         immediate = rate_limiter.breaker.allow()  # consumes a token on success

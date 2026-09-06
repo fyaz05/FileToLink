@@ -17,8 +17,7 @@ from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
-# L4: new ingestions hash to 32 hex chars; the historical 20-char family
-# stays valid forever so every existing link keeps working.
+# L4: new hashes are 32 hex chars; legacy 20-char hashes stay valid forever.
 PUBLIC_HASH_LENGTH = 32
 LEGACY_PUBLIC_HASH_LENGTH = 20
 _CACHE_TTL_SECONDS = 600
@@ -29,8 +28,7 @@ _INGEST_CLAIM_POLL_SECONDS = 0.5
 _MAX_INGEST_RETRIES = 10
 _CACHE_PRUNE_INTERVAL = 50
 
-# M14: bounded touch buffer -- overflow drops increments (counted) instead
-# of growing memory; flushes batch into a single BulkWrite.
+# M14: bounded touch buffer; overflow drops (counted), flush is one BulkWrite.
 _FLUSH_DELAY_SECONDS = max(1, min(60, Var.TOUCH_FLUSH_SECONDS))
 _TOUCH_BUFFER_MAX = max(100, min(10_000, Var.TOUCH_BUFFER_MAX))
 _dropped_touches = 0
@@ -192,9 +190,8 @@ async def _flush_pending_touches() -> None:
                 logger.error(f"Touch flush failed on cancel path: {e}", exc_info=True)
         _flush_task = None
         if _pending_touches and not cancelled:
-            # touches added while this flush was in flight are invisible to it
-            # (it snapshotted before they arrived) -- re-arm or they sit
-            # unflushed until the next schedule or process exit
+            # touches added during this flush escaped its snapshot; re-arm
+            # or they sit unflushed until process exit
             _flush_task = asyncio.create_task(_flush_pending_touches())
 
 
@@ -206,11 +203,8 @@ async def _bulk_flush() -> None:
     try:
         await db.bulk_touch_file_records([(h, reused) for h, (_, reused) in items])
     except Exception as e:
-        # merge the batch back so the next flush retries -- clearing before
-        # the write succeeded silently discarded every pending increment.
-        # NOTE: with an ordered=False bulk write failing part-way, this
-        # re-applies increments for ops that DID apply -- seen_count may
-        # over-count for that subset (counters only; accepted trade-off).
+        # merge back so the next flush retries; NOTE: a part-way failed
+        # ordered=False bulk re-applies some increments (accepted over-count)
         logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
         for h, payload in items:
             _pending_touches.setdefault(h, payload)
@@ -316,12 +310,8 @@ async def _get_reusable_canonical_record(
     try:
         is_valid = await _is_canonical_record_valid(existing, file_unique_id, client)
     except Exception as e:
-        # RPC failure (FloodWait-exhausted, timeout, network) is NOT proof the
-        # vault message is gone -- treating it as stale made every Telegram
-        # hiccup re-copy the file into BIN and orphan the old vault message.
-        # Keep the cached record and serve it; only a definitive None /
-        # unique-id mismatch (checked inside _is_canonical_record_valid)
-        # declares staleness.
+        # RPC failure is NOT proof the vault message is gone; only a definitive
+        # None / unique-id mismatch declares staleness (else re-copy storms)
         logger.warning(
             f"Canonical validation errored for {file_unique_id}; keeping cached record: {e}",
             exc_info=True,
@@ -366,9 +356,8 @@ def _merge_replacement_record(
     refreshed["first_source_message_id"] = existing.get(
         "first_source_message_id", refreshed.get("first_source_message_id")
     )
-    # Preserve the existing public_hash: re-hashing here would rewrite a
-    # legacy 20-char hash to the new 32-hex family and permanently break
-    # every published legacy link (the L4 "valid forever" contract).
+    # preserve existing public_hash: re-hashing rewrites legacy 20-char hashes
+    # to 32-hex and breaks published links (L4 "valid forever" contract)
     preserved_hash = existing.get("public_hash")
     if preserved_hash:
         refreshed["public_hash"] = preserved_hash

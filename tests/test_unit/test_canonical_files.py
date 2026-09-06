@@ -1,4 +1,3 @@
-# tests/test_unit/test_canonical_files.py
 """Hash building (L4 dual lengths) + merge precedence (H2 target)."""
 
 import pytest

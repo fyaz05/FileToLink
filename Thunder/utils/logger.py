@@ -17,10 +17,8 @@ logging._srcfile = None
 logging.logThreads = False
 logging.logProcesses = False
 
-# --------------------------------------------------------------------------
-# H10: shared secret redaction -- used by the access-log middleware and by
-# /log before upload so no token / Mongo URI can leave the machine.
-# --------------------------------------------------------------------------
+# H10: shared secret redaction -- the access-log middleware and /log upload
+# both go through these so no token / Mongo URI can leave the machine.
 
 BOT_TOKEN_PATTERN = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35,}")
 MONGO_URI_PATTERN = re.compile(r"mongodb(\+srv)?://[^:]+:[^@]+@")
@@ -104,8 +102,7 @@ file_handler.setFormatter(file_formatter)
 
 console_handler = logging.StreamHandler(stream=sys.__stdout__)
 console_handler.setFormatter(console_formatter)
-# reconfigure exists on io.TextIOWrapper (the real sys.__stdout__ under
-# CPython); guard so wrapped/replaced streams can never crash boot.
+# reconfigure only exists on io.TextIOWrapper; guard wrapped/replaced streams.
 _stream = console_handler.stream
 if hasattr(_stream, "reconfigure"):
     _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]

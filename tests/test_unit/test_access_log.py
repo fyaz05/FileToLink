@@ -1,20 +1,12 @@
-# tests/test_unit/test_access_log.py
-"""H10 access-log middleware: path pseudonymization + log-forging escape.
-
-Regression: the pre-recheck _redact_path ran four sequential re.sub rules;
-the id-first rule could re-match the 8-hex pseudonyms produced by the
-canonical rule (~39% of them end in two digits), double-hashing the same
-file and stamping a misleading "…" truncation marker. The single combined
-pass pins exactly-once semantics.
-"""
+"""H10 access-log middleware: path pseudonymization + log-forging escape."""
 
 import pytest
 
 import Thunder.server as server_mod
 from Thunder.server import _escape_control_chars, _redact_path
 
-# 6 alnum chars + 2 trailing digits: as a *pseudonym* this shape used to be
-# re-matched by the id-first rule and hashed a second time.
+# 6 alnum + 2 trailing digits: the old id-first rule used to re-match this
+# shape and hash it a second time.
 _FAKE_PSEUDONYM = "ab12cd99"
 
 

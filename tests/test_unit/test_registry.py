@@ -1,4 +1,3 @@
-# tests/test_unit/test_registry.py
 """M1: registry drives the menu (owner-only hidden) and AGENTS.md drift."""
 
 import re

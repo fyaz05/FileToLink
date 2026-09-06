@@ -2,21 +2,13 @@
 
 """Central FloodWait-safe call helpers.
 
-Every Telegram RPC in the codebase goes through :func:`tg_call` or one of the
-thin wrappers below instead of the historical copy-pasted
-``try/except FloodWait`` pairs.  Semantics preserved from the old pattern:
-
-* on ``FloodWait`` the coroutine sleeps for ``min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)``
-  seconds and retries, at most ``retries`` times (default 1 -- i.e. two
-  attempts total, matching the previous inline behaviour); Telegram can
-  send multi-minute FloodWaits, and an uncapped sleep let a "lightweight"
-  RPC pin its caller far beyond the wall-clock budget it advertises (H8);
-* after the retries are exhausted the exception propagates unchanged.
-
-Wall-clock budgets (H8): lightweight RPCs get a default timeout so a hung
-call can never pin a handler forever.  File-transfer paths (copy / upload /
-download) default to *no* timeout because large media legitimately takes
-minutes; pass ``timeout=`` explicitly where a budget is known.
+Every Telegram RPC goes through :func:`tg_call` or a thin wrapper.  On
+``FloodWait`` the call sleeps ``min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)``
+and retries at most ``retries`` times, then the exception propagates
+unchanged.  Wall-clock budgets (H8): lightweight RPCs get a default timeout
+so a hung call cannot pin a handler forever; file-transfer paths default to
+*no* timeout (large media legitimately takes minutes) -- pass ``timeout=``
+explicitly where a budget is known.
 """
 
 import asyncio
@@ -29,16 +21,13 @@ from Thunder.utils.logger import logger
 
 T = TypeVar("T")
 
-# Default wall-clock budget for lightweight RPCs (get_me, get_messages,
-# edit_text, answer, ...).  Env-overridable via TG_RPC_TIMEOUT_SECONDS.
+# Default wall-clock budget for lightweight RPCs; env-overridable via TG_RPC_TIMEOUT_SECONDS.
 DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
 
-# H8: cap a single FloodWait sleep so a lightweight RPC cannot exceed its
-# advertised budget by minutes.  Total sleep is also bounded by ``retries``.
+# H8: cap FloodWait sleeps so a lightweight RPC cannot blow its advertised wall-clock budget.
 MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
 
-# Call shapes that are allowed to run unbounded by default (large media
-# transfers).  Matched by attribute name of the callable.
+# Call shapes allowed to run unbounded by default (large media transfers); matched by name.
 _UNBOUNDED_SHAPES = {
     "copy",
     "copy_message",
@@ -63,8 +52,7 @@ _env_timeout_cache: float | None = None
 
 
 def _env_timeout() -> float:
-    # TG_RPC_TIMEOUT_SECONDS is static per process; resolve it once instead
-    # of re-importing + re-reading on every RPC.
+    # static per process: resolve once instead of re-reading on every RPC
     global _env_timeout_cache
     if _env_timeout_cache is None:
         try:

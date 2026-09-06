@@ -1,4 +1,3 @@
-# tests/test_unit/test_config.py
 """M6: config validation surfaces all problems; booleans/sets parse."""
 
 import subprocess

@@ -155,10 +155,8 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if start_str:
         start = int(start_str)
         end = int(end_str) if end_str else file_size - 1
-        # RFC 7233 §2.1: a last-byte-pos >= length means "rest of the
-        # representation" -- clamp instead of rejecting.  Download managers
-        # commonly send a fixed-chunk end computed without knowing the size;
-        # a hard 416 broke resume/seeking for exactly those clients.
+        # RFC 7233: last-byte-pos >= length means "rest of the representation" --
+        # clamp, not 416; download managers send fixed-chunk ends without knowing the size.
         end = min(end, file_size - 1)
     else:
         if not end_str:
@@ -461,10 +459,8 @@ async def canonical_media_delivery(request: web.Request):
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
 
-            # M10: resolve the vault message up-front.  One fetch serves
-            # both the self-heal check and the Content-Length verification;
-            # the Message object is passed on so stream_file does not
-            # re-fetch it.
+            # M10: one vault fetch serves both the self-heal check and the
+            # Content-Length verification; the Message is passed on so stream_file does not re-fetch.
             try:
                 vault_message = await streamer.get_message(media_ref)
             except FileNotFound:
@@ -472,9 +468,8 @@ async def canonical_media_delivery(request: web.Request):
                 raise FileNotFound(
                     "Vault message missing; record self-healed, re-upload to regenerate the link"
                 ) from None
-            # TelegramUnavailable (FloodWait-exhaustion / timeout / transport)
-            # is NOT proof the vault message is gone: it must not delete the
-            # record.  It falls through to the 503 ladder below.
+            # TelegramUnavailable (FloodWait/timeout/transport) is NOT proof the
+            # vault message is gone -- must not delete the record; falls through to the 503 ladder.
 
             media = get_media(vault_message)
             if not media:

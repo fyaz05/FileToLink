@@ -1,4 +1,3 @@
-# tests/test_unit/test_human_readable.py
 import pytest
 
 from Thunder.utils.human_readable import humanbytes

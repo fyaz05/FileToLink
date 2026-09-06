@@ -1,7 +1,4 @@
-# tests/test_unit/test_custom_dl_exceptions.py
-"""Transient Telegram failures must NOT surface as FileNotFound: the delivery
-route self-heals (deletes the vault record) on FileNotFound, so conflating the
-two let a Telegram brownout destroy valid records en masse."""
+"""Transient Telegram failures must NOT surface as FileNotFound (self-heal deletes records)."""
 
 from types import SimpleNamespace
 

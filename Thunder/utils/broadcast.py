@@ -60,8 +60,8 @@ _PERMANENT_ERROR_REASONS: dict[type[Exception], tuple[str, str]] = {
 _BROADCAST_PACE_SECONDS = 0.2
 _PROGRESS_EVERY = 25
 
-# strong references to in-flight broadcast tasks (CPython only weakly
-# references tasks; unreferenced ones can be garbage-collected mid-sweep)
+# strong refs: CPython only weakly references tasks; unreferenced ones
+# can be garbage-collected mid-run
 _BROADCAST_TASKS: set[asyncio.Task] = set()
 
 
@@ -128,9 +128,8 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
         return
 
     async def do_broadcast():
-        # M4a: worker pool pulling from a bounded queue; the Mongo cursor is
-        # streamed (never materialized), sends are paced, progress edits are
-        # throttled, and the cancel callback keeps working.
+        # M4a: bounded-queue worker pool; cursor streamed, never materialized;
+        # sends paced, progress edits throttled, cancel stays responsive
         queue: asyncio.Queue = asyncio.Queue(maxsize=200)
 
         async def producer():
@@ -209,9 +208,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                 logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 
     task = asyncio.create_task(do_broadcast())
-    # hold a reference -- CPython only weakly references tasks, so an
-    # unreferenced broadcast can be garbage-collected mid-sweep -- and let
-    # the module-level set keep it alive until done
+    # hold a strong ref so CPython cannot GC the task mid-run
     _BROADCAST_TASKS.add(task)
     task.add_done_callback(_BROADCAST_TASKS.discard)
 

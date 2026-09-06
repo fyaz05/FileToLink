@@ -9,15 +9,11 @@ from Thunder.utils.logger import hash_path_token, logger
 
 from .stream_routes import routes
 
-# H10: access log middleware -- logs method, redacted path (file tokens are
-# replaced by their sha256 prefix), status, bytes and duration.
-# Modeled on ThunderGo's http/server.go logMiddleware + redactPath.
+# H10: access log middleware -- method, redacted path, status, bytes, duration.
 
 
-# Single combined pass: every path segment is pseudonymized exactly once.
-# Sequential re.sub rules would let the id-first rule re-match 8-hex
-# pseudonyms produced by the canonical rule (~39% of them end in two
-# digits), double-hashing the same file and stamping a misleading "…".
+# Single pass: sequential rules would let the id-first rule re-match 8-hex
+# pseudonyms from the canonical rule (~39% end in two digits), double-hashing them.
 _PSEUDONYM_RE = re.compile(
     r"(?P<canon>(?<=/f/)[0-9a-f]{20,32})"
     r"|(?P<legacy>(?<=/watch/)[a-zA-Z0-9_-]{6}\d+)"
@@ -26,7 +22,7 @@ _PSEUDONYM_RE = re.compile(
 )
 
 # "…" marks legacy segments whose id suffix was consumed by the hash;
-# canonical /f/ and /activate/ tokens keep their bare pseudonym.
+# canonical and /activate/ tokens keep their bare pseudonym.
 _TRUNCATED_GROUPS = frozenset({"legacy", "idfirst"})
 
 
@@ -58,8 +54,7 @@ async def access_log_middleware(request: web.Request, handler):
     finally:
         duration_ms = (time.perf_counter() - start) * 1000
         try:
-            # response stays None when the handler raised a non-HTTP
-            # exception; getattr(None, ...) then falls back to 500
+            # response is None for non-HTTP exceptions; getattr(None, ...) then yields 500
             status = getattr(response, "status", 500)
             size = getattr(response, "content_length", None)
             logger.info(
@@ -73,8 +68,7 @@ async def access_log_middleware(request: web.Request, handler):
 
 
 async def web_server():
-    # client_max_size removed (H4b): this is a GET-only server; the old 50 MiB
-    # cap only governed request bodies that can never legitimately arrive.
+    # H4b: GET-only server -- no request bodies, so no client_max_size cap.
     web_app = web.Application(middlewares=[access_log_middleware])
     web_app.add_routes(routes)
     return web_app

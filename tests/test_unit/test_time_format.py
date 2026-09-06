@@ -1,4 +1,3 @@
-# tests/test_unit/test_time_format.py
 import pytest
 
 from Thunder.utils.time_format import get_readable_time

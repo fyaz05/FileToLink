@@ -121,8 +121,8 @@ async def send_channel_links(
     reply_to_message_id: int | None = None,
 ):
     text = MSG_NEW_FILE_REQUEST.format(
-        # source_info (display name / chat title) is user-controlled and the
-        # template renders as HTML under pyrofork's DEFAULT parse mode (M7)
+        # source_info (display name / chat title) is user-controlled and renders
+        # as HTML under pyrofork's DEFAULT parse mode (M7)
         source_info=html.escape(source_info),
         id_=source_id,
         online_link=links["online_link"],
@@ -201,8 +201,8 @@ async def send_link(msg: Message, links: dict[str, Any]):
 
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
-    # A channel-posted /link has no from_user; key the limiter on the
-    # sender chat instead of dropping the request with dead air.
+    # A channel-posted /link has no from_user: key the limiter on the
+    # sender chat instead of dropping the request.
     if kwargs.get("rl_user_id") is None and msg.sender_chat and msg.sender_chat.id:
         kwargs["rl_user_id"] = msg.sender_chat.id
 
@@ -211,8 +211,8 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         if shortener_val is None:
             return
         if message.from_user and not await db.is_user_exist(message.from_user.id):
-            # client.me is always populated after client.start(); the stub union
-            # is unavoidable at this layer.
+            # client.me is populated after client.start(); the stub union
+            # is unavoidable here.
             invite_link = f"https://t.me/{client.me.username}?start=start"  # type: ignore[union-attr]
             try:
                 await reply_safe(
@@ -243,8 +243,8 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
 
         notification_msg = handler_kwargs.get("notification_msg")
 
-        # filters.command also matches captions, where .text is None --
-        # parse from the caption too or a captioned /link crashes with dead air
+        # filters.command matches captions too, where .text is None --
+        # parse the caption or a captioned /link dies silently
         parts = (message.text or message.caption or "").split()
         num_files = 1
         if len(parts) > 1:
@@ -335,10 +335,8 @@ async def channel_receive_handler(bot: Client, msg: Message):
     async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
         if not Var.CHANNEL:
             return
-        # M12: PRIVATE_MODE promises "owner + authorized users only" -- a
-        # channel post must not mint public links on a private instance
-        # (channels have no from_user, so the user gates cannot vouch for
-        # them; fail closed here).
+        # M12: PRIVATE_MODE promises "owner + authorized users only" -- channels
+        # have no from_user for the gates, so fail closed: no public links.
         if Var.PRIVATE_MODE:
             logger.debug(f"Ignoring channel post from {message.chat.id} (PRIVATE_MODE).")
             return
@@ -347,11 +345,9 @@ async def channel_receive_handler(bot: Client, msg: Message):
         is_banned_statically = (
             hasattr(Var, "BANNED_CHANNELS") and message.chat.id in Var.BANNED_CHANNELS
         )
-        # flag-cached (one DB hit per channel per TTL instead of per post).
-        # Fail-open is DELIBERATE here: the action on a hit is leave_chat,
-        # which is destructive and irreversible -- a Mongo outage must not
-        # make the bot leave every channel it serves (H7's fail-closed
-        # applies to the user-ban gate, where denial is cheap and safe).
+        # Flag-cached (one DB hit per channel per TTL).  Fail-open is DELIBERATE:
+        # a hit triggers leave_chat (irreversible) -- a Mongo outage must not
+        # mass-leave served channels (H7 fail-closed applies to user-ban gates).
         is_banned_dynamically = (
             await flags.get_or_load(
                 ("banned_channel", message.chat.id),
@@ -400,9 +396,8 @@ async def channel_receive_handler(bot: Client, msg: Message):
                 links = await gen_links(stored_msg, shortener=shortener_val)
                 reply_to_message_id = stored_msg.id
             source_info = message.chat.title or "Unknown Channel"
-            # When we reused an existing canonical BIN copy, stored_msg is intentionally
-            # None so send_channel_links falls back to StreamBot.send_message(...,
-            # reply_to_message_id=...) and keeps the log threaded to the canonical message.
+            # stored_msg is intentionally None after reusing a canonical BIN copy:
+            # send_channel_links then threads the log to the canonical message via reply_to_message_id.
 
             if notification_msg:
                 try:
@@ -592,7 +587,7 @@ async def process_batch(
     skipped = 0
     counters = {"done": 0, "failed": 0}
 
-    # ---- pre-fetch phase (chunked, same as the historical behavior) ----
+    # ---- pre-fetch phase (chunked) ----
     fetched: dict[int, Message | None] = {}
     fetch_failed: set[int] = set()
     for chunk_start in range(0, count, BATCH_SIZE):
@@ -608,8 +603,8 @@ async def process_batch(
             else:
                 messages = list(fetched_msgs)
         except Exception as e:
-            # a failed chunk is a FAILED fetch, not a benign skip: counting it
-            # as skipped made whole-chunk outages invisible in the summary
+            # a failed chunk counts as FAILED, not skipped -- skipping would
+            # hide whole-chunk outages from the summary
             logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             fetch_failed.update(chunk_ids)
             messages = []
@@ -666,8 +661,8 @@ async def process_batch(
             if counters["done"] % BATCH_UPDATE_INTERVAL == 0 and counters["done"] < count:
                 await progress_edit()
 
-    # initial status (guarded: a deleted/undeletable status message must not
-    # abort the whole batch before it starts)
+    # initial status (guarded: a deleted/undeletable status message must
+    # not abort the batch before it starts)
     try:
         await edit_safe(
             status_msg,

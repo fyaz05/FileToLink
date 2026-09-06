@@ -21,8 +21,7 @@ async def set_commands():
         try:
             commands = bot_commands()
             if commands:
-                # lazy import (M12 layering: utils must not import bot at
-                # module scope -- same pattern as canonical_files/render_template)
+                # lazy import (M12 layering: utils must not import bot at module scope)
                 from Thunder.bot import StreamBot
 
                 await StreamBot.set_bot_commands(commands)

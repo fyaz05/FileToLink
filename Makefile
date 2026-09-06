@@ -1,9 +1,7 @@
 .PHONY: format lint test coverage audit run clean
 
 # L8: developer entry points (see CONTRIBUTING.md)
-# NOTE: recipes MUST be indented with hard TABs, not spaces.
-# All tools run through `uv run` so they execute inside the project
-# environment regardless of the developer's ambient virtualenv.
+# Recipes need hard TABs; tools run via `uv run` (project env, not the ambient venv).
 
 format:
 	uv run ruff check Thunder/ update.py tests/ --fix

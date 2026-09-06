@@ -78,8 +78,7 @@ def main() -> None:
     if not UPSTREAM_REPO:
         return
     if UPSTREAM_REPO.startswith("-") or UPSTREAM_BRANCH.startswith("-"):
-        # git would treat leading-dash values as its own options; these are
-        # operator-supplied env vars, but stay on the safe side of argv
+        # operator-supplied env vars, but git would treat leading-dash values as options
         logger.info("UPSTREAM_REPO/UPSTREAM_BRANCH must not start with '-'; skipping self-update.")
         return
     _recover_config_backup()
@@ -90,9 +89,8 @@ def main() -> None:
         logger.info("Not a git repository; skipping self-update.")
         return
 
-    # defense-in-depth: UPSTREAM_REPO flows into git's remote handling, and
-    # the argv/dash guards do not stop the git-remote-ext family
-    # (ext::sh -c ...) -- allowlist the ordinary transport schemes only.
+    # defense-in-depth: the argv/dash guards do not stop the git-remote-ext family
+    # (ext::sh -c ...) -- allowlist ordinary transport schemes only.
     if "://" in UPSTREAM_REPO and UPSTREAM_REPO.split("://", 1)[0] not in {
         "https",
         "http",

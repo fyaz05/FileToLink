@@ -90,9 +90,8 @@ async def generate(user_id: int) -> str:
                         exc_info=True,
                     )
                     raise
-        # The loop always returns or raises on its final attempt; this is a
-        # honest crash instead of returning "" (which callers would treat as
-        # a real token value).
+        # The loop always returns or raises on its final attempt; crash loudly
+        # instead of returning "", which callers would treat as a real token value.
         raise RuntimeError("token save retry loop exited without success")
     except Exception as e:
         logger.error(f"Error in generate for user {user_id}: {e}", exc_info=True)
@@ -102,12 +101,9 @@ async def generate(user_id: int) -> str:
 async def consume(token: str, user_id: int) -> tuple[str, float]:
     """Atomically activate a token (plan M8).
 
-    Replaces the historical ``find_one`` -> ``update_one`` pair that allowed
-    a double-activation race.  Uses ``find_one_and_update`` conditioned on
-    ``activated != True`` so exactly one concurrent activation can win.
-
-    Returns ``(status, hours_valid)`` with status one of
-    ``"ok" | "already" | "wrong_user" | "invalid"``.
+    ``find_one_and_update`` conditioned on ``activated != True``: exactly one
+    concurrent activation can win.  Returns ``(status, hours_valid)`` with
+    status one of ``"ok" | "already" | "wrong_user" | "invalid"``.
     """
     now = datetime.now(UTC)
     try:
@@ -119,8 +115,7 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
         if doc.get("activated"):
             return "already", 0.0
         if doc.get("expires_at") and doc["expires_at"] <= now:
-            # expired unactivated tokens must not be activatable via a stale
-            # deep-link that outraced the TTL monitor/cleanup
+            # a stale deep-link must not activate a token that expired before the CAS
             return "invalid", 0.0
 
         expires_at = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
@@ -142,9 +137,8 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
             return_document=True,
         )
         if activated_doc is None:
-            # Lost the CAS race.  Distinguish a concurrent activation (the
-            # winner activated the doc) from a doc that expired -- or never
-            # had a usable expires_at -- between our pre-check and the CAS;
+            # Lost the CAS race: distinguish a concurrent activation (doc now
+            # activated) from a doc that expired between pre-check and CAS;
             # both used to surface as the misleading "already".
             current = await db.token_col.find_one({"token": token}, {"activated": 1})
             if current and current.get("activated"):

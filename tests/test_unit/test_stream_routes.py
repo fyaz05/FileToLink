@@ -1,4 +1,3 @@
-# tests/test_unit/test_stream_routes.py
 """HTTP parsing primitives (H2 target) + L4 dual-hash + L6 disposition."""
 
 from types import SimpleNamespace
@@ -87,9 +86,8 @@ class TestParseRangeHeader:
 
     @pytest.mark.unit
     def test_end_beyond_eof_clamps_instead_of_416(self):
-        # RFC 7233 §2.1: last-byte-pos >= length means "rest of the file".
-        # Download managers send fixed-chunk ends computed without the size;
-        # a hard 416 broke resume/seeking for exactly those clients.
+        # RFC 7233: last-byte-pos >= length means "rest of the file"; download
+        # managers send such fixed-chunk ends, and a hard 416 broke their resume/seeking.
         assert parse_range_header("bytes=0-99999999", 100) == (0, 99)
         assert parse_range_header("bytes=50-1000", 100) == (50, 99)
 

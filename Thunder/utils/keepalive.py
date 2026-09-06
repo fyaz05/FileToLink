@@ -20,7 +20,7 @@ def _health_url() -> str:
     fqdn = os.getenv("KEEPALIVE_HOST") or Var.BIND_ADDRESS
     if fqdn in ("0.0.0.0", "::"):  # nosec B104 -- string check mapping bind-all to loopback
         fqdn = "127.0.0.1"
-    # self-check always targets loopback over plain HTTP unless overridden
+    # loopback unless KEEPALIVE_HOST overrides
     return f"http://{fqdn}:{Var.PORT}/health"
 
 

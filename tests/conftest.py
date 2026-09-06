@@ -1,11 +1,4 @@
-# tests/conftest.py
-"""Bootstrap a valid fake environment BEFORE any Thunder import.
-
-Thunder.vars validates at import time and hard-fails on missing required
-values (plan H7/M6), so the unit tier must always run with a complete,
-hermetic environment -- no network, no Mongo (AsyncMongoClient constructs
-lazily and never connects at import).
-"""
+"""Bootstrap a valid fake environment BEFORE any Thunder import."""
 
 import os
 import sys
@@ -14,8 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Hard overrides (not setdefault): the unit tier must be hermetic even when
-# the CI/host environment leaks unrelated DATABASE_URL-style variables.
+# Hard overrides (not setdefault): must beat any CI/host-leaked env for hermeticity.
 _required = {
     "API_ID": "1234567",
     "API_HASH": "test-hash",
@@ -30,8 +22,6 @@ _required = {
 for _key, _value in _required.items():
     os.environ[_key] = _value
 
-# Hermeticity: never read the developer's own config.env / config.env.local
-# in-process (optional knobs like PRIVATE_MODE would silently leak into
-# assertions). The subprocess-based precedence tests opt back out; the
-# kill-switch is honoured by vars._load_env_layers().
+# Hermeticity: never read the developer's config.env in-process (optional knobs
+# like PRIVATE_MODE would leak into assertions); subprocess precedence tests opt back out.
 os.environ["THUNDER_SKIP_CONFIG_FILES"] = "1"

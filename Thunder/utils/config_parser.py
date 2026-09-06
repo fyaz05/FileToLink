@@ -9,8 +9,7 @@ class TokenParser:
         self.config_file = config_file
 
     def parse_from_env(self) -> dict[int, str]:
-        # The sort key cannot raise: the digit filter yields an empty string
-        # at worst, which `or 0` turns into a valid int.
+        # sort key cannot raise: digit filter yields "" at worst, `or 0` -> int
         multi_tokens = {
             key: value.strip()
             for key, value in os.environ.items()

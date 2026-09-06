@@ -1,4 +1,3 @@
-# tests/test_unit/test_rate_limiter.py
 """H6: window math, breaker, sweep -- pure logic, no Mongo."""
 
 import time

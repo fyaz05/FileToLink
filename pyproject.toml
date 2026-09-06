@@ -11,13 +11,12 @@ dependencies = [
     "Jinja2==3.1.6",
     "python-dotenv==1.2.3",
     "psutil==7.2.2",
-    "uvloop==0.22.1",            # py3.13 support (was pinned 0.21.0)
+    "uvloop==0.22.1",            # py3.13 support
 ]
 
 [project.optional-dependencies]
-# H5b/R8: escape hatch for Cloudflare-protected shortener providers.
-# Never installed by default; shortener falls back to plain aiohttp.
-# Floor 0.15.0: GHSA-qw2m-4pqf-rmpp (CVE-2026-33752, redirect-based SSRF).
+# H5b/R8: escape hatch for Cloudflare-protected shortener providers; never
+# installed by default (shortener falls back to plain aiohttp). >=0.15: CVE-2026-33752 SSRF.
 shortener-cf = ["curl_cffi>=0.15.0"]
 
 [dependency-groups]
@@ -64,9 +63,8 @@ markers = [
     "integration: testcontainers-backed tests (opt-in, see tests/integration)",
 ]
 addopts = "-m unit"
-# Coverage flags are passed explicitly by `make test` / CI so that the
-# opt-in integration tier (`pytest -m integration`) can run without the
-# unit tier's --cov-fail-under threshold breaking it.
+# Coverage flags are passed by `make test`/CI so the opt-in integration tier
+# (`pytest -m integration`) runs without the unit tier's --cov-fail-under threshold.
 
 [tool.coverage.run]
 source = ["Thunder"]

@@ -1,10 +1,4 @@
-# tests/test_unit/test_tokens_consume.py
-"""consume() status ladder for corrupt/expired tokens -- no Mongo required.
-
-Regression (review C-1 family): a corrupt token row without a usable
-expires_at must surface as "invalid", never as the misleading "already"
-that the historical fallback produced.
-"""
+"""consume() status ladder (review C-1): corrupt/expired tokens read "invalid", never "already"."""
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -16,9 +10,8 @@ from Thunder.utils.tokens import consume
 
 
 class _FakeTokenCol:
-    """find_one_and_update always loses the CAS (returns None); find_one
-    returns the full row for the pre-check and -- when a projection is
-    passed (the post-CAS re-read signature) -- the scripted post-CAS doc."""
+    """find_one_and_update always loses the CAS (returns None); find_one returns the
+    pre-check row, or the scripted post-CAS doc when a projection arg is passed."""
 
     def __init__(self, doc, post_cas_doc=None):
         self._doc = doc

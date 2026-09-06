@@ -15,8 +15,7 @@ from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
-# M9/H4b: bound the total time one streaming handler (and its admission
-# slot) may stay pinned by repeated FloodWaits before we give up with 503.
+# M9/H4b: caps the total FloodWait pinning of one stream handler before a 503.
 _MAX_STREAM_FLOODWAIT_SECONDS = 60.0
 
 
@@ -28,14 +27,9 @@ class ByteStreamer:
         self.chat_id = int(Var.BIN_CHANNEL)
 
     async def get_message(self, message_id: int) -> Message:
-        # H4b/H8: bounded FloodWait handling via tg_call -- the previous
-        # open-ended sleep loop could pin an HTTP handler (and its stream
-        # slot) indefinitely on a sustained Telegram flood.
-        #
-        # Transient Telegram failures raise TelegramUnavailable, NEVER
-        # FileNotFound: the delivery route self-heals (deletes the record)
-        # on FileNotFound, so conflating the two let a Telegram brownout
-        # destroy valid vault records en masse.
+        # H4b/H8: bounded FloodWait handling via tg_call; transient failures
+        # raise TelegramUnavailable, NEVER FileNotFound -- the delivery route
+        # self-heals (deletes the record) on FileNotFound.
         try:
             message = await tg_call(
                 self.client.get_messages, self.chat_id, message_id, retries=2, timeout=60
@@ -65,18 +59,16 @@ class ByteStreamer:
         if limit > 0:
             chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
 
-        # Fetch the target ONCE, outside the retry loop: a per-retry re-fetch
-        # cost one extra get_messages RPC per FloodWait, and a failing
-        # re-fetch turned a mid-stream hiccup of an already-streaming file
-        # into a spurious not-found.
+        # fetch the target ONCE, outside the retry loop: per-retry re-fetches
+        # cost an extra RPC per FloodWait and turn hiccups into spurious 404s
         target = await self.get_message(media_ref) if isinstance(media_ref, int) else media_ref
 
         chunks_done = 0
         floodwait_sleep_total = 0.0
         while True:
             try:
-                # stream_media is an async generator in pyrofork; the stubs
-                # union it with file_ref types, so narrow via ignore here.
+                # stream_media is an async generator; stubs union it with
+                # file_ref types, hence the ignore below
                 async for chunk in self.client.stream_media(  # type: ignore[union-attr]
                     target, offset=chunk_offset, limit=chunk_limit
                 ):
@@ -84,15 +76,14 @@ class ByteStreamer:
                     chunks_done += 1
                 return
             except FloodWait as e:
-                # resume from where the CONSUMER actually is: restarting from
-                # the original offset re-yields bytes already sent, corrupting
-                # the download (duplicated middle, truncated tail).
+                # resume from where the consumer is: restarting from the
+                # original offset re-sends bytes and corrupts the download
                 if chunks_done:
                     chunk_offset += chunks_done
                     if chunk_limit:
                         chunk_limit = max(chunk_limit - chunks_done, 0)
                     chunks_done = 0
-                # bound total pinned time on sustained floods (was unbounded)
+                # bound total pinned time on sustained floods
                 if floodwait_sleep_total + e.value > _MAX_STREAM_FLOODWAIT_SECONDS:
                     raise TelegramUnavailable(
                         "Sustained Telegram flood while streaming "
@@ -131,8 +122,7 @@ class ByteStreamer:
         }
 
     async def get_file_info(self, message_id: int) -> dict[str, Any]:
-        # no blanket swallow: the legacy route's error ladder already maps
-        # FileNotFound -> 404 and everything else -> 500 with an error_id;
-        # masking them here turned transient outages into misleading 404s
+        # no blanket swallow: the route's error ladder maps FileNotFound -> 404
+        # and all else -> 500; masking here turned outages into misleading 404s
         message = await self.get_message(message_id)
         return self.get_file_info_sync(message)

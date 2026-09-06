@@ -1,4 +1,3 @@
-# tests/test_unit/test_media_types.py
 import pytest
 
 from Thunder.utils.media_types import (

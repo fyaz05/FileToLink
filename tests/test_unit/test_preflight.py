@@ -1,4 +1,3 @@
-# tests/test_unit/test_preflight.py
 """M12: unified preflight chain -- gate presets, ordering, fail-closed ids."""
 
 import pytest

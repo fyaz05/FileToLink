@@ -2,17 +2,13 @@
 
 """URL shortener (plan H5b + M5).
 
-* HTTP layer is asyncio-native ``aiohttp`` (cloudscraper removed; the
-  requests/urllib3 transitive tree is gone).  ``curl_cffi`` remains an
-  optional escape hatch for Cloudflare-protected providers -- declared as
-  the ``shortener-cf`` extra, never a hard dependency.
-* M5 hardening: LRU cache + per-URL singleflight, https-only
-  endpoints, redirects never followed, and the returned short URL's host
-  must match the configured site's host (anti redirect-to-attacker).
-  API-key placement is provider-mandated: Bitly takes a Bearer header;
-  path/query-key providers (ouo.io, generic) keep their documented
-  schemes.
-* The plugin registry and the offline Linkvertise builder are preserved.
+aiohttp HTTP layer; ``curl_cffi`` is an optional escape hatch for
+Cloudflare-protected providers (the ``shortener-cf`` extra, never a hard
+dependency).  M5 hardening: LRU cache + per-URL singleflight, https-only
+endpoints, redirects never followed, and the returned short URL's host must
+match the configured site's host (anti redirect-to-attacker).  API-key
+placement is provider-mandated (Bitly: Bearer header; path/query-key
+providers keep their documented schemes).
 """
 
 import asyncio
@@ -58,10 +54,8 @@ class ShortenerPlugin(ABC):
     def _host_matches(domain: str, *bases: str) -> bool:
         """Exact-host or subdomain match against the provider's hostnames.
 
-        Substring checks (``"bitly.com" in domain``) accept lookalikes such
-        as ``evil.com/bitly.com`` or ``bitly.com.evil.com`` (CodeQL
-        py/incomplete-url-substring-sanitization); parsing the hostname
-        closes those.  A trailing root dot (FQDN form) is tolerated.
+        Substring checks accept lookalikes (``bitly.com.evil.com``); parsing
+        the hostname closes them.  A trailing root dot (FQDN form) is tolerated.
         """
         try:
             host = urlparse(f"https://{domain}").hostname or ""
@@ -195,8 +189,7 @@ class ShortenerSystem:
         return GenericShortenerPlugin
 
     async def initialize(self) -> bool:
-        # lock: the first concurrent use (e.g. two shorten() calls in one
-        # gather) would otherwise build two sessions and leak one
+        # lock: concurrent first use would otherwise build two sessions and leak one
         async with self._init_lock:
             if self.ready:
                 return True
@@ -216,9 +209,8 @@ class ShortenerSystem:
                     timeout=timeout,
                     headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) FileToLink/shortener"},
                 )
-                # NOTE: redirects are disabled per-request (aiohttp does not accept
-                # ``allow_redirects`` on the session constructor -- passing it there
-                # raises TypeError at runtime and silently disabled the shortener).
+                # NOTE: redirects are disabled per-request -- aiohttp rejects
+                # allow_redirects on the session constructor (TypeError).
                 self.domain = site
                 plugin_class = self._get_plugin_class(site)
                 self.plugin = plugin_class()
@@ -268,8 +260,7 @@ class ShortenerSystem:
                 future.set_result(result)
             return result
         except BaseException as e:
-            # CancelledError is BaseException: without this, a cancelled
-            # runner never resolves the future and every waiter hangs forever
+            # CancelledError is BaseException: without this, a cancelled runner hangs every waiter.
             if not future.done():
                 future.set_exception(
                     e

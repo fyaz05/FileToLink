@@ -69,8 +69,7 @@ async def get_force_channel_button(client: Client):
     if not Var.FORCE_CHANNEL_ID:
         return None
     try:
-        # reuse the resolved-once cache in force_channel.get_force_info
-        # instead of a fresh get_chat RPC on every help-panel render
+        # get_force_info resolves once and caches -- no fresh get_chat RPC per render
         link, title = await get_force_info(client)
         if link:
             return [
@@ -93,7 +92,7 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
     if force_button:
         buttons.append(force_button)
     buttons.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    # keep /help command and the help panel on one implementation (M1)
+    # M1: /help command and the help panel share one implementation
     help_text = build_help_text(Var.MAX_BATCH_FILES)
     try:
         await edit_safe(
@@ -154,8 +153,7 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
 @StreamBot.on_callback_query(filters.regex(r"^close_panel$"))
 @guard_callback
 async def close_panel_callback(client: Client, callback_query: CallbackQuery):
-    # M11: permission check -- previously any group member who saw a Close
-    # button could trigger deletion attempts.
+    # M11: only the owner or whoever triggered the panel may close it.
     closer_id = callback_query.from_user.id if callback_query.from_user else None
     message = callback_query.message
 
@@ -164,10 +162,8 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
         if closer_id == Var.OWNER_ID:
             is_allowed = True
         else:
-            # Panels are bot-sent, so message.from_user is the BOT -- comparing
-            # against it locked every non-owner out of their own Close button.
-            # The person who triggered the panel is its reply target (the
-            # command/queue message) or, in private chats, the chat peer.
+            # Panels are bot-sent, so message.from_user is the bot -- the requester
+            # is the reply target's sender, or the chat peer in private chats.
             if message.reply_to_message and message.reply_to_message.from_user:
                 is_allowed = closer_id == message.reply_to_message.from_user.id
             if not is_allowed and message.chat and message.chat.type == enums.ChatType.PRIVATE:

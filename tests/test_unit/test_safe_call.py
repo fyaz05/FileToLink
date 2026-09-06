@@ -1,4 +1,3 @@
-# tests/test_unit/test_safe_call.py
 """H4a helper semantics: retry-then-retry, exhaustion, timeout."""
 
 import asyncio

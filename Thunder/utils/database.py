@@ -12,16 +12,15 @@ from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
 
-# H8: every Mongo operation gets a server-side budget so a brownout cannot
-# pin handlers forever.  Per-op overrides remain possible at call sites.
+# H8: every Mongo op gets a server-side budget so a brownout cannot pin
+# handlers forever; per-op overrides remain possible at call sites.
 MONGO_TIMEOUT_MS = 5000
 
 
 class Database:
     def __init__(self, uri: str, database_name: str, **kwargs):
-        # tz_aware=True: pymongo's default returns naive UTC datetimes, and
-        # comparing them against the aware datetime.now(UTC) used across the
-        # codebase raises TypeError (this broke token activation at runtime).
+        # tz_aware=True: pymongo's default returns naive UTC datetimes, which
+        # raise TypeError against aware now(UTC) (broke token activation once)
         self._client = AsyncMongoClient(uri, timeoutMS=MONGO_TIMEOUT_MS, tz_aware=True, **kwargs)
         self.db = self._client[database_name]
         self.col: AsyncCollection = self.db.users
@@ -89,18 +88,12 @@ class Database:
 
     async def _backfill_file_last_seen(self) -> None:
         """One-off migration: stamp ``last_seen_at`` on legacy rows that lack
-        it, so the TTL index activated right after gives them a full window
-        instead of letting them age out from an undefined reference point.
+        it, so the TTL index activated right after gives them a full window.
 
-        Runs as a sequence of ``_id``-paged micro-batches: every statement is
-        a cheap ``_id``-index seek that fits comfortably inside the
-        client-wide 5s ``timeoutMS``. A single ``update_many`` here would be
-        a COLLSCAN that ExecutionTimeouts on sizeable vaults -- and its
-        failure used to abort every subsequent index ensure (review item 9).
-
-        A bounded number of batches per boot keeps startup latency
-        predictable; an interrupted migration resumes on the next boot and
-        must never raise (the unique-index ensures below always run).
+        ``_id``-paged micro-batches keep each statement inside the 5s
+        ``timeoutMS`` (a single ``update_many`` would COLLSCAN and abort the
+        remaining index ensures). Bounded batches per boot; interrupted runs
+        resume next boot and must never raise.
         """
         stamp = datetime.datetime.now(datetime.UTC)
         batch_size = 500
@@ -149,9 +142,8 @@ class Database:
                 "last_seen_at", expireAfterSeconds=expire_after_seconds
             )
         except ExecutionTimeout:
-            # A first-ever build on a large vault can exceed the client
-            # budget; the server-side build continues and create_index is
-            # idempotent once it completes, so just re-check next boot.
+            # first build on a large vault can exceed the budget; the
+            # server-side build continues and is idempotent, re-check next boot
             logger.warning(
                 "File TTL index build exceeded the client timeout budget; "
                 "the server-side build continues and is re-checked on next boot."
@@ -160,9 +152,8 @@ class Database:
             if e.code != 85:  # 85 = IndexOptionsConflict
                 logger.warning(f"File TTL index creation failed: {e}")
                 return
-            # Mongo cannot alter a TTL value via createIndexes; an operator
-            # changing FILE_TTL_DAYS between boots must not abort the
-            # remaining (unique-index) ensures below.
+            # Mongo cannot alter TTL via createIndexes; an operator's
+            # FILE_TTL_DAYS change must not abort the remaining unique ensures
             logger.warning("FILE_TTL_DAYS changed between boots; recreating file TTL index.")
             try:
                 await self.files_col.drop_index("last_seen_at_1")
@@ -180,9 +171,8 @@ class Database:
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
-            # L2: optional file TTL -- backfill before the TTL index exists
-            # so pre-existing rows get a full window instead of vanishing
-            # the moment the index is created (default off).
+            # L2: backfill before the TTL index exists so pre-existing rows
+            # get a full window instead of vanishing on activation (default off)
             if Var.FILE_TTL_DAYS > 0:
                 expected_ttl = Var.FILE_TTL_DAYS * 86400
                 current_ttl = await self._file_ttl_index_seconds()
@@ -191,8 +181,7 @@ class Database:
                     logger.debug(f"File TTL index already active: {Var.FILE_TTL_DAYS} days")
                 else:
                     if not backfill_done:
-                        # Stamp legacy rows before (re)activating the index so
-                        # pre-existing files get a full TTL window.
+                        # stamp legacy rows first so they get a full TTL window
                         await self._backfill_file_last_seen()
                     await self._create_file_ttl_index(expected_ttl)
                     logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")

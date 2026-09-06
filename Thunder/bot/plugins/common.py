@@ -51,14 +51,14 @@ from Thunder.utils.safe_call import edit_safe, reply_safe
 from Thunder.utils.tokens import consume
 from Thunder.vars import Var
 
-# M7: surfaces that interpolate user-controlled values are HTML now;
-# every interpolation is html.escape()d.
+# M7: surfaces interpolating user-controlled values are HTML; every
+# interpolation is html.escape()d.
 
 
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, msg: Message):
-    # M12: /start runs banned + private-mode only so the activation flow
-    # stays reachable for token-gated users.
+    # M12: banned + private-mode gates only, so token-gated users can
+    # still reach the activation flow.
     if await preflight(bot, msg, gates=GATES_START) is None:
         return
     user = msg.from_user
@@ -171,8 +171,8 @@ async def send_user_dc(msg: Message, user: User):
     await reply_safe(
         msg,
         text=txt,
-        # DC templates are HTML (M7): pin the parse mode so pyrofork's
-        # DEFAULT markdown pre-pass cannot reinterpret user data
+        # M7: pin HTML parse mode -- pyrofork's markdown pre-pass must not
+        # reinterpret user data
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
     )
@@ -225,9 +225,8 @@ async def send_file_dc(msg: Message, file_msg: Message):
 
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, msg: Message):
-    # Gate chain for /dc (banned -> private-mode, then force-sub).  The token
-    # gate is intentionally NOT applied: /dc is informational, and applying
-    # it here would lock token-gated users out of diagnostics.
+    # Gate chain: banned -> private-mode (GATES_START), then force-sub; token gate
+    # intentionally skipped -- /dc is informational, must stay reachable for token users.
     if await preflight(bot, msg, gates=GATES_START) is None:
         return
     from Thunder.utils.decorators import force_sub_gate

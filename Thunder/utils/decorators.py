@@ -52,9 +52,8 @@ async def check_banned(client, message: Message) -> bool:
         try:
             ban_details = await flags.get_or_load(
                 ("banned_user", user_id),
-                # raise_on_error=True: the DB method otherwise swallows Mongo
-                # outages into None, which the cache would treat as
-                # "not banned" (negative-cached for 5 min) -- fail-open.
+                # raise_on_error=True: otherwise Mongo outages become None,
+                # negative-cached 5 min as "not banned" -- fail-open
                 lambda: db.is_user_banned(user_id, raise_on_error=True),
             )
         except Exception as e:
@@ -132,15 +131,13 @@ async def check_private_mode(client, message: Message) -> bool:
 async def require_token(client, message: Message) -> bool:
     """Token-activation gate (H7: cached checks, fail-closed)."""
     try:
-        # NOTE: the TOKEN_ENABLED short-circuit comes FIRST -- when the
-        # feature is off this gate must be a no-op even for anonymous
-        # senders, or group /link via an anonymous admin would break.
+        # TOKEN_ENABLED short-circuit comes FIRST: with the feature off the
+        # gate must no-op even for anonymous senders, or anonymous /link breaks
         if not Var.TOKEN_ENABLED:
             return True
 
         if not message.from_user:
-            # Channel-posted / anonymous senders cannot hold an activation
-            # token: fail-closed (they also cannot complete the flow).
+            # anonymous senders cannot hold a token: fail-closed
             logger.debug("Denied unattributable sender (token gate, no from_user).")
             try:
                 await reply_safe(message, MSG_ERROR_ANONYMOUS_SENDER)
@@ -175,8 +172,7 @@ async def require_token(client, message: Message) -> bool:
                 pass
             return False
 
-        # generate() either returns a token string or raises; there is no
-        # empty-string path to defend against.
+        # generate() returns a token or raises; no empty-string path exists
 
         try:
             me = await tg_call(client.get_me)
@@ -251,9 +247,7 @@ async def get_shortener_status(client, message: Message) -> bool:
         return Var.SHORTEN_MEDIA_LINKS
 
 
-# --------------------------------------------------------------------------
 # M12: unified preflight chain
-# --------------------------------------------------------------------------
 
 #: gate registry -- order is the documented contract; adding a new gate is a
 #: one-place change here (chain asserted by tests/test_unit/test_preflight.py).

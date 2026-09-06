@@ -13,11 +13,10 @@ from Thunder.utils.logger import logger
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
-# NOTE: ``Thunder.server.exceptions`` is imported lazily inside render_page()
-# to avoid a circular import (server/__init__ -> stream_routes -> here).
+# NOTE: lazy import of Thunder.server.exceptions inside render_page() avoids
+# a circular import (server/__init__ -> stream_routes -> here).
 
-# M2: resolve templates relative to the package, not the process CWD --
-# the old ``'Thunder/template'`` loader only worked when CWD == repo root.
+# M2: resolve templates relative to the package, not the process CWD.
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "template"
 
 template_env = Environment(
@@ -73,8 +72,7 @@ async def render_media_page(
     return await template.render_async(**context)
 
 
-# L1: the legacy /watch route re-fetched the vault message from Telegram on
-# every view; a small TTL+LRU cache keeps repeat views off the API.
+# L1: TTL+LRU cache so repeat legacy /watch views don't re-fetch the vault message.
 _legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str]]" = OrderedDict()
 _LEGACY_CACHE_TTL_SECONDS = 600
 _LEGACY_CACHE_MAX_ITEMS = 1024
@@ -139,8 +137,7 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
         return await render_media_page(file_name, src)
     except Exception as e:
-        # the capability hash is a credential: never write it to bot.txt
-        # (which /log uploads) -- log the message id instead
+        # the capability hash is a credential: never log it (bot.txt is uploaded via /log)
         logger.error(
             f"Error in render_page for message_id {message_id} (hash redacted): {e}",
             exc_info=True,

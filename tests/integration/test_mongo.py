@@ -1,10 +1,4 @@
-# tests/integration/test_mongo.py
-"""L9: integration tier against a real MongoDB via testcontainers.
-
-Run explicitly:  pytest -m integration
-Requires Docker; skipped cleanly (as designed, mirroring ThunderGo's
-build-tag-gated tier) when Docker is unavailable.
-"""
+"""L9: real-MongoDB tier via testcontainers; opt in with `pytest -m integration` (needs Docker)."""
 
 import os
 from datetime import UTC
@@ -37,11 +31,8 @@ def db(mongo_container):
     import Thunder.utils.database as database_module
     import Thunder.utils.tokens as tokens_module
 
-    # Bind a fresh Database directly to the container URI.  Rebinding is
-    # required because Thunder.vars is cached in sys.modules by the unit
-    # tier's imports (Var.DATABASE_URL still points at the platform
-    # config), and `from ... import db` copies froze the old instance in
-    # every consumer module.  Reload-based approaches never worked.
+    # Rebind a fresh Database: unit-tier imports cache Thunder.vars in sys.modules
+    # and `from ... import db` copies froze the old instance in every consumer.
     fresh = database_module.Database(mongo_container.get_connection_url(), "thunder_test")
     original = database_module.db
     database_module.db = fresh
@@ -80,14 +71,9 @@ async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
 async def test_ensure_indexes_ttl_lifecycle(  # pragma: no cover
     mongo_container, monkeypatch
 ):
-    """Review item 9 regression: FILE_TTL_DAYS must survive a change between
-    boots (IndexOptionsConflict -> drop+recreate) without aborting the
-    remaining unique-index ensures, and the legacy-row backfill must stamp
-    last_seen_at before the index first activates.
-
-    Uses its own Database instance (fresh event-loop affinity) so it does
-    not share the module fixture's client loop.
-    """
+    """Review item 9 regression: a FILE_TTL_DAYS change between boots must drop+recreate
+    the TTL index without aborting the remaining unique-index ensures, and legacy rows
+    must be stamped with last_seen_at before the index first activates."""
     from datetime import datetime
 
     import Thunder.utils.database as database_module
