@@ -19,7 +19,7 @@ def _invalidate_user_flags(user_id: int) -> None:
 async def check(user_id: int) -> bool:
     """Token/authorization gate (H7: cached, fail-closed)."""
     try:
-        if not getattr(Var, "TOKEN_ENABLED", False):
+        if not Var.TOKEN_ENABLED:
             return True
         if user_id == Var.OWNER_ID:
             return True
@@ -64,7 +64,7 @@ async def generate(user_id: int) -> str:
         base_delay = 0.5
         for attempt in range(max_retries):
             try:
-                ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
+                ttl_hours = Var.TOKEN_TTL_HOURS
                 created_at = datetime.now(UTC)
                 expires_at = created_at + timedelta(hours=ttl_hours)
                 await db.save_main_token(
@@ -90,7 +90,10 @@ async def generate(user_id: int) -> str:
                         exc_info=True,
                     )
                     raise
-        return ""
+        # The loop always returns or raises on its final attempt; this is a
+        # honest crash instead of returning "" (which callers would treat as
+        # a real token value).
+        raise RuntimeError("token save retry loop exited without success")
     except Exception as e:
         logger.error(f"Error in generate for user {user_id}: {e}", exc_info=True)
         raise
@@ -139,8 +142,14 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
             return_document=True,
         )
         if activated_doc is None:
-            # lost the race to a concurrent activation
-            return "already", 0.0
+            # Lost the CAS race.  Distinguish a concurrent activation (the
+            # winner activated the doc) from a doc that expired -- or never
+            # had a usable expires_at -- between our pre-check and the CAS;
+            # both used to surface as the misleading "already".
+            current = await db.token_col.find_one({"token": token}, {"activated": 1})
+            if current and current.get("activated"):
+                return "already", 0.0
+            return "invalid", 0.0
         _invalidate_user_flags(user_id)
         hours = round((expires_at - now).total_seconds() / 3600, 1)
         logger.debug(f"Token atomically activated for user {user_id} ({hours}h)")

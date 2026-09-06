@@ -1,11 +1,12 @@
 # Thunder/utils/database.py
 
 import datetime
+import uuid
 from typing import Any
 
 from pymongo import AsyncMongoClient, UpdateOne
 from pymongo.asynchronous.collection import AsyncCollection
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
@@ -17,8 +18,11 @@ MONGO_TIMEOUT_MS = 5000
 
 
 class Database:
-    def __init__(self, uri: str, database_name: str, *args, **kwargs):
-        self._client = AsyncMongoClient(uri, *args, timeoutMS=MONGO_TIMEOUT_MS, **kwargs)
+    def __init__(self, uri: str, database_name: str, **kwargs):
+        # tz_aware=True: pymongo's default returns naive UTC datetimes, and
+        # comparing them against the aware datetime.now(UTC) used across the
+        # codebase raises TypeError (this broke token activation at runtime).
+        self._client = AsyncMongoClient(uri, timeoutMS=MONGO_TIMEOUT_MS, tz_aware=True, **kwargs)
         self.db = self._client[database_name]
         self.col: AsyncCollection = self.db.users
         self.banned_users_col: AsyncCollection = self.db.banned_users
@@ -51,13 +55,34 @@ class Database:
             # L2: optional file TTL -- backfill first so pre-existing rows do
             # not vanish the moment the index is created (default off).
             if Var.FILE_TTL_DAYS > 0:
+                # Backfill before the TTL index exists so pre-existing rows
+                # do not vanish the moment it is created (default off).  The
+                # client-level 5s timeoutMS would abort this COLLSCAN on any
+                # sizeable vault, so this one-off migration gets its own
+                # generous budget.
                 await self.files_col.update_many(
                     {"last_seen_at": {"$exists": False}},
                     {"$set": {"last_seen_at": datetime.datetime.now(datetime.UTC)}},
+                    timeoutMS=120_000,  # type: ignore[call-arg]  # CSOT per-op budget (stub lag)
                 )
-                await self.files_col.create_index(
-                    "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
-                )
+                try:
+                    await self.files_col.create_index(
+                        "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
+                    )
+                except OperationFailure as e:
+                    # Mongo cannot change a TTL value via createIndexes; an
+                    # operator changing FILE_TTL_DAYS between boots must not
+                    # abort the remaining (unique-index) ensures below.
+                    logger.warning(
+                        f"FILE_TTL_DAYS changed between boots; recreating file TTL index: {e}"
+                    )
+                    try:
+                        await self.files_col.drop_index("last_seen_at_1")
+                    except Exception:
+                        pass
+                    await self.files_col.create_index(
+                        "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
+                    )
                 logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")
             else:
                 try:
@@ -378,24 +403,6 @@ class Database:
             )
             raise
 
-    async def touch_file_record(
-        self, public_hash: str, *, reused: bool = False, raise_on_error: bool = False
-    ) -> bool:
-        try:
-            update_doc: dict[str, Any] = {
-                "$set": {"last_seen_at": datetime.datetime.now(datetime.UTC)},
-                "$inc": {"seen_count": 1},
-            }
-            if reused:
-                update_doc["$inc"]["reuse_count"] = 1
-            await self.files_col.update_one({"public_hash": public_hash}, update_doc)
-            return True
-        except Exception as e:
-            logger.error(f"Error touching canonical file {public_hash}: {e}", exc_info=True)
-            if raise_on_error:
-                raise
-            return False
-
     async def bulk_touch_file_records(
         self, items: list[tuple[str, bool]], *, raise_on_error: bool = False
     ) -> bool:
@@ -453,15 +460,24 @@ class Database:
 
     async def acquire_file_ingest_claim(
         self, file_unique_id: str, *, ttl_seconds: int = 60
-    ) -> bool:
+    ) -> str | None:
+        """Acquire the ingest claim; returns an opaque owner token, or
+        ``None`` when another worker holds a live claim.
+
+        The owner token makes the matching ``release_file_ingest_claim``
+        refuse to delete a newer worker's claim after this worker's TTL
+        expired mid-copy (which previously caused a redundant third copy).
+        """
         now = datetime.datetime.now(datetime.UTC)
+        owner = uuid.uuid4().hex
         claim_fields = {
+            "owner": owner,
             "created_at": now,
             "expires_at": now + datetime.timedelta(seconds=ttl_seconds),
         }
         try:
             await self.file_ingest_locks_col.insert_one({"_id": file_unique_id, **claim_fields})
-            return True
+            return owner
         except DuplicateKeyError:
             try:
                 result = await self.file_ingest_locks_col.find_one_and_update(
@@ -472,7 +488,7 @@ class Database:
                     {"$set": claim_fields},
                     return_document=False,
                 )
-                return bool(result)
+                return owner if result else None
             except Exception as e:
                 logger.error(
                     f"Error updating ingest claim for {file_unique_id}: {e}", exc_info=True
@@ -482,10 +498,13 @@ class Database:
             logger.error(f"Error acquiring ingest claim for {file_unique_id}: {e}", exc_info=True)
             raise
 
-    async def release_file_ingest_claim(self, file_unique_id: str) -> bool:
+    async def release_file_ingest_claim(self, file_unique_id: str, owner: str) -> bool:
+        """Release the claim only if we still own it (owner-checked)."""
         try:
-            await self.file_ingest_locks_col.delete_one({"_id": file_unique_id})
-            return True
+            result = await self.file_ingest_locks_col.delete_one(
+                {"_id": file_unique_id, "owner": owner}
+            )
+            return result.deleted_count > 0
         except Exception as e:
             logger.error(f"Error releasing ingest claim for {file_unique_id}: {e}", exc_info=True)
             return False
