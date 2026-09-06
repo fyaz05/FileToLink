@@ -11,13 +11,21 @@ RUN apt-get update && \
         build-essential \
         libssl-dev \
     && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash thunder
 
 COPY requirements.txt .
 
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY --chown=thunder:thunder . .
+
+# L8: run as non-root
+USER thunder
+
+# L8: container health follows /health (M3)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+    CMD python3 -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8080')+'/health', timeout=5)"
 
 CMD ["bash", "thunder.sh"]

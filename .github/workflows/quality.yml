@@ -1,0 +1,73 @@
+name: Quality Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov ruff mypy bandit vulture pip-audit
+
+      - name: Ruff (lint + format check)
+        run: |
+          ruff check Thunder/ update.py
+          ruff format --check Thunder/ update.py
+
+      - name: Mypy (permissive baseline, tightened per phase)
+        run: mypy Thunder --ignore-missing-imports
+        continue-on-error: true
+
+      - name: Unit tests
+        run: pytest -m unit
+
+      - name: pip-audit
+        run: pip-audit -r requirements.txt --strict || pip-audit -r requirements.txt
+
+      - name: Bandit (medium+ severity)
+        run: bandit -r Thunder -ll --skip B101
+
+      - name: Vulture (dead-code gate, whitelisted)
+        run: vulture Thunder whitelist.py --min-confidence 80
+
+      - name: Dependency count gate (leanness is permanent)
+        run: |
+          COUNT=$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt)
+          echo "Direct runtime deps: $COUNT"
+          if [ "$COUNT" -gt 8 ]; then
+            echo "::error::Direct dependency count increased beyond the agreed 8; justify in the PR or remove."
+            exit 1
+          fi
+
+  docker:
+    if: github.repository == 'fyaz05/FileToLink' && github.event_name == 'push'
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: fyaz05
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: fyaz05/thunder:latest

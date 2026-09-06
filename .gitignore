@@ -4,6 +4,12 @@
 .venv/
 .Python
 config.env
+config.env.local
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 log.text
 .vscode/
 **/__pycache__/
