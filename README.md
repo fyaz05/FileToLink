@@ -236,6 +236,12 @@ Enable controlled access with tokens:
 3. Admins can grant permanent authorization with `/authorize` to bypass tokens.
 4. Tokens include activation links for secure access.
 
+> **Note**: with `TOKEN_ENABLED=True` (or `PRIVATE_MODE=True`), messages
+> without an attributable sender — e.g. channel posts or anonymous-admin
+> messages in the bot's own channel — are rejected by design. Interact with
+> the bot from a personal account so your user ID can be checked against
+> the token/ban gates.
+
 ### URL Shortening
 
 Configure URL shortening for cleaner links:

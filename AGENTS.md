@@ -140,6 +140,9 @@ from Thunder.vars import Var                      # All env config
 - Owner bypasses everything; authorized users bypass all but the ban check.
 - `/start` runs only `banned + private-mode` so the activation flow stays reachable.
 - `PRIVATE_MODE=True` restricts the whole bot to owner + authorized users.
+- Messages with no attributable sender (`from_user is None`: channel posts,
+  anonymous admins) are DENIED by the private-mode and token gates —
+  fail-closed, never bypass.
 - Adding a new gate = one entry in `PREFLIGHT_GATES` + a row above.
 
 ## Rate Limiting
