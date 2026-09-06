@@ -6,7 +6,7 @@ from typing import Any
 
 from pymongo import AsyncMongoClient, UpdateOne
 from pymongo.asynchronous.collection import AsyncCollection
-from pymongo.errors import DuplicateKeyError, OperationFailure
+from pymongo.errors import DuplicateKeyError, ExecutionTimeout, OperationFailure
 
 from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
@@ -32,6 +32,8 @@ class Database:
         self.restart_message_col: AsyncCollection = self.db.restart_message
         self.files_col: AsyncCollection = self.db.files
         self.file_ingest_locks_col: AsyncCollection = self.db.file_ingest_locks
+        # One-shot migration markers (backfill completion bookkeeping)
+        self.migration_flags_col: AsyncCollection = self.db.migration_flags
 
     async def _deduplicate_users(self) -> None:
         pipeline: list[dict[str, Any]] = [
@@ -50,40 +52,150 @@ class Database:
             if result.deleted_count > 0:
                 logger.warning(f"Deduplicated {result.deleted_count} duplicate user documents.")
 
+    async def _file_ttl_index_seconds(self) -> int | None:
+        """Current ``expireAfterSeconds`` of the file TTL index, or None when
+        the index is absent (or its options cannot be inspected)."""
+        try:
+            # AsyncCollection.list_indexes() is a coroutine in pymongo's
+            # async API: iterate the awaited cursor, never the coroutine.
+            cursor = await self.files_col.list_indexes()
+            async for idx in cursor:
+                if idx.get("name") == "last_seen_at_1":
+                    try:
+                        return int(idx.get("expireAfterSeconds", -1))
+                    except (TypeError, ValueError):
+                        return -1
+        except Exception as e:
+            logger.warning(f"Could not inspect file TTL index: {e}")
+        return None
+
+    async def _backfill_done(self) -> bool:
+        try:
+            return bool(
+                await self.migration_flags_col.find_one({"_id": "file_last_seen_backfill_done"})
+            )
+        except Exception:
+            return False
+
+    async def _mark_backfill_done(self) -> None:
+        try:
+            await self.migration_flags_col.update_one(
+                {"_id": "file_last_seen_backfill_done"},
+                {"$set": {"done_at": datetime.datetime.now(datetime.UTC)}},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"Could not record backfill completion marker: {e}")
+
+    async def _backfill_file_last_seen(self) -> None:
+        """One-off migration: stamp ``last_seen_at`` on legacy rows that lack
+        it, so the TTL index activated right after gives them a full window
+        instead of letting them age out from an undefined reference point.
+
+        Runs as a sequence of ``_id``-paged micro-batches: every statement is
+        a cheap ``_id``-index seek that fits comfortably inside the
+        client-wide 5s ``timeoutMS``. A single ``update_many`` here would be
+        a COLLSCAN that ExecutionTimeouts on sizeable vaults -- and its
+        failure used to abort every subsequent index ensure (review item 9).
+
+        A bounded number of batches per boot keeps startup latency
+        predictable; an interrupted migration resumes on the next boot and
+        must never raise (the unique-index ensures below always run).
+        """
+        stamp = datetime.datetime.now(datetime.UTC)
+        batch_size = 500
+        max_batches_per_boot = 100  # ~50k rows scanned per boot; resumes next boot
+        last_id: Any = None
+        stamped = 0
+        try:
+            for _ in range(max_batches_per_boot):
+                page_filter: dict[str, Any] = {}
+                if last_id is not None:
+                    page_filter["_id"] = {"$gt": last_id}
+                page = (
+                    await self.files_col.find(page_filter, {"last_seen_at": 1})
+                    .sort("_id", 1)
+                    .to_list(batch_size)
+                )
+                if not page:
+                    await self._mark_backfill_done()
+                    return
+                last_id = page[-1]["_id"]
+                stale_ids = [doc["_id"] for doc in page if "last_seen_at" not in doc]
+                if stale_ids:
+                    await self.files_col.update_many(
+                        {"_id": {"$in": stale_ids}},
+                        {"$set": {"last_seen_at": stamp}},
+                    )
+                    stamped += len(stale_ids)
+                if len(page) < batch_size:
+                    await self._mark_backfill_done()
+                    if stamped:
+                        logger.info(f"Backfilled last_seen_at on {stamped} legacy file records.")
+                    return
+            logger.warning(
+                "last_seen_at backfill hit the per-boot scan cap "
+                f"({max_batches_per_boot * batch_size} docs); resuming on next boot."
+            )
+        except Exception as e:
+            # The migration must never abort the remaining index ensures.
+            logger.warning(f"last_seen_at backfill interrupted (resumes next boot): {e}")
+
+    async def _create_file_ttl_index(self, expire_after_seconds: int) -> None:
+        """Create (or recreate after an operator TTL change) the file TTL
+        index without letting its failure modes abort the remaining ensures."""
+        try:
+            await self.files_col.create_index(
+                "last_seen_at", expireAfterSeconds=expire_after_seconds
+            )
+        except ExecutionTimeout:
+            # A first-ever build on a large vault can exceed the client
+            # budget; the server-side build continues and create_index is
+            # idempotent once it completes, so just re-check next boot.
+            logger.warning(
+                "File TTL index build exceeded the client timeout budget; "
+                "the server-side build continues and is re-checked on next boot."
+            )
+        except OperationFailure as e:
+            if e.code != 85:  # 85 = IndexOptionsConflict
+                logger.warning(f"File TTL index creation failed: {e}")
+                return
+            # Mongo cannot alter a TTL value via createIndexes; an operator
+            # changing FILE_TTL_DAYS between boots must not abort the
+            # remaining (unique-index) ensures below.
+            logger.warning("FILE_TTL_DAYS changed between boots; recreating file TTL index.")
+            try:
+                await self.files_col.drop_index("last_seen_at_1")
+            except Exception:
+                pass
+            try:
+                await self.files_col.create_index(
+                    "last_seen_at", expireAfterSeconds=expire_after_seconds
+                )
+            except ExecutionTimeout:
+                logger.warning(
+                    "File TTL index rebuild exceeded the client timeout budget; "
+                    "re-checked on next boot."
+                )
+
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
-            # L2: optional file TTL -- backfill first so pre-existing rows do
-            # not vanish the moment the index is created (default off).
+            # L2: optional file TTL -- backfill before the TTL index exists
+            # so pre-existing rows get a full window instead of vanishing
+            # the moment the index is created (default off).
             if Var.FILE_TTL_DAYS > 0:
-                # Backfill before the TTL index exists so pre-existing rows
-                # do not vanish the moment it is created (default off).  The
-                # client-level 5s timeoutMS would abort this COLLSCAN on any
-                # sizeable vault, so this one-off migration gets its own
-                # generous budget.
-                await self.files_col.update_many(
-                    {"last_seen_at": {"$exists": False}},
-                    {"$set": {"last_seen_at": datetime.datetime.now(datetime.UTC)}},
-                    timeoutMS=120_000,  # type: ignore[call-arg]  # CSOT per-op budget (stub lag)
-                )
-                try:
-                    await self.files_col.create_index(
-                        "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
-                    )
-                except OperationFailure as e:
-                    # Mongo cannot change a TTL value via createIndexes; an
-                    # operator changing FILE_TTL_DAYS between boots must not
-                    # abort the remaining (unique-index) ensures below.
-                    logger.warning(
-                        f"FILE_TTL_DAYS changed between boots; recreating file TTL index: {e}"
-                    )
-                    try:
-                        await self.files_col.drop_index("last_seen_at_1")
-                    except Exception:
-                        pass
-                    await self.files_col.create_index(
-                        "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
-                    )
-                logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")
+                expected_ttl = Var.FILE_TTL_DAYS * 86400
+                current_ttl = await self._file_ttl_index_seconds()
+                backfill_done = await self._backfill_done()
+                if current_ttl == expected_ttl and backfill_done:
+                    logger.debug(f"File TTL index already active: {Var.FILE_TTL_DAYS} days")
+                else:
+                    if not backfill_done:
+                        # Stamp legacy rows before (re)activating the index so
+                        # pre-existing files get a full TTL window.
+                        await self._backfill_file_last_seen()
+                    await self._create_file_ttl_index(expected_ttl)
+                    logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")
             else:
                 try:
                     await self.files_col.drop_index("last_seen_at_1")
