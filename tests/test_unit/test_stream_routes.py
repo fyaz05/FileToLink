@@ -6,6 +6,7 @@ from aiohttp.web import HTTPBadRequest, HTTPRequestRangeNotSatisfiable
 
 from Thunder.server.stream_routes import (
     _is_activation_token,
+    _telegram_activate_url,
     build_content_disposition,
     parse_media_request,
     parse_range_header,
@@ -137,3 +138,16 @@ class TestActivationTokenShape:
         assert not _is_activation_token("../../evil.com?")
         assert not _is_activation_token("x\r\nLocation: https://evil.com")
         assert not _is_activation_token("a" * 20 + "/" + "b" * 22)
+
+
+class TestTelegramActivateUrl:
+    @pytest.mark.unit
+    def test_valid_token_produces_expected_deep_link(self):
+        token = "a" * 43
+        assert _telegram_activate_url("MyBot", token) == f"https://t.me/MyBot?start={token}"
+
+    @pytest.mark.unit
+    def test_hostile_token_cannot_reshape_url(self):
+        url = _telegram_activate_url("MyBot", "x&start=evil#frag")
+        assert url.startswith("https://t.me/MyBot?start=")
+        assert "&" not in url[24:] and "#" not in url[24:]

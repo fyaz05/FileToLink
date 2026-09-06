@@ -4,7 +4,7 @@ import re
 import secrets
 import time
 from collections.abc import Mapping
-from urllib.parse import quote, unquote
+from urllib.parse import quote, quote_plus, unquote
 
 from aiohttp import web
 
@@ -301,6 +301,16 @@ def _is_activation_token(token: str) -> bool:
     return bool(_ACTIVATION_TOKEN_RE.fullmatch(token))
 
 
+def _telegram_activate_url(username: str, token: str) -> str:
+    """Build the t.me deep link with the token percent-encoded.
+
+    ``quote_plus`` guarantees the token can only ever occupy the query
+    value slot (no ``&``/``#``/CR/LF can reshape the URL) -- a no-op for
+    shape-valid tokens, which are already URL-safe.
+    """
+    return f"https://t.me/{username}?start={quote_plus(token, safe='')}"
+
+
 @routes.get("/activate/{token}")
 async def activate_endpoint(request: web.Request):
     """M8: web entry for activation -- shorteners can produce real URLs."""
@@ -312,7 +322,7 @@ async def activate_endpoint(request: web.Request):
         raise web.HTTPBadRequest(text="Malformed activation token")
     if not username:
         raise web.HTTPServiceUnavailable(text="Bot is still starting; try again shortly.")
-    raise web.HTTPFound(f"https://t.me/{username}?start={token}")
+    raise web.HTTPFound(_telegram_activate_url(username, token))
 
 
 @routes.get("/status", allow_head=True)
