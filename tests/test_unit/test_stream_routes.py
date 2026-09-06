@@ -1,7 +1,10 @@
 # tests/test_unit/test_stream_routes.py
 """HTTP parsing primitives (H2 target) + L4 dual-hash + L6 disposition."""
 
+from types import SimpleNamespace
+
 import pytest
+from aiohttp import web
 from aiohttp.web import HTTPBadRequest, HTTPRequestRangeNotSatisfiable
 
 from Thunder.server.stream_routes import (
@@ -151,3 +154,102 @@ class TestTelegramActivateUrl:
         url = _telegram_activate_url("MyBot", "x&start=evil#frag")
         assert url.startswith("https://t.me/MyBot?start=")
         assert "&" not in url[24:] and "#" not in url[24:]
+
+
+class TestCanonicalDeliveryErrorLadder:
+    """Review fix regression: transport errors must 503 WITHOUT deleting the
+    record; only true Telegram-side absence may self-heal (delete)."""
+
+    @staticmethod
+    def _request():
+        return SimpleNamespace(match_info={"secure_hash": "a" * 32})
+
+    @pytest.mark.unit
+    async def test_transport_error_maps_to_503_and_never_deletes(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.server.exceptions import TelegramUnavailable
+
+        deleted: list[dict] = []
+
+        async def get_message(_ref):
+            raise TelegramUnavailable("FloodWait exhausted")
+
+        async def get_file_by_hash(_h, raise_on_error=False):
+            return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
+
+        async def forget_stale_record(record):
+            deleted.append(record)
+
+        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
+        monkeypatch.setattr(
+            stream_routes,
+            "select_optimal_client",
+            lambda: (0, SimpleNamespace(get_message=get_message)),
+        )
+        monkeypatch.setattr(stream_routes, "forget_stale_record", forget_stale_record)
+        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
+
+        with pytest.raises(web.HTTPServiceUnavailable) as exc:
+            await stream_routes.canonical_media_delivery(self._request())
+        assert exc.value.headers.get("Retry-After") == "5"
+        assert deleted == []  # transient error must NOT destroy the record
+        assert stream_routes.work_loads == {0: 0}  # admission slot released
+
+    @pytest.mark.unit
+    async def test_true_absence_self_heals_and_maps_to_404(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.server.exceptions import FileNotFound
+
+        deleted: list[dict] = []
+
+        async def get_message(_ref):
+            raise FileNotFound("no such message")
+
+        async def get_file_by_hash(_h, raise_on_error=False):
+            return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
+
+        async def forget_stale_record(record):
+            deleted.append(record)
+
+        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
+        monkeypatch.setattr(
+            stream_routes,
+            "select_optimal_client",
+            lambda: (0, SimpleNamespace(get_message=get_message)),
+        )
+        monkeypatch.setattr(stream_routes, "forget_stale_record", forget_stale_record)
+        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
+
+        with pytest.raises(web.HTTPNotFound):
+            await stream_routes.canonical_media_delivery(self._request())
+        assert len(deleted) == 1  # genuine absence is the one self-heal case
+        assert stream_routes.work_loads == {0: 0}
+
+    @pytest.mark.unit
+    async def test_medialess_vault_message_self_heals(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+
+        deleted: list[dict] = []
+
+        async def get_message(_ref):
+            return SimpleNamespace()  # message exists but carries no media
+
+        async def get_file_by_hash(_h, raise_on_error=False):
+            return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
+
+        async def forget_stale_record(record):
+            deleted.append(record)
+
+        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
+        monkeypatch.setattr(
+            stream_routes,
+            "select_optimal_client",
+            lambda: (0, SimpleNamespace(get_message=get_message)),
+        )
+        monkeypatch.setattr(stream_routes, "forget_stale_record", forget_stale_record)
+        monkeypatch.setattr(stream_routes, "get_media", lambda m: None)
+        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
+
+        with pytest.raises(web.HTTPNotFound):
+            await stream_routes.canonical_media_delivery(self._request())
+        assert len(deleted) == 1

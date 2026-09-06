@@ -5,7 +5,7 @@ import glob
 import importlib.util
 import os
 import sys
-from datetime import datetime
+import time
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -122,7 +122,7 @@ async def import_plugins():
 
 
 async def start_services():
-    start_time = datetime.now()
+    start_time = time.monotonic()
     background_tasks: list[asyncio.Task] = []
     print_banner()
     print("╔════════════════ INITIALIZING BOT SERVICES ════════════════╗")
@@ -184,7 +184,7 @@ async def start_services():
 
     print("   ▶ Starting Web Server initialization...")
     try:
-        app_runner = web.AppRunner(await web_server())
+        app_runner = web.AppRunner(await web_server(), access_log=None)
         await app_runner.setup()
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
@@ -222,7 +222,7 @@ async def start_services():
         await _safe_teardown_step(db.close, "database")
         raise SystemExit(1) from e
 
-    elapsed_time = (datetime.now() - start_time).total_seconds()
+    elapsed_time = time.monotonic() - start_time
     print("╠═══════════════════════════════════════════════════════════╣")
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")

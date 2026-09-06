@@ -484,9 +484,11 @@ async def canonical_media_delivery(request: web.Request):
             serve_info = dict(file_record)
             actual_size = int(getattr(media, "file_size", 0) or 0)
             if actual_size and actual_size != int(serve_info.get("file_size", 0) or 0):
+                # no capability hash in logs: hash+size would fingerprint the
+                # link for anyone who later reads /log output
                 logger.warning(
-                    f"Record size {serve_info.get('file_size')} != vault size {actual_size} "
-                    f"for {secure_hash}; serving verified length"
+                    f"Record size {serve_info.get('file_size')} != vault size {actual_size}; "
+                    "serving verified length"
                 )
             if actual_size:
                 # never tell clients a Content-Length the upstream cannot deliver
@@ -501,7 +503,7 @@ async def canonical_media_delivery(request: web.Request):
                     await update_cached_file_id(file_record, new_file_id)
                 except Exception as e:
                     logger.warning(
-                        f"Failed to refresh cached file_id for canonical file {secure_hash}: {e}",
+                        f"Failed to refresh cached file_id for a canonical file: {e}",
                         exc_info=True,
                     )
 
