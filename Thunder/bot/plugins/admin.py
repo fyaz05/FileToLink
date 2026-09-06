@@ -1,9 +1,9 @@
 # Thunder/bot/plugins/admin.py
 
 import asyncio
+import contextlib
 import html
 import os
-import shutil
 import time
 from io import BytesIO
 from typing import Any
@@ -58,7 +58,7 @@ from Thunder.utils.messages import (
     MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING,
     MSG_SHELL_NO_OUTPUT,
-    MSG_SHELL_OUTPUT,
+    MSG_SHELL_OUTPUT_CAPTION,
     MSG_SHELL_OUTPUT_STDERR,
     MSG_SHELL_OUTPUT_STDOUT,
     MSG_SHELL_USAGE,
@@ -185,10 +185,11 @@ async def show_stats(client: Client, message: Message):
         ram_used = humanbytes(ram_info.used)
         ram_free = humanbytes(ram_info.free)
 
-        total_disk, used_disk, free_disk = await asyncio.to_thread(shutil.disk_usage, ".")
-
-        # H8: the last synchronous psutil call is off the event loop too
-        disk_percent = (await asyncio.to_thread(psutil.disk_usage, ".")).percent
+        # one psutil call yields all four values (was: shutil + psutil)
+        disk = await asyncio.to_thread(psutil.disk_usage, ".")
+        total_disk, used_disk, free_disk = disk.total, disk.used, disk.free
+        # H8: the synchronous psutil call is off the event loop
+        disk_percent = disk.percent
 
         limiter_line = (
             ", ".join(f"{k}={v}" for k, v in rate_limiter.occupancy().items()) or "disabled"
@@ -443,7 +444,7 @@ async def unban_command(client: Client, message: Message):
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
     # L10: env kill-switch -- the powerful command is opt-in.
-    if not getattr(Var, "ENABLE_SHELL", False):
+    if not Var.ENABLE_SHELL:
         return await reply(message, text=MSG_SHELL_DISABLED, parse_mode=ParseMode.HTML)
 
     if len(message.command) < 2:
@@ -469,7 +470,8 @@ async def run_shell_command(client: Client, message: Message):
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
         except TimeoutError:
-            process.kill()
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
             await process.communicate()
             raise TimeoutError("shell command exceeded 60s") from None
 
@@ -494,7 +496,7 @@ async def run_shell_command(client: Client, message: Message):
             file = BytesIO(output.encode())
             file.name = "shell_output.txt"
             await message.reply_document(
-                file, caption=MSG_SHELL_OUTPUT.format(command=html.escape(command))
+                file, caption=MSG_SHELL_OUTPUT_CAPTION.format(command=html.escape(command))
             )
         else:
             await reply(message, text=output, parse_mode=ParseMode.HTML)

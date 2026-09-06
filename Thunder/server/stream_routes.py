@@ -7,10 +7,11 @@ from collections.abc import Mapping
 from urllib.parse import quote, quote_plus, unquote
 
 from aiohttp import web
+from pyrogram.types import Message
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.server.exceptions import FileNotFound, InvalidHash
+from Thunder.server.exceptions import FileNotFound, InvalidHash, TelegramUnavailable
 from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.canonical_files import (
     LEGACY_PUBLIC_HASH_LENGTH,
@@ -32,8 +33,8 @@ routes = web.RouteTableDef()
 # legacy 6-char capability hash family (L1: kept while ENABLE_LEGACY_LINKS=on)
 SECURE_HASH_LENGTH = 6
 CHUNK_SIZE = 1024 * 1024
-# M9: per-client admission cap (env-tunable; was a hardcoded constant)
-MAX_CONCURRENT_PER_CLIENT = max(1, int(getattr(Var, "MAX_CONCURRENT_STREAMS", 8)))
+# M9: per-client admission cap
+MAX_CONCURRENT_PER_CLIENT = max(1, Var.MAX_CONCURRENT_STREAMS)
 OVERLOAD_RETRY_AFTER_SECONDS = 2
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 PATTERN_HASH_FIRST = re.compile(rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
@@ -177,13 +178,6 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     return start, end
 
 
-def _resolve_unique_id(file_info: dict) -> str:
-    unique_id = file_info.get("unique_id") or file_info.get("file_unique_id")
-    if not unique_id:
-        raise FileNotFound("File unique ID not found in info.")
-    return unique_id
-
-
 def _resolve_filename(file_info: dict, mime_type: str) -> str:
     filename = file_info.get("file_name")
     if filename:
@@ -195,13 +189,20 @@ def _resolve_filename(file_info: dict, mime_type: str) -> str:
     return f"file_{secrets.token_hex(4)}.{ext}"
 
 
+def _resolve_unique_id(file_info: dict) -> str:
+    unique_id = file_info.get("unique_id") or file_info.get("file_unique_id")
+    if not unique_id:
+        raise FileNotFound("File unique ID not found in info.")
+    return unique_id
+
+
 async def _serve_media_response(
     request: web.Request,
     *,
     file_info: dict,
     streamer: ByteStreamer,
     client_id: int,
-    media_ref: int | object,
+    media_ref: int | Message,
 ):
     file_size = int(file_info.get("file_size", 0) or 0)
     if file_size == 0:
@@ -287,7 +288,7 @@ async def health_endpoint(request):
     )
 
 
-_ACTIVATION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+_ACTIVATION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
 def _is_activation_token(token: str) -> bool:
@@ -384,7 +385,6 @@ async def canonical_media_preview(request: web.Request):
         rendered_page = await render_media_page(
             file_name,
             src,
-            requested_action="stream",
             mime_type=file_record.get("mime_type"),
         )
 
@@ -422,7 +422,7 @@ async def media_preview(request: web.Request):
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
 
-        rendered_page = await render_page(message_id, secure_hash, requested_action="stream")
+        rendered_page = await render_page(message_id, secure_hash)
 
         response = web.Response(
             text=rendered_page,
@@ -472,6 +472,9 @@ async def canonical_media_delivery(request: web.Request):
                 raise FileNotFound(
                     "Vault message missing; record self-healed, re-upload to regenerate the link"
                 ) from None
+            # TelegramUnavailable (FloodWait-exhaustion / timeout / transport)
+            # is NOT proof the vault message is gone: it must not delete the
+            # record.  It falls through to the 503 ladder below.
 
             media = get_media(vault_message)
             if not media:
@@ -512,6 +515,11 @@ async def canonical_media_delivery(request: web.Request):
         except (FileNotFound, InvalidHash):
             work_loads[client_id] -= 1
             raise
+        except TelegramUnavailable as e:
+            work_loads[client_id] -= 1
+            raise web.HTTPServiceUnavailable(
+                text=str(e), headers={**CORS_HEADERS, "Retry-After": "5"}
+            ) from e
         except web.HTTPException as e:
             work_loads[client_id] -= 1
             logger.debug(f"Client HTTP error in canonical stream: {e}")
@@ -570,6 +578,11 @@ async def media_delivery(request: web.Request):
         except (FileNotFound, InvalidHash):
             work_loads[client_id] -= 1
             raise
+        except TelegramUnavailable as e:
+            work_loads[client_id] -= 1
+            raise web.HTTPServiceUnavailable(
+                text=str(e), headers={**CORS_HEADERS, "Retry-After": "5"}
+            ) from e
         except web.HTTPException as e:
             work_loads[client_id] -= 1
             logger.debug(f"Client HTTP error in media stream: {e}")

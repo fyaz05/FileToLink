@@ -8,12 +8,16 @@ from pyrogram import Client
 from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
-from Thunder.server.exceptions import FileNotFound
+from Thunder.server.exceptions import FileNotFound, TelegramUnavailable
 from Thunder.utils.file_properties import get_media
 from Thunder.utils.logger import logger
 from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
+
+# M9/H4b: bound the total time one streaming handler (and its admission
+# slot) may stay pinned by repeated FloodWaits before we give up with 503.
+_MAX_STREAM_FLOODWAIT_SECONDS = 60.0
 
 
 class ByteStreamer:
@@ -27,21 +31,26 @@ class ByteStreamer:
         # H4b/H8: bounded FloodWait handling via tg_call -- the previous
         # open-ended sleep loop could pin an HTTP handler (and its stream
         # slot) indefinitely on a sustained Telegram flood.
+        #
+        # Transient Telegram failures raise TelegramUnavailable, NEVER
+        # FileNotFound: the delivery route self-heals (deletes the record)
+        # on FileNotFound, so conflating the two let a Telegram brownout
+        # destroy valid vault records en masse.
         try:
             message = await tg_call(
                 self.client.get_messages, self.chat_id, message_id, retries=2, timeout=60
             )
         except FloodWait as e:
-            raise FileNotFound(f"Message {message_id} unavailable (FloodWait {e.value}s)") from e
+            raise TelegramUnavailable(
+                f"Telegram temporarily unavailable (FloodWait {e.value}s)"
+            ) from e
         except Exception as e:
             logger.debug(f"Error fetching message {message_id}: {e}", exc_info=True)
-            raise FileNotFound(f"Message {message_id} not found") from e
+            raise TelegramUnavailable(f"Telegram fetch failed for message {message_id}") from e
 
-        if isinstance(message, list):  # defensive: pyrogram returns a list for list inputs
-            if not message:
-                raise FileNotFound(f"Message {message_id} not found")
-            message = message[0]
-        if not message or not message.media:
+        # pyrogram's stubs declare `Message | list[Message]`, but a single
+        # id always yields a single Message; a list here means bad input
+        if isinstance(message, list) or not message or not message.media:
             raise FileNotFound(f"Message {message_id} not found")
         return message
 
@@ -56,15 +65,16 @@ class ByteStreamer:
         if limit > 0:
             chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
 
-        # H4b: the historical fallback-message plumbing was dead (the
-        # fallback id always equalled the primary ref, so the fallback ref
-        # was never appended) -- removed.
+        # Fetch the target ONCE, outside the retry loop: a per-retry re-fetch
+        # cost one extra get_messages RPC per FloodWait, and a failing
+        # re-fetch turned a mid-stream hiccup of an already-streaming file
+        # into a spurious not-found.
+        target = await self.get_message(media_ref) if isinstance(media_ref, int) else media_ref
+
         chunks_done = 0
+        floodwait_sleep_total = 0.0
         while True:
             try:
-                target = (
-                    await self.get_message(media_ref) if isinstance(media_ref, int) else media_ref
-                )
                 # stream_media is an async generator in pyrofork; the stubs
                 # union it with file_ref types, so narrow via ignore here.
                 async for chunk in self.client.stream_media(  # type: ignore[union-attr]
@@ -82,11 +92,18 @@ class ByteStreamer:
                     if chunk_limit:
                         chunk_limit = max(chunk_limit - chunks_done, 0)
                     chunks_done = 0
+                # bound total pinned time on sustained floods (was unbounded)
+                if floodwait_sleep_total + e.value > _MAX_STREAM_FLOODWAIT_SECONDS:
+                    raise TelegramUnavailable(
+                        "Sustained Telegram flood while streaming "
+                        f">{_MAX_STREAM_FLOODWAIT_SECONDS:.0f}s; try again shortly"
+                    ) from e
+                floodwait_sleep_total += e.value
                 logger.debug(f"FloodWait: stream_file, sleep {e.value}s")
                 await asyncio.sleep(e.value)
             except Exception as e:
                 logger.debug(f"Error streaming media ref {media_ref}: {e}", exc_info=True)
-                raise FileNotFound(f"Unable to stream file: {e}") from e
+                raise TelegramUnavailable(f"Unable to stream file: {e}") from e
 
     def get_file_info_sync(self, message: Message) -> dict[str, Any]:
         media = get_media(message)

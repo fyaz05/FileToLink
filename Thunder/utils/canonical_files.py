@@ -13,6 +13,7 @@ from pyrogram.types import Message
 from Thunder.utils.database import db
 from Thunder.utils.file_properties import get_fname, get_media, get_uniqid
 from Thunder.utils.logger import logger
+from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
@@ -30,8 +31,8 @@ _CACHE_PRUNE_INTERVAL = 50
 
 # M14: bounded touch buffer -- overflow drops increments (counted) instead
 # of growing memory; flushes batch into a single BulkWrite.
-_FLUSH_DELAY_SECONDS = max(1, min(60, int(getattr(Var, "TOUCH_FLUSH_SECONDS", 3))))
-_TOUCH_BUFFER_MAX = max(100, int(getattr(Var, "TOUCH_BUFFER_MAX", 1000)))
+_FLUSH_DELAY_SECONDS = max(1, min(60, Var.TOUCH_FLUSH_SECONDS))
+_TOUCH_BUFFER_MAX = max(100, min(10_000, Var.TOUCH_BUFFER_MAX))
 _dropped_touches = 0
 
 _cache_by_unique_id: "OrderedDict[str, tuple[float, dict[str, Any]]]" = OrderedDict()
@@ -50,16 +51,12 @@ def build_public_hash(file_unique_id: str) -> str:
 
 
 def _infer_mime_type(media: Any) -> str:
+    """Mime for a record: the media's own mime when present, else the
+    canonical map (NOT a local mini-map that drifted from it)."""
     mime_type = getattr(media, "mime_type", None)
     if mime_type:
         return mime_type
-
-    mime_map = {
-        "photo": "image/jpeg",
-        "voice": "audio/ogg",
-        "videonote": "video/mp4",
-    }
-    return mime_map.get(type(media).__name__.lower(), "application/octet-stream")
+    return ext_and_mime_for_class(type(media).__name__.lower())[1]
 
 
 def build_file_record(
@@ -210,7 +207,10 @@ async def _bulk_flush() -> None:
         await db.bulk_touch_file_records([(h, reused) for h, (_, reused) in items])
     except Exception as e:
         # merge the batch back so the next flush retries -- clearing before
-        # the write succeeded silently discarded every pending increment
+        # the write succeeded silently discarded every pending increment.
+        # NOTE: with an ordered=False bulk write failing part-way, this
+        # re-applies increments for ops that DID apply -- seen_count may
+        # over-count for that subset (counters only; accepted trade-off).
         logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
         for h, payload in items:
             _pending_touches.setdefault(h, payload)
@@ -276,17 +276,10 @@ async def update_cached_file_id(record: dict[str, Any], file_id: str) -> None:
     await db.update_file_id(record["public_hash"], file_id, raise_on_error=True)
 
 
-async def _fetch_canonical_message(record: dict[str, Any], client=None) -> Message | None:
+async def _fetch_canonical_message(record: dict[str, Any], client) -> Message | None:
     canonical_message_id = record.get("canonical_message_id")
     if canonical_message_id is None:
         return None
-
-    # M12 layering break: the client is passed in by callers; the lazy
-    # fallback keeps backward compatibility for existing call sites.
-    if client is None:
-        from Thunder.bot import StreamBot
-
-        client = StreamBot
 
     try:
         message = await tg_call(
@@ -307,16 +300,14 @@ async def _fetch_canonical_message(record: dict[str, Any], client=None) -> Messa
     return message
 
 
-async def _is_canonical_record_valid(
-    record: dict[str, Any], file_unique_id: str, client=None
-) -> bool:
+async def _is_canonical_record_valid(record: dict[str, Any], file_unique_id: str, client) -> bool:
     message = await _fetch_canonical_message(record, client)
     return bool(message and get_uniqid(message) == file_unique_id)
 
 
 async def _get_reusable_canonical_record(
     file_unique_id: str,
-    client=None,
+    client,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     existing = await get_file_by_unique_id(file_unique_id)
     if not existing:
@@ -345,7 +336,7 @@ async def _get_reusable_canonical_record(
 
 
 async def _wait_for_other_worker_canonical_record(
-    file_unique_id: str, client=None
+    file_unique_id: str, client
 ) -> dict[str, Any] | None:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _INGEST_CLAIM_WAIT_SECONDS
@@ -375,6 +366,12 @@ def _merge_replacement_record(
     refreshed["first_source_message_id"] = existing.get(
         "first_source_message_id", refreshed.get("first_source_message_id")
     )
+    # Preserve the existing public_hash: re-hashing here would rewrite a
+    # legacy 20-char hash to the new 32-hex family and permanently break
+    # every published legacy link (the L4 "valid forever" contract).
+    preserved_hash = existing.get("public_hash")
+    if preserved_hash:
+        refreshed["public_hash"] = preserved_hash
     return refreshed
 
 
@@ -408,7 +405,7 @@ async def file_ingest_lock(file_unique_id: str):
 async def get_or_create_canonical_file(
     source_message: Message,
     copy_media: Callable[[Message], Awaitable[Message | None]],
-    client=None,
+    client,
 ) -> tuple[dict[str, Any] | None, Message | None, bool]:
     file_unique_id = get_uniqid(source_message)
     if not file_unique_id:
@@ -426,10 +423,10 @@ async def get_or_create_canonical_file(
                 schedule_touch_file_record(reusable_record, reused=True)
                 return reusable_record, None, True
 
-            claim_acquired = await db.acquire_file_ingest_claim(
+            claim_owner = await db.acquire_file_ingest_claim(
                 file_unique_id, ttl_seconds=_INGEST_CLAIM_TTL_SECONDS
             )
-            if not claim_acquired:
+            if not claim_owner:
                 reusable_record = await _wait_for_other_worker_canonical_record(
                     file_unique_id, client
                 )
@@ -490,7 +487,7 @@ async def get_or_create_canonical_file(
                     )
                     return None, stored_message, False
             finally:
-                await db.release_file_ingest_claim(file_unique_id)
+                await db.release_file_ingest_claim(file_unique_id, claim_owner)
 
         logger.error(f"Max ingest retries ({_MAX_INGEST_RETRIES}) exhausted for {file_unique_id}")
         return None, None, False

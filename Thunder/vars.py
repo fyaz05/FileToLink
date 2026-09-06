@@ -16,12 +16,33 @@ The ``Var`` facade is kept so no import site changes.
 
 import os
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from Thunder.utils.logger import logger
 
-load_dotenv("config.env")
-load_dotenv("config.env.local")  # optional local override layer
+
+def _load_env_layers() -> None:
+    """Load ``config.env`` then ``config.env.local`` with REAL precedence.
+
+    ``load_dotenv(override=False)`` (the historical behaviour) never lets a
+    later file override keys an earlier file already set, so the documented
+    "local layer wins" was inverted -- operator edits in config.env.local
+    were silently ignored.  Precedence now is: real environment >
+    config.env.local > config.env; existing os.environ entries still win
+    (same contract as load_dotenv's default).
+    """
+    merged: dict[str, str | None] = {}
+    for path in ("config.env", "config.env.local"):
+        try:
+            merged.update(dotenv_values(path))
+        except OSError as e:
+            logger.warning(f"Could not read {path}: {e}")
+    for key, value in merged.items():
+        if value is not None:
+            os.environ.setdefault(key, value)
+
+
+_load_env_layers()
 
 
 def str_to_bool(val: str) -> bool:
@@ -37,6 +58,8 @@ def str_to_int_set(val: str) -> set[int]:
         try:
             result.add(int(x))
         except (TypeError, ValueError):
+            # collect-all-errors (M6): junk tokens are surfaced, not skipped
+            _config_errors.append(f"{val!r} contains a non-integer entry: {x!r}")
             continue
     return result
 

@@ -12,8 +12,12 @@ is charged at *execution* time (the old code charged at enqueue AND again
 inside the executor, double-charging every queued request); FloodWait
 inside a worker requeues the request with an attempt counter instead of
 sleeping the worker.
-H6c: a global RPS token-bucket breaker (§5.1b) sheds bursts before they all
-hit Telegram-side FLOOD_WAIT at once.
+H6c: a global RPS token-bucket breaker (§5.1b) shapes bursts through the
+queue: the immediate path also consumes a breaker token, and when the
+bucket is dry the request falls through to the queue instead of being
+dropped -- queued workers consume tokens at exec time, so bursts of
+distinct users are spread out instead of all hitting Telegram-side
+FLOOD_WAIT at once.
 """
 
 import asyncio
@@ -90,7 +94,6 @@ class RateLimiter:
     def __init__(self):
         self.request_queue: deque[dict] = deque()
         self.priority_queue: deque[dict] = deque()
-        self.user_queue_counts: dict[int, int] = {}
 
         self.request_event: asyncio.Event = asyncio.Event()
         self.request_lock: asyncio.Lock = asyncio.Lock()
@@ -254,17 +257,10 @@ class RateLimiter:
                 self.file_processing_times.pop(key, None)
                 dropped_files += 1
 
-        dropped_counts = 0
-        for user_id, count in list(self.user_queue_counts.items()):
-            if count <= 0:
-                self.user_queue_counts.pop(user_id, None)
-                dropped_counts += 1
-
         return {
             "user_windows": dropped_users,
             "global_entries": dropped_global,
             "file_entries": dropped_files,
-            "stale_counts": dropped_counts,
         }
 
     def occupancy(self) -> dict[str, float | int]:
@@ -282,6 +278,12 @@ class RateLimiter:
         if delay > 0:
             request_data["not_before"] = time.time() + delay
         async with self.request_lock:
+            # Re-insertion policy (deliberate, bounded by MAX_REQUEST_ATTEMPTS):
+            # FloodWait/breaker requeues go to the FRONT -- those requests have
+            # already waited (their delay has elapsed by the time they run
+            # again), while not-yet-executed peers have not.  Deferred
+            # rotations in _process_one go to the BACK -- they have not waited
+            # yet and must not jump the queue.
             if queue_type == "priority":
                 self.priority_queue.appendleft(request_data)
             else:
@@ -328,7 +330,6 @@ class RateLimiter:
                 self.request_queue.append(request_data)
                 queue_name = "regular"
 
-            self.user_queue_counts[user_id] = self.user_queue_counts.get(user_id, 0) + 1
             logger.debug(
                 f"Added request for user {user_id} to {queue_name} queue. Total queued: {total_queued + 1}"
             )
@@ -373,14 +374,16 @@ class RateLimiter:
                 return True
             if record:
                 request_data["charged"] = True
-            if self.global_rate_limit_enabled and not self.breaker.allow():
+            if self.breaker.rate > 0 and not self.breaker.allow():
+                # breaker is active via GLOBAL_RPS_LIMIT or the derived
+                # per-minute rate -- same shaping at exec time, same requeue
+                # discipline for both sources
                 retry = max(self.breaker.retry_after(), 0.5)
                 await self._requeue_request(request_data, queue_type, delay=retry)
                 return True
 
         logger.debug(f"Processing request for user {user_id} from {queue_type} queue.")
         start_time = time.time()
-        processed = False
         try:
             await request_data["func"](*request_data["args"], **request_data["kwargs"])
             processing_time = time.time() - start_time
@@ -396,7 +399,6 @@ class RateLimiter:
                     file_identifier, deque(maxlen=100)
                 )
                 file_times.append(processing_time)
-            processed = True
 
         except FloodWait as e:
             # H6b: requeue with an attempt counter instead of stalling the
@@ -408,30 +410,16 @@ class RateLimiter:
                     f"Dropping request for user {user_id} after {attempts} "
                     f"FloodWait requeues (last wait {e.value}s)."
                 )
-                processed = True  # leave the queue
                 await self._notify_drop(request_data)
             else:
                 logger.warning(f"FloodWait for user {user_id}, requeueing (attempt {attempts}).")
                 await self._requeue_request(request_data, queue_type, delay=min(e.value, 300.0))
         except asyncio.CancelledError:
-            # Shutdown/cancellation: release the queue slot so the user's
-            # count does not leak, then propagate.
-            async with self.request_lock:
-                if user_id in self.user_queue_counts:
-                    self.user_queue_counts[user_id] -= 1
-                    if self.user_queue_counts[user_id] <= 0:
-                        self.user_queue_counts.pop(user_id, None)
+            # Shutdown/cancellation: propagate; the queue item is already
+            # popped, so nothing further to release.
             raise
         except Exception as e:
             logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
-            processed = True
-        finally:
-            if processed:
-                async with self.request_lock:
-                    if user_id in self.user_queue_counts:
-                        self.user_queue_counts[user_id] -= 1
-                        if self.user_queue_counts[user_id] <= 0:
-                            self.user_queue_counts.pop(user_id, None)
         return True
 
     async def _notify_drop(self, request_data: dict) -> None:
@@ -496,7 +484,6 @@ class RateLimiter:
         async with self.request_lock:
             self.request_queue.clear()
             self.priority_queue.clear()
-            self.user_queue_counts.clear()
             self.request_event.clear()
         if self._deferred_timer is not None:
             self._deferred_timer.cancel()
@@ -596,7 +583,7 @@ rate_limiter = RateLimiter()
 def start_executors() -> list[asyncio.Task]:
     """Start the worker pool (H6b) -- callers keep the tasks for shutdown."""
     workers: list[asyncio.Task] = []
-    for i in range(max(1, int(getattr(Var, "EXECUTOR_WORKERS", 5)))):
+    for i in range(Var.EXECUTOR_WORKERS):
         workers.append(
             asyncio.create_task(
                 rate_limiter.request_executor(), name=f"request_executor_worker_{i}"
@@ -625,19 +612,16 @@ async def handle_rate_limited_request(
         await handler(bot, message, *args, **kwargs)
         return
 
-    # H6c: probe without consuming -- the queued exec path below is where
-    # breaker tokens are consumed.  The immediate path is gated by the 60s
-    # user window only (charging here == charging at exec); sub-second
-    # breaker throttling therefore applies to queued traffic, not bursts of
-    # within-window users.
-    if rate_limiter.global_rate_limit_enabled and rate_limiter.breaker.retry_after() > 0:
-        logger.warning(f"Global RPS breaker engaged; shedding request for user {user_id}.")
-        if not (rl_user_id is not None and rl_user_id < 0):
-            await send_queue_full_message(bot, message, file_identifier)
-        return
-
-    # Immediate path: executes right now, so charging here == charging at exec.
-    if await rate_limiter.check_limits(user_id, record=True):
+    # H6c (revised): the immediate path now consumes a breaker token too.
+    # Bursts of distinct within-window users were exactly the traffic that
+    # produced Telegram-side FLOOD_WAITs, and it never touched the bucket
+    # (tokens were consumed only by the queued exec path).  A dry bucket no
+    # longer sheds: the request falls through to the queue, where workers
+    # consume tokens at exec time, so bursts are shaped instead of dropped.
+    immediate = await rate_limiter.check_limits(user_id, record=False)
+    if immediate and rate_limiter.breaker.rate > 0:
+        immediate = rate_limiter.breaker.allow()  # consumes a token on success
+    if immediate and await rate_limiter.check_limits(user_id, record=True):
         logger.debug(f"User {user_id} within rate limits, executing immediately.")
         await handler(bot, message, *args, **kwargs)
         return

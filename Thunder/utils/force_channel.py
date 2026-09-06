@@ -9,7 +9,12 @@ from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import MSG_COMMUNITY_CHANNEL
+from Thunder.utils.messages import (
+    MSG_COMMUNITY_CHANNEL,
+    MSG_FORCE_JOIN_BUTTON,
+    MSG_FORCE_SUB_CHECK_FAILED,
+    MSG_FORCE_SUB_REQUIRED,
+)
 from Thunder.utils.safe_call import reply_safe, tg_call
 from Thunder.vars import Var
 
@@ -88,23 +93,22 @@ async def force_channel_check(client: Client, message: Message):
                         channel_title=html.escape(title or "Channel")
                     ),
                     parse_mode=ParseMode.HTML,
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join", url=link)]]),
+                    reply_markup=InlineKeyboardMarkup(
+                        [[InlineKeyboardButton(MSG_FORCE_JOIN_BUTTON, url=link)]]
+                    ),
                 )
             except Exception as e:
                 logger.warning(f"Could not send force-sub prompt: {e}")
         else:
             try:
-                await reply_safe(message, "You must join the channel to use this bot.")
+                await reply_safe(message, MSG_FORCE_SUB_REQUIRED)
             except Exception as e:
                 logger.warning(f"Could not send force-sub notice: {e}")
         return False
     except Exception as e:
         logger.error(f"Error checking force channel: {e}", exc_info=True)
         try:
-            await reply_safe(
-                message,
-                "An unexpected error occurred while checking channel membership. Please try again.",
-            )
+            await reply_safe(message, MSG_FORCE_SUB_CHECK_FAILED)
         except Exception as inner_e:
             logger.warning(f"Could not send force-sub error notice: {inner_e}")
         return False

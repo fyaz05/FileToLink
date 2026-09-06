@@ -28,6 +28,15 @@ MSG_PRIVATE_MODE_DENIED = (
     "🔒 **Private bot.** This instance is restricted to authorized users. "
     "If you believe you should have access, contact the owner."
 )
+MSG_ERROR_ANONYMOUS_SENDER = (
+    "🙈 **Unidentifiable sender.** This command needs a regular user account "
+    "(anonymous admins and channel posts cannot use it)."
+)
+MSG_FORCE_JOIN_BUTTON = "📢 Join"
+MSG_FORCE_SUB_REQUIRED = "You must join the channel to use this bot."
+MSG_FORCE_SUB_CHECK_FAILED = (
+    "An unexpected error occurred while checking channel membership. Please try again."
+)
 
 # ------ File & Media Errors ------
 MSG_ERROR_PROCESSING_MEDIA = "⚠️ **Oops!** Something went wrong while processing your media. Please try again. If the issue persists, contact support."
@@ -40,7 +49,6 @@ MSG_DEAUTHORIZE_FAILED = (
 MSG_TOKEN_FAILED = (
     "⚠️ **Token Activation Failed!**\n\n"
     "> ❗ Reason: {reason}\n\n"
-    "> 🆔 Support ID: {error_id}\n\n"
     "🔑 Please check your token or contact support."
 )
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
@@ -118,6 +126,7 @@ MSG_SHELL_DISABLED = (
 MSG_SHELL_EXECUTING = "Executing Command... ⚙️\n<pre>{command}</pre>"
 MSG_SHELL_OUTPUT = """**Shell Command Output:**
 <pre>{output}</pre>"""
+MSG_SHELL_OUTPUT_CAPTION = "**Shell Command Output** (see attached file):\n<pre>{command}</pre>"
 MSG_SHELL_OUTPUT_STDOUT = "<b>[stdout]:</b>\n<pre>{output}</pre>"
 MSG_SHELL_OUTPUT_STDERR = "<b>[stderr]:</b>\n<pre>{error}</pre>"
 MSG_SHELL_NO_OUTPUT = "✅ <b>Command Executed:</b> No output."
@@ -313,6 +322,10 @@ MSG_BROADCAST_USAGE = (
     "`/broadcast regular` - Broadcast to regular (non-authorized) users only\n\n"
     "**Note:** Reply to the message you want to broadcast."
 )
+MSG_BROADCAST_FAILED_USERS = "❌ **Broadcast Failed:** Unable to fetch users for mode '{mode}'."
+MSG_BROADCAST_NO_USERS = "ℹ️ **No users found for broadcast mode:** `{mode}`"
+MSG_BROADCAST_CANCELLED_PREFIX = "🛑 **Broadcast Cancelled**\n\n"
+MSG_BROADCAST_PROGRESS = "📣 **Broadcasting...** ✅ {success} / {total} delivered"
 
 # =====================================================================================
 # ====== PERMISSION MESSAGES ======

@@ -24,6 +24,7 @@ from Thunder.utils.messages import (
     MSG_ERROR_BROADCAST_RESTART,
     MSG_ERROR_CALLBACK_UNSUPPORTED,
     MSG_ERROR_CLOSE_NOT_ALLOWED,
+    MSG_ERROR_UNEXPECTED,
 )
 from Thunder.utils.safe_call import answer_safe, edit_safe
 from Thunder.vars import Var
@@ -45,9 +46,7 @@ def guard_callback(fn):
             error_id = secrets.token_hex(6)
             logger.error(f"Callback error {error_id} in {fn.__name__}: {e}", exc_info=True)
             try:
-                await answer_safe(
-                    callback_query, "An error occurred. Please try again.", show_alert=True
-                )
+                await answer_safe(callback_query, MSG_ERROR_UNEXPECTED, show_alert=True)
             except Exception:
                 pass
             try:

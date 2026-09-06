@@ -25,17 +25,29 @@ logging.logProcesses = False
 BOT_TOKEN_PATTERN = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35,}")
 MONGO_URI_PATTERN = re.compile(r"mongodb(\+srv)?://[^:]+:[^@]+@")
 SESSION_TOKEN_PATTERN = re.compile(r"(?i)(authorization:\s*)(Bearer\s+)?[A-Za-z0-9._\-]{20,}")
+# API_HASH assignments (32-hex value; contextual so file hashes still log)
+API_HASH_PATTERN = re.compile(r"(?i)(api_hash['\"]?\s*[:=]\s*['\"]?)([0-9a-f]{32})")
+# pyrogram session strings (long base64url blobs assigned to session vars)
+SESSION_STRING_PATTERN = re.compile(
+    r"(?i)(session_string['\"]?\s*[:=]\s*['\"]?)([A-Za-z0-9_-]{40,})"
+)
+# activation tokens in t.me deep links (?start=<43-char urlsafe token>)
+ACTIVATION_TOKEN_PATTERN = re.compile(r"(\?start=)([A-Za-z0-9_-]{43})")
 
 REDACTED = "***REDACTED***"
 
 
 def redact_secrets(text: str) -> str:
-    """Strip bot tokens and Mongo credentials from a log payload."""
+    """Strip bot tokens, Mongo credentials, API hashes, session strings and
+    activation tokens from a log payload."""
     if not text:
         return text
     text = BOT_TOKEN_PATTERN.sub(REDACTED, text)
     text = MONGO_URI_PATTERN.sub("mongodb://***:***@", text)
     text = SESSION_TOKEN_PATTERN.sub(r"\1\2" + REDACTED, text)
+    text = API_HASH_PATTERN.sub(r"\1" + REDACTED, text)
+    text = SESSION_STRING_PATTERN.sub(r"\1" + REDACTED, text)
+    text = ACTIVATION_TOKEN_PATTERN.sub(r"\1" + REDACTED, text)
     return text
 
 

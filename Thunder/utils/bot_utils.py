@@ -40,10 +40,12 @@ def format_link_message(links: dict[str, str]) -> str:
     text = MSG_LINKS.format(
         file_name=html.escape(str(links["media_name"])),
         file_size=links["media_size"],
-        download_link=links["online_link"],
-        stream_link=links["stream_link"],
+        # shortener responses are external data: escape them too, or one
+        # hostile/buggy shortener breaks Telegram entity parsing entirely
+        download_link=html.escape(str(links["online_link"])),
+        stream_link=html.escape(str(links["stream_link"])),
     )
-    if getattr(Var, "FILE_TTL_DAYS", 0) > 0:
+    if Var.FILE_TTL_DAYS > 0:
         text += "\n\n" + MSG_FILE_EXPIRY_NOTE.format(
             days=MSG_FILE_TTL_DAYS_LABEL.format(days=Var.FILE_TTL_DAYS)
         )
@@ -62,7 +64,7 @@ async def _build_links(
     slink = f"{base_url}{stream_path}"
     olink = f"{base_url}{download_path}"
 
-    if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
+    if shortener and Var.SHORTEN_MEDIA_LINKS:
         try:
             s_results = await asyncio.gather(shorten(slink), shorten(olink), return_exceptions=True)
             if isinstance(s_results[0], BaseException):
@@ -100,7 +102,7 @@ async def gen_canonical_links(
 
 
 async def notify_own(cli: Client, txt: str):
-    o_ids = Var.OWNER_ID if isinstance(Var.OWNER_ID, (list, tuple, set)) else [Var.OWNER_ID]
+    o_ids = [Var.OWNER_ID]  # OWNER_ID is an int by construction
 
     async def send_with_flood_wait(chat_id: int):
         try:

@@ -11,9 +11,9 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, 
 from Thunder.bot import StreamBot
 from Thunder.utils.bot_utils import gen_dc_txt, get_user, log_newusr, reply_user_err
 from Thunder.utils.commands import build_help_text
-from Thunder.utils.decorators import check_banned
+from Thunder.utils.decorators import GATES_INFO, GATES_START, preflight
 from Thunder.utils.file_properties import get_fname, get_fsize, parse_fid
-from Thunder.utils.force_channel import force_channel_check, get_force_info
+from Thunder.utils.force_channel import get_force_info
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
@@ -59,11 +59,7 @@ from Thunder.vars import Var
 async def start_command(bot: Client, msg: Message):
     # M12: /start runs banned + private-mode only so the activation flow
     # stays reachable for token-gated users.
-    if not await check_banned(bot, msg):
-        return
-    from Thunder.utils.decorators import check_private_mode
-
-    if not await check_private_mode(bot, msg):
+    if await preflight(bot, msg, gates=GATES_START) is None:
         return
     user = msg.from_user
     if user:
@@ -81,17 +77,13 @@ async def start_command(bot: Client, msg: Message):
                 return await reply_safe(
                     msg,
                     text=MSG_TOKEN_FAILED.format(
-                        reason="This activation link is not for your account.",
-                        error_id=str(int(time.time()))[-8:],
+                        reason="This activation link is not for your account."
                     ),
                 )
             if status == "already":
                 return await reply_safe(
                     msg,
-                    text=MSG_TOKEN_FAILED.format(
-                        reason="Token has already been activated.",
-                        error_id=str(int(time.time()))[-8:],
-                    ),
+                    text=MSG_TOKEN_FAILED.format(reason="Token has already been activated."),
                 )
             if status == "ok":
                 return await reply_safe(msg, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours))
@@ -133,7 +125,7 @@ async def _send_html(msg: Message, txt: str, btns):
 
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, msg: Message):
-    if not await check_banned(bot, msg):
+    if await preflight(bot, msg, gates=GATES_INFO) is None:
         return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
@@ -153,7 +145,7 @@ async def help_command(bot: Client, msg: Message):
 
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, msg: Message):
-    if not await check_banned(bot, msg):
+    if await preflight(bot, msg, gates=GATES_INFO) is None:
         return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
@@ -233,16 +225,14 @@ async def send_file_dc(msg: Message, file_msg: Message):
 
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, msg: Message):
-    # Gate chain for /dc (banned -> private-mode -> force-sub).  The token
+    # Gate chain for /dc (banned -> private-mode, then force-sub).  The token
     # gate is intentionally NOT applied: /dc is informational, and applying
     # it here would lock token-gated users out of diagnostics.
-    if not await check_banned(bot, msg):
+    if await preflight(bot, msg, gates=GATES_START) is None:
         return
-    from Thunder.utils.decorators import check_private_mode
+    from Thunder.utils.decorators import force_sub_gate
 
-    if not await check_private_mode(bot, msg):
-        return
-    if not await force_channel_check(bot, msg):
+    if not await force_sub_gate(bot, msg):
         return
     if not msg.from_user and not msg.reply_to_message:
         return await reply_user_err(msg, MSG_DC_ANON_ERROR)
@@ -274,13 +264,11 @@ async def dc_command(bot: Client, msg: Message):
 
 @StreamBot.on_message(filters.command("ping") & filters.private)
 async def ping_command(bot: Client, msg: Message):
-    if not await check_banned(bot, msg):
+    if await preflight(bot, msg, gates=GATES_START) is None:
         return
-    from Thunder.utils.decorators import check_private_mode
+    from Thunder.utils.decorators import force_sub_gate
 
-    if not await check_private_mode(bot, msg):
-        return
-    if not await force_channel_check(bot, msg):
+    if not await force_sub_gate(bot, msg):
         return
     start = time.time()
     try:

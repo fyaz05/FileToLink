@@ -63,7 +63,7 @@ def print_banner():
     print(banner)
 
 
-def schedule_index_ensure() -> None:
+def schedule_index_ensure() -> asyncio.Task:
     task = asyncio.create_task(
         db.ensure_indexes(raise_on_error=False), name="ensure_database_indexes"
     )
@@ -79,6 +79,7 @@ def schedule_index_ensure() -> None:
             logger.error(f"Background database index ensure failed: {e}", exc_info=True)
 
     task.add_done_callback(_log_index_failure)
+    return task
 
 
 async def import_plugins():
@@ -122,6 +123,7 @@ async def import_plugins():
 
 async def start_services():
     start_time = datetime.now()
+    background_tasks: list[asyncio.Task] = []
     print_banner()
     print("╔════════════════ INITIALIZING BOT SERVICES ════════════════╗")
 
@@ -134,7 +136,9 @@ async def start_services():
 
         await set_commands()
         print("   ✓ Bot commands set successfully.")
-        schedule_index_ensure()
+        # managed background task: cancelled + awaited at shutdown (the old
+        # fire-and-forget version leaked as a pending task)
+        background_tasks.append(schedule_index_ensure())
         _harden_session_files()
 
         restart_message_data = await db.get_restart_message()
@@ -155,14 +159,17 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
-        return
+        # M13 contract: a failed boot must exit non-zero, or container
+        # restart policies never fire and the box sits dead but "healthy".
+        raise SystemExit(1) from e
 
     print("   ▶ Starting Client initialization...")
     try:
         await initialize_clients()
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
-        return
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
+        raise SystemExit(1) from e
 
     await import_plugins()
 
@@ -173,7 +180,7 @@ async def start_services():
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
     except Exception as e:
         logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
-        return
+        raise SystemExit(1) from e
 
     print("   ▶ Starting Web Server initialization...")
     try:
@@ -183,29 +190,29 @@ async def start_services():
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
 
+        background_tasks.extend(executor_tasks)
+
         keepalive_task = asyncio.create_task(ping_server(), name="keepalive_task")
+        background_tasks.append(keepalive_task)
         print("   ✓ Keep-alive service started")
         token_cleanup_task = asyncio.create_task(
             schedule_token_cleanup(), name="token_cleanup_task"
         )
+        background_tasks.append(token_cleanup_task)
         # H6a: bounded bookkeeping -- periodic sweepers
         limiter_sweeper_task = asyncio.create_task(
             schedule_limiter_sweep(), name="limiter_sweeper_task"
         )
+        background_tasks.append(limiter_sweeper_task)
         flag_sweeper_task = asyncio.create_task(flags.run_sweeper(), name="flag_cache_sweeper_task")
+        background_tasks.append(flag_sweeper_task)
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
-        tasks_to_cancel: list[asyncio.Task] = []
-        tasks_to_cancel.extend(locals().get("executor_tasks", []) or [])
-        for name in ("limiter_sweeper_task", "flag_sweeper_task"):
-            t = locals().get(name)
-            if t is not None:
-                tasks_to_cancel.append(t)
-        for t in tasks_to_cancel:
+        for t in background_tasks:
             t.cancel()
-        if tasks_to_cancel:
-            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         # mirror shutdown_services ordering: the touch buffer must flush
         # BEFORE db.close, or _bulk_flush runs against a closed client and
         # silently discards every pending increment
@@ -213,7 +220,7 @@ async def start_services():
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         await _safe_teardown_step(cleanup_clients, "clients")
         await _safe_teardown_step(db.close, "database")
-        return
+        raise SystemExit(1) from e
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
     print("╠═══════════════════════════════════════════════════════════╣")
@@ -223,14 +230,6 @@ async def start_services():
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")
     print("╚═══════════════════════════════════════════════════════════╝")
     print("   ▶ Bot is now running! Press CTRL+C to stop.")
-
-    background_tasks = [
-        *executor_tasks,
-        keepalive_task,
-        token_cleanup_task,
-        limiter_sweeper_task,
-        flag_sweeper_task,
-    ]
 
     try:
         await idle()
@@ -262,18 +261,24 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         if not task.done():
             task.cancel()
 
-    for task in background_tasks:
-        try:
-            await asyncio.wait_for(task, timeout=10)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            errors.append((task.get_name(), e))
-            logger.error(f"Background task {task.get_name()} failed at shutdown: {e}")
+    # one bounded wait for the WHOLE batch (the old per-task wait_for(x, 10)
+    # could stack to ~80s worst-case before teardown ever started)
+    if background_tasks:
+        done, pending = await asyncio.wait(background_tasks, timeout=10)
+        for t in done:
+            if t.cancelled():
+                continue
+            exc = t.exception()
+            if exc is not None:
+                errors.append((t.get_name(), exc))
+                logger.error(f"Background task {t.get_name()} failed at shutdown: {exc}")
+        for t in pending:
+            logger.warning(f"Background task {t.get_name()} did not stop within 10s")
 
     # 2. bounded drain: wait (<= 30 s) for in-flight streams to finish
-    drain_deadline = asyncio.get_event_loop().time() + 30
-    while sum(work_loads.values()) > 0 and asyncio.get_event_loop().time() < drain_deadline:
+    loop = asyncio.get_running_loop()
+    drain_deadline = loop.time() + 30
+    while sum(work_loads.values()) > 0 and loop.time() < drain_deadline:
         await asyncio.sleep(0.25)
     remaining = sum(work_loads.values())
     if remaining:

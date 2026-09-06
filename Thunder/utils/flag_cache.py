@@ -79,25 +79,12 @@ class FlagCache:
             self._data.popitem(last=False)
         return value
 
-    def peek(self, key: Hashable) -> tuple[bool, Any]:
-        """Non-loading read: ``(hit, value)``."""
-        if key not in self._data:
-            return False, None
-        value, ts = self._data[key]
-        if time.monotonic() - ts > self.ttl_seconds:
-            self._data.pop(key, None)
-            return False, None
-        return True, value
-
     def invalidate(self, *keys: Hashable) -> None:
         for key in keys:
             self._data.pop(key, None)
 
     def clear(self) -> None:
         self._data.clear()
-
-    def occupancy(self) -> int:
-        return len(self._data)
 
     async def sweep(self) -> int:
         now = time.monotonic()
@@ -122,4 +109,4 @@ class FlagCache:
 
 flags = FlagCache(name="user_flags")
 
-__all__ = ["FlagCache", "flags", "DEFAULT_TTL_SECONDS"]
+__all__ = ["FlagCache", "flags", "DEFAULT_TTL_SECONDS", "DEFAULT_MAX_ITEMS"]

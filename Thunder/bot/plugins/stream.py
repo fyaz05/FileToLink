@@ -201,6 +201,11 @@ async def send_link(msg: Message, links: dict[str, Any]):
 
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
+    # A channel-posted /link has no from_user; key the limiter on the
+    # sender chat instead of dropping the request with dead air.
+    if kwargs.get("rl_user_id") is None and msg.sender_chat and msg.sender_chat.id:
+        kwargs["rl_user_id"] = msg.sender_chat.id
+
     async def _actual_link_handler(client: Client, message: Message, **handler_kwargs):
         shortener_val = await validate_request_common(client, message)
         if shortener_val is None:
@@ -259,7 +264,6 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         except Exception as e:
             logger.error(f"Could not send processing status: {e}", exc_info=True)
             return
-        shortener_val = handler_kwargs.get("shortener", shortener_val)
         if num_files == 1:
             await process_single(
                 client,
@@ -330,6 +334,13 @@ async def private_receive_handler(bot: Client, msg: Message, **kwargs):
 async def channel_receive_handler(bot: Client, msg: Message):
     async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
         if not Var.CHANNEL:
+            return
+        # M12: PRIVATE_MODE promises "owner + authorized users only" -- a
+        # channel post must not mint public links on a private instance
+        # (channels have no from_user, so the user gates cannot vouch for
+        # them; fail closed here).
+        if Var.PRIVATE_MODE:
+            logger.debug(f"Ignoring channel post from {message.chat.id} (PRIVATE_MODE).")
             return
         notification_msg = handler_kwargs.get("notification_msg")
 

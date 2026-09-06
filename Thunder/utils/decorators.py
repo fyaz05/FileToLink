@@ -17,6 +17,7 @@ Documented ordering (see AGENTS.md):
 """
 
 import html
+from urllib.parse import quote_plus
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -25,6 +26,7 @@ from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_DECORATOR_BANNED,
+    MSG_ERROR_ANONYMOUS_SENDER,
     MSG_ERROR_TEMP,
     MSG_ERROR_TOKEN_LINK_FAILED,
     MSG_ERROR_UNAUTHORIZED,
@@ -95,10 +97,17 @@ async def check_banned(client, message: Message) -> bool:
 
 async def check_private_mode(client, message: Message) -> bool:
     """PRIVATE_MODE allowlist gate (M12): owner + authorized users only."""
-    if not getattr(Var, "PRIVATE_MODE", False):
+    if not Var.PRIVATE_MODE:
         return True
     if not message.from_user:
-        return True
+        # Channel-posted / anonymous-admin messages have no verifiable user
+        # id, so allowlist membership cannot be checked: fail-closed.
+        logger.debug("Rejected unattributable sender (PRIVATE_MODE, no from_user).")
+        try:
+            await reply_safe(message, MSG_PRIVATE_MODE_DENIED)
+        except Exception:
+            pass
+        return False
     user_id = message.from_user.id
     if user_id == Var.OWNER_ID:
         return True
@@ -123,11 +132,21 @@ async def check_private_mode(client, message: Message) -> bool:
 async def require_token(client, message: Message) -> bool:
     """Token-activation gate (H7: cached checks, fail-closed)."""
     try:
-        if not message.from_user:
+        # NOTE: the TOKEN_ENABLED short-circuit comes FIRST -- when the
+        # feature is off this gate must be a no-op even for anonymous
+        # senders, or group /link via an anonymous admin would break.
+        if not Var.TOKEN_ENABLED:
             return True
 
-        if not getattr(Var, "TOKEN_ENABLED", False):
-            return True
+        if not message.from_user:
+            # Channel-posted / anonymous senders cannot hold an activation
+            # token: fail-closed (they also cannot complete the flow).
+            logger.debug("Denied unattributable sender (token gate, no from_user).")
+            try:
+                await reply_safe(message, MSG_ERROR_ANONYMOUS_SENDER)
+            except Exception:
+                pass
+            return False
 
         user_id = message.from_user.id
         if user_id == Var.OWNER_ID:
@@ -182,7 +201,9 @@ async def require_token(client, message: Message) -> bool:
             except Exception:
                 pass
             return False
-        deep_link = f"https://t.me/{me.username}?start={temp_token_string}"
+        deep_link = (
+            "https://t.me/" + me.username + "?start=" + quote_plus(temp_token_string, safe="")
+        )
         short_url = deep_link
 
         try:
@@ -210,9 +231,7 @@ async def require_token(client, message: Message) -> bool:
     except Exception as e:
         logger.error(f"Error in require_token: {e}", exc_info=True)
         try:
-            await reply_safe(
-                message, "An error occurred while checking your authorization. Please try again."
-            )
+            await reply_safe(message, MSG_ERROR_UNEXPECTED)
         except Exception as inner_e:
             logger.error(
                 f"Failed to send error message to user in require_token: {inner_e}", exc_info=True
@@ -223,7 +242,7 @@ async def require_token(client, message: Message) -> bool:
 async def get_shortener_status(client, message: Message) -> bool:
     try:
         user_id = message.from_user.id if message.from_user else None
-        use_shortener = getattr(Var, "SHORTEN_MEDIA_LINKS", False)
+        use_shortener = Var.SHORTEN_MEDIA_LINKS
         if user_id:
             try:
                 if user_id == Var.OWNER_ID or await allowed(user_id):
@@ -236,7 +255,7 @@ async def get_shortener_status(client, message: Message) -> bool:
         return use_shortener
     except Exception as e:
         logger.error(f"Error in get_shortener_status: {e}", exc_info=True)
-        return getattr(Var, "SHORTEN_MEDIA_LINKS", False)
+        return Var.SHORTEN_MEDIA_LINKS
 
 
 # --------------------------------------------------------------------------
@@ -244,31 +263,37 @@ async def get_shortener_status(client, message: Message) -> bool:
 # --------------------------------------------------------------------------
 
 #: gate registry -- order is the documented contract; adding a new gate is a
-#: one-place change here (gate chain asserted by tests/test_unit/test_registry.py).
+#: one-place change here (chain asserted by tests/test_unit/test_preflight.py).
 PREFLIGHT_GATES = {
     "banned": check_banned,
     "private_mode": check_private_mode,
     "token": require_token,
 }
 
+#: preset gate chains -- the documented orders, so callers cannot invent
+#: their own sequence and a new command cannot forget a gate
+GATES_STANDARD: tuple = ("banned", "private_mode", "token")
+GATES_START: tuple = ("banned", "private_mode")
+GATES_INFO: tuple = ("banned",)
+
 
 async def preflight(
     client,
     message: Message,
     *,
-    gates: tuple = ("banned", "private_mode", "token"),
+    gates: tuple = GATES_STANDARD,
 ) -> bool | None:
     """Run the standard gate chain in order.
 
     Returns the final shortener status (last gate's value convention) or
-    ``None`` when any gate rejects the request.
+    ``None`` when any gate rejects the request.  Unknown gate ids REJECT
+    (fail-closed) -- a typo'd id must never silently disable a check.
     """
     for name in gates:
         gate = PREFLIGHT_GATES.get(name)
         if gate is None:
-            # a typo'd gate id must never silently disable a security check
-            logger.warning(f"preflight: unknown gate {name!r} skipped -- fix the gate id")
-            continue
+            logger.error(f"preflight: unknown gate {name!r}; rejecting request (fail-closed)")
+            return None
         if not await gate(client, message):
             return None
     return await get_shortener_status(client, message)
@@ -307,7 +332,7 @@ async def owner_only(client, update) -> bool:
         logger.error(f"Error in owner_only: {e}", exc_info=True)
         try:
             if hasattr(update, "answer"):
-                await answer_safe(update, "An error occurred. Please try again.", show_alert=True)
+                await answer_safe(update, MSG_ERROR_UNEXPECTED, show_alert=True)
         except Exception as inner_e:
             logger.error(f"Failed to send error answer in owner_only: {inner_e}", exc_info=True)
         return False

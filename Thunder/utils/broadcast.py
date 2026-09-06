@@ -21,7 +21,11 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from Thunder.utils.database import db
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
+    MSG_BROADCAST_CANCELLED_PREFIX,
     MSG_BROADCAST_COMPLETE,
+    MSG_BROADCAST_FAILED_USERS,
+    MSG_BROADCAST_NO_USERS,
+    MSG_BROADCAST_PROGRESS,
     MSG_BROADCAST_START,
     MSG_BUTTON_CANCEL_BROADCAST,
     MSG_INVALID_BROADCAST_CMD,
@@ -41,6 +45,16 @@ _PERMANENT_ERRORS = (
     ChannelInvalid,
     InputUserDeactivated,
 )
+
+# Closed mapping for the exact exception set above -- no dead fallback branch.
+_PERMANENT_ERROR_REASONS: dict[type[Exception], tuple[str, str]] = {
+    ChannelInvalid: ("Channel", "invalid channel"),
+    InputUserDeactivated: ("User", "deactivated account"),
+    UserIsBlocked: ("User", "blocked the bot"),
+    UserDeactivated: ("User", "deactivated account"),
+    PeerIdInvalid: ("Recipient", "invalid ID"),
+    ChatWriteForbidden: ("Chat", "write forbidden"),
+}
 
 # pacing between sends per worker + progress-edit cadence (M4a)
 _BROADCAST_PACE_SECONDS = 0.2
@@ -97,8 +111,8 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
     except Exception as e:
         logger.error(f"Error getting user cursor for mode '{mode}': {e}", exc_info=True)
         try:
-            await status_msg.edit_text(
-                f"❌ **Broadcast Failed:** Unable to fetch users for mode '{mode}'."
+            await tg_call(
+                status_msg.edit_text, MSG_BROADCAST_FAILED_USERS.format(mode=mode), retries=0
             )
         except Exception:
             pass
@@ -107,7 +121,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
 
     if stats["total"] == 0:
         try:
-            await status_msg.edit_text(f"ℹ️ **No users found for broadcast mode:** `{mode}`")
+            await tg_call(status_msg.edit_text, MSG_BROADCAST_NO_USERS.format(mode=mode), retries=0)
         except Exception:
             pass
         del broadcast_ids[broadcast_id]
@@ -147,11 +161,10 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                     if stats["success"] and stats["success"] % _PROGRESS_EVERY == 0:
                         await _edit_progress(status_msg, stats)
                 finally:
-                    queue.task_done()
                     if user is not None:
                         await asyncio.sleep(_BROADCAST_PACE_SECONDS)
 
-        worker_count = max(1, int(getattr(Var, "BROADCAST_WORKERS", 4)))
+        worker_count = Var.BROADCAST_WORKERS
         workers = [
             asyncio.create_task(worker(), name=f"broadcast_worker_{i}") for i in range(worker_count)
         ]
@@ -173,7 +186,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             if not producer_task.done():
                 producer_task.cancel()
             try:
-                await status_msg.delete()
+                await tg_call(status_msg.delete, retries=0)
             except Exception:
                 pass
             broadcast_ids.pop(broadcast_id, None)
@@ -188,7 +201,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             )
 
             if stats["cancelled"]:
-                completion_msg = "🛑 **Broadcast Cancelled**\n\n" + completion_msg
+                completion_msg = MSG_BROADCAST_CANCELLED_PREFIX + completion_msg
 
             try:
                 await reply_safe(message, completion_msg, parse_mode=ParseMode.MARKDOWN)
@@ -208,20 +221,7 @@ async def _send_one(client: Client, message: Message, user_id: int, stats: dict)
         await tg_call(message.reply_to_message.copy, user_id, retries=2)
         stats["success"] += 1
     except _PERMANENT_ERRORS as e:
-        if isinstance(e, ChannelInvalid):
-            recipient_type, reason = "Channel", "invalid channel"
-        elif isinstance(e, InputUserDeactivated):
-            recipient_type, reason = "User", "deactivated account"
-        elif isinstance(e, UserIsBlocked):
-            recipient_type, reason = "User", "blocked the bot"
-        elif isinstance(e, UserDeactivated):
-            recipient_type, reason = "User", "deactivated account"
-        elif isinstance(e, PeerIdInvalid):
-            recipient_type, reason = "Recipient", "invalid ID"
-        elif isinstance(e, ChatWriteForbidden):
-            recipient_type, reason = "Chat", "write forbidden"
-        else:
-            recipient_type, reason = "Recipient", f"error: {type(e).__name__}"
+        recipient_type, reason = _PERMANENT_ERROR_REASONS[type(e)]
 
         logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
         try:
@@ -244,8 +244,10 @@ async def _send_one(client: Client, message: Message, user_id: int, stats: dict)
 
 async def _edit_progress(status_msg: Message, stats: dict) -> None:
     try:
-        await status_msg.edit_text(
-            f"📣 **Broadcasting...** ✅ {stats['success']} / {stats['total']} delivered"
+        await tg_call(
+            status_msg.edit_text,
+            MSG_BROADCAST_PROGRESS.format(success=stats["success"], total=stats["total"]),
+            retries=0,
         )
     except Exception:
         pass

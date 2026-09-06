@@ -90,6 +90,21 @@ def main() -> None:
         logger.info("Not a git repository; skipping self-update.")
         return
 
+    # defense-in-depth: UPSTREAM_REPO flows into git's remote handling, and
+    # the argv/dash guards do not stop the git-remote-ext family
+    # (ext::sh -c ...) -- allowlist the ordinary transport schemes only.
+    if "://" in UPSTREAM_REPO and UPSTREAM_REPO.split("://", 1)[0] not in {
+        "https",
+        "http",
+        "git",
+        "ssh",
+    }:
+        logger.error("UPSTREAM_REPO uses a unsupported scheme; skipping self-update.")
+        return
+    if UPSTREAM_REPO.startswith(("ext::", "ssh://;")):
+        logger.error("UPSTREAM_REPO uses a forbidden scheme; skipping self-update.")
+        return
+
     backed_up = _backup_config()
     try:
         # git >= 2.27 warns without the refspec; be explicit.

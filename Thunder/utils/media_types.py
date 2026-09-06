@@ -4,9 +4,11 @@
 
 Historically three drifted copies existed (``custom_dl.get_file_info_sync``,
 ``file_properties.get_fname``, ``common.send_file_dc``); this module replaces
-all of them (plan H4c).  Both naming families are keyed: pyrogram class
-names come out lower-cased with no underscore (``videonote``) while message
-attribute names use ``video_note`` -- both are accepted everywhere.
+the two mime/extension-driven ones (plan H4c).  ``common.send_file_dc`` keeps
+its own display-name map, which is a presentation concern, not a mime/ext one.
+Both naming families are keyed: pyrogram class names come out lower-cased with
+no underscore (``videonote``) while message attribute names use ``video_note``
+-- both are accepted everywhere.
 """
 
 # message attribute name -> stable canonical key

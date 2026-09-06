@@ -59,7 +59,6 @@ def _page_kind(mime_type: str | None, file_name: str) -> str:
 async def render_media_page(
     file_name: str,
     src: str,
-    requested_action: str | None = None,
     mime_type: str | None = None,
 ) -> str:
     # NOTE: src must be a pre-encoded URL. Templates use |safe to avoid double-encoding.
@@ -76,40 +75,38 @@ async def render_media_page(
 
 # L1: the legacy /watch route re-fetched the vault message from Telegram on
 # every view; a small TTL+LRU cache keeps repeat views off the API.
-_legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str, str]]" = OrderedDict()
+_legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str]]" = OrderedDict()
 _LEGACY_CACHE_TTL_SECONDS = 600
 _LEGACY_CACHE_MAX_ITEMS = 1024
 
 
-def _legacy_cache_get(key) -> tuple[str, str] | None:
+def _legacy_cache_get(key) -> str | None:
     cached = _legacy_cache.get(key)
     if not cached:
         return None
-    ts, file_name, unique_id = cached
+    ts, file_name = cached
     if time.monotonic() - ts > _LEGACY_CACHE_TTL_SECONDS:
         _legacy_cache.pop(key, None)
         return None
     _legacy_cache.move_to_end(key)
-    return file_name, unique_id
+    return file_name
 
 
-def _legacy_cache_put(key, file_name: str, unique_id: str) -> None:
-    _legacy_cache[key] = (time.monotonic(), file_name, unique_id)
+def _legacy_cache_put(key, file_name: str) -> None:
+    _legacy_cache[key] = (time.monotonic(), file_name)
     _legacy_cache.move_to_end(key)
     while len(_legacy_cache) > _LEGACY_CACHE_MAX_ITEMS:
         _legacy_cache.popitem(last=False)
 
 
-async def render_page(
-    message_id: int, secure_hash: str, requested_action: str | None = None
-) -> str:
+async def render_page(message_id: int, secure_hash: str) -> str:
     key = (int(message_id), str(secure_hash))
     cached = _legacy_cache_get(key)
     if cached is not None:
-        file_name, _ = cached
+        file_name = cached
         quoted_filename = quote_media_name(file_name)
         src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
-        return await render_media_page(file_name, src, requested_action)
+        return await render_media_page(file_name, src)
 
     try:
         from Thunder.bot import StreamBot  # M12 layering break: lazy import
@@ -136,14 +133,16 @@ async def render_page(
         if not file_unique_id or file_unique_id[:6] != secure_hash:
             raise InvalidHash("File unique ID or secure hash mismatch during rendering.")
 
-        _legacy_cache_put(key, file_name, file_unique_id)
+        _legacy_cache_put(key, file_name)
 
         quoted_filename = quote_media_name(file_name)
         src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
-        return await render_media_page(file_name, src, requested_action)
+        return await render_media_page(file_name, src)
     except Exception as e:
+        # the capability hash is a credential: never write it to bot.txt
+        # (which /log uploads) -- log the message id instead
         logger.error(
-            f"Error in render_page for message_id {message_id} and hash {secure_hash}: {e}",
+            f"Error in render_page for message_id {message_id} (hash redacted): {e}",
             exc_info=True,
         )
         raise

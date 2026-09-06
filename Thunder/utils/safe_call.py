@@ -6,9 +6,11 @@ Every Telegram RPC in the codebase goes through :func:`tg_call` or one of the
 thin wrappers below instead of the historical copy-pasted
 ``try/except FloodWait`` pairs.  Semantics preserved from the old pattern:
 
-* on ``FloodWait`` the coroutine sleeps for ``e.value`` seconds and retries,
-  at most ``retries`` times (default 1 -- i.e. two attempts total, matching
-  the previous inline behaviour);
+* on ``FloodWait`` the coroutine sleeps for ``min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)``
+  seconds and retries, at most ``retries`` times (default 1 -- i.e. two
+  attempts total, matching the previous inline behaviour); Telegram can
+  send multi-minute FloodWaits, and an uncapped sleep let a "lightweight"
+  RPC pin its caller far beyond the wall-clock budget it advertises (H8);
 * after the retries are exhausted the exception propagates unchanged.
 
 Wall-clock budgets (H8): lightweight RPCs get a default timeout so a hung
@@ -30,6 +32,10 @@ T = TypeVar("T")
 # Default wall-clock budget for lightweight RPCs (get_me, get_messages,
 # edit_text, answer, ...).  Env-overridable via TG_RPC_TIMEOUT_SECONDS.
 DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
+
+# H8: cap a single FloodWait sleep so a lightweight RPC cannot exceed its
+# advertised budget by minutes.  Total sleep is also bounded by ``retries``.
+MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
 
 # Call shapes that are allowed to run unbounded by default (large media
 # transfers).  Matched by attribute name of the callable.
@@ -53,13 +59,21 @@ _UNBOUNDED_SHAPES = {
 }
 
 
-def _env_timeout() -> float | None:
-    try:
-        from Thunder.vars import Var  # lazy: avoids any import-order coupling
+_env_timeout_cache: float | None = None
 
-        return float(getattr(Var, "TG_RPC_TIMEOUT_SECONDS", DEFAULT_RPC_TIMEOUT_SECONDS))
-    except Exception:
-        return DEFAULT_RPC_TIMEOUT_SECONDS
+
+def _env_timeout() -> float:
+    # TG_RPC_TIMEOUT_SECONDS is static per process; resolve it once instead
+    # of re-importing + re-reading on every RPC.
+    global _env_timeout_cache
+    if _env_timeout_cache is None:
+        try:
+            from Thunder.vars import Var  # lazy: avoids any import-order coupling
+
+            _env_timeout_cache = float(Var.TG_RPC_TIMEOUT_SECONDS)
+        except Exception:
+            _env_timeout_cache = DEFAULT_RPC_TIMEOUT_SECONDS
+    return _env_timeout_cache
 
 
 def _default_timeout(fn: Callable[..., Awaitable[T]]) -> float | None:
@@ -94,11 +108,12 @@ async def tg_call(
             attempt += 1
             if attempt > retries:
                 raise
+            sleep_for = min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)
             logger.debug(
                 f"FloodWait in {getattr(fn, '__name__', fn)}, "
-                f"sleeping {e.value}s (attempt {attempt}/{retries})"
+                f"sleeping {sleep_for}s (asked {e.value}s, attempt {attempt}/{retries})"
             )
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(sleep_for)
         except Exception as e:
             if on_error is not None:
                 try:
@@ -136,4 +151,5 @@ __all__ = [
     "delete_safe",
     "answer_safe",
     "DEFAULT_RPC_TIMEOUT_SECONDS",
+    "MAX_FLOODWAIT_SLEEP_SECONDS",
 ]
