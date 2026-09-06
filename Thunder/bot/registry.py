@@ -19,7 +19,6 @@ class Command(NamedTuple):
     name: str
     description: str
     owner_only: bool = False
-    hidden: bool = False  # not listed anywhere (none today)
 
 
 COMMANDS: list[Command] = [
@@ -52,7 +51,7 @@ def bot_commands() -> list[BotCommand]:
     return [
         BotCommand(cmd.name, cmd.description[:_MAX_DESC_LEN])
         for cmd in COMMANDS
-        if not cmd.owner_only and not cmd.hidden
+        if not cmd.owner_only
     ]
 
 
@@ -60,7 +59,7 @@ def help_command_rows() -> str:
     """/help surface: same public commands, same order."""
     rows = ""
     for cmd in COMMANDS:
-        if cmd.owner_only or cmd.hidden:
+        if cmd.owner_only:
             continue
         rows += MSG_HELP_COMMAND_ROW.format(name=cmd.name, description=cmd.description)
     return rows

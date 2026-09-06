@@ -175,15 +175,8 @@ async def require_token(client, message: Message) -> bool:
                 pass
             return False
 
-        if not temp_token_string:
-            logger.error(
-                f"Temporary token generation returned empty for user {user_id}.", exc_info=True
-            )
-            try:
-                await reply_safe(message, MSG_ERROR_TOKEN_LINK_FAILED)
-            except Exception:
-                pass
-            return False
+        # generate() either returns a token string or raises; there is no
+        # empty-string path to defend against.
 
         try:
             me = await tg_call(client.get_me)

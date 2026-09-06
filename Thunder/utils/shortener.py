@@ -201,13 +201,11 @@ class ShortenerSystem:
             if self.ready:
                 return True
 
-            if not (
-                getattr(Var, "SHORTEN_ENABLED", False) or getattr(Var, "SHORTEN_MEDIA_LINKS", False)
-            ):
+            if not (Var.SHORTEN_ENABLED or Var.SHORTEN_MEDIA_LINKS):
                 return False
 
-            site = getattr(Var, "URL_SHORTENER_SITE", "")
-            api_key = getattr(Var, "URL_SHORTENER_API_KEY", "")
+            site = Var.URL_SHORTENER_SITE
+            api_key = Var.URL_SHORTENER_API_KEY
 
             if not (site and api_key):
                 return False

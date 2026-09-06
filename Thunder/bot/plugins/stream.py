@@ -585,7 +585,7 @@ async def process_batch(
     """
     total_started = time.monotonic()
     deadline = total_started + _BATCH_DEADLINE_BASE + 2 * count
-    worker_count = max(1, int(getattr(Var, "BATCH_WORKERS", 5)))
+    worker_count = max(1, int(Var.BATCH_WORKERS))
 
     ids: list[int] = list(range(start_id, start_id + count))
     results: dict[int, dict[str, Any] | None] = {}
@@ -641,33 +641,30 @@ async def process_batch(
         nonlocal skipped
         while True:
             mid = await queue.get()
-            try:
-                if mid is None:
-                    return
-                if time.monotonic() > deadline:
-                    results[mid] = None
-                    skipped += 1
-                    counters["done"] += 1
-                    continue
-                m = fetched.get(mid)
-                if mid in fetch_failed:
-                    results[mid] = None
-                    counters["failed"] += 1
-                elif m is not None:
-                    links = await process_single(
-                        bot, msg, m, None, shortener_val, original_request_msg=msg
-                    )
-                    results[mid] = links
-                    if not links:
-                        counters["failed"] += 1
-                else:
-                    results[mid] = None
-                    skipped += 1
+            if mid is None:
+                return
+            if time.monotonic() > deadline:
+                results[mid] = None
+                skipped += 1
                 counters["done"] += 1
-                if counters["done"] % BATCH_UPDATE_INTERVAL == 0 and counters["done"] < count:
-                    await progress_edit()
-            finally:
-                queue.task_done()
+                continue
+            m = fetched.get(mid)
+            if mid in fetch_failed:
+                results[mid] = None
+                counters["failed"] += 1
+            elif m is not None:
+                links = await process_single(
+                    bot, msg, m, None, shortener_val, original_request_msg=msg
+                )
+                results[mid] = links
+                if not links:
+                    counters["failed"] += 1
+            else:
+                results[mid] = None
+                skipped += 1
+            counters["done"] += 1
+            if counters["done"] % BATCH_UPDATE_INTERVAL == 0 and counters["done"] < count:
+                await progress_edit()
 
     # initial status (guarded: a deleted/undeletable status message must not
     # abort the whole batch before it starts)

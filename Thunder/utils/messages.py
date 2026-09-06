@@ -124,8 +124,6 @@ MSG_SHELL_DISABLED = (
     "owner-only command."
 )
 MSG_SHELL_EXECUTING = "Executing Command... ⚙️\n<pre>{command}</pre>"
-MSG_SHELL_OUTPUT = """**Shell Command Output:**
-<pre>{output}</pre>"""
 MSG_SHELL_OUTPUT_CAPTION = "**Shell Command Output** (see attached file):\n<pre>{command}</pre>"
 MSG_SHELL_OUTPUT_STDOUT = "<b>[stdout]:</b>\n<pre>{output}</pre>"
 MSG_SHELL_OUTPUT_STDERR = "<b>[stderr]:</b>\n<pre>{error}</pre>"
