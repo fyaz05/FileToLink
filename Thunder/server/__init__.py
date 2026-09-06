@@ -24,7 +24,9 @@ def _redact_path(path: str) -> str:
     # legacy: /watch/<6-char-hash><id>/<name> -> hash part
     path = re.sub(
         r"(?<=/watch/)[a-zA-Z0-9_-]{6}\d+",
-        lambda m: _hash_token(m.group(0)[: -len(m.group(0))]) + "…",
+        # hash the match itself -- the previous `m.group(0)[:-len(m.group(0))]`
+        # slice always evaluated to "" so every file logged the same pseudonym
+        lambda m: _hash_token(m.group(0)) + "…",
         path,
     )
     return path

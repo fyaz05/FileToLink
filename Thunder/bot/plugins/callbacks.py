@@ -3,12 +3,12 @@
 import functools
 import secrets
 
-from pyrogram import Client, filters
+from pyrogram import Client, enums, filters
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from Thunder.bot import StreamBot
-from Thunder.bot.registry import help_command_rows
 from Thunder.utils.broadcast import broadcast_ids
+from Thunder.utils.commands import build_help_text
 from Thunder.utils.decorators import owner_only
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
@@ -23,9 +23,6 @@ from Thunder.utils.messages import (
     MSG_ERROR_BROADCAST_RESTART,
     MSG_ERROR_CALLBACK_UNSUPPORTED,
     MSG_ERROR_CLOSE_NOT_ALLOWED,
-    MSG_HELP_COMMANDS_HEADER,
-    MSG_HELP_INTRO,
-    MSG_HELP_TIPS,
 )
 from Thunder.utils.safe_call import answer_safe, edit_safe, tg_call
 from Thunder.vars import Var
@@ -99,12 +96,8 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
     if force_button:
         buttons.append(force_button)
     buttons.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    help_text = (
-        MSG_HELP_INTRO.format(max_files=Var.MAX_BATCH_FILES)
-        + MSG_HELP_COMMANDS_HEADER
-        + help_command_rows()
-        + MSG_HELP_TIPS
-    )
+    # keep /help command and the help panel on one implementation (M1)
+    help_text = build_help_text(Var.MAX_BATCH_FILES)
     try:
         await edit_safe(
             callback_query.message,
@@ -168,9 +161,21 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
     # button could trigger deletion attempts.
     closer_id = callback_query.from_user.id if callback_query.from_user else None
     message = callback_query.message
-    owner_id = getattr(message.from_user, "id", None) if message and message.from_user else None
 
-    is_allowed = closer_id == Var.OWNER_ID or (owner_id is not None and closer_id == owner_id)
+    is_allowed = False
+    if closer_id is not None and message is not None:
+        if closer_id == Var.OWNER_ID:
+            is_allowed = True
+        else:
+            # Panels are bot-sent, so message.from_user is the BOT -- comparing
+            # against it locked every non-owner out of their own Close button.
+            # The person who triggered the panel is its reply target (the
+            # command/queue message) or, in private chats, the chat peer.
+            if message.reply_to_message and message.reply_to_message.from_user:
+                is_allowed = closer_id == message.reply_to_message.from_user.id
+            if not is_allowed and message.chat and message.chat.type == enums.ChatType.PRIVATE:
+                is_allowed = closer_id == message.chat.id
+
     if not is_allowed:
         await answer_safe(callback_query, MSG_ERROR_CLOSE_NOT_ALLOWED, show_alert=True)
         return

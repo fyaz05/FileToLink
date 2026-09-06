@@ -36,7 +36,6 @@ _dropped_touches = 0
 
 _cache_by_unique_id: "OrderedDict[str, tuple[float, dict[str, Any]]]" = OrderedDict()
 _cache_by_hash: "OrderedDict[str, tuple[float, dict[str, Any]]]" = OrderedDict()
-_cache_by_message_id: "OrderedDict[int, tuple[float, dict[str, Any]]]" = OrderedDict()
 
 _upload_locks: dict[str, asyncio.Lock] = {}
 _upload_lock_counts: dict[str, int] = {}
@@ -121,7 +120,6 @@ def _remember(record: dict[str, Any]) -> dict[str, Any]:
     now = asyncio.get_running_loop().time()
     file_unique_id = record.get("file_unique_id")
     public_hash = record.get("public_hash")
-    canonical_message_id = record.get("canonical_message_id")
 
     _insert_counter += 1
     should_prune = _insert_counter % _CACHE_PRUNE_INTERVAL == 0
@@ -136,25 +134,17 @@ def _remember(record: dict[str, Any]) -> dict[str, Any]:
         _cache_by_hash.move_to_end(public_hash)
         if should_prune:
             _prune_cache(_cache_by_hash)
-    if canonical_message_id is not None:
-        _cache_by_message_id[canonical_message_id] = (now, record)
-        _cache_by_message_id.move_to_end(canonical_message_id)
-        if should_prune:
-            _prune_cache(_cache_by_message_id)
     return record
 
 
 def _forget(record: dict[str, Any]) -> None:
     file_unique_id = record.get("file_unique_id")
     public_hash = record.get("public_hash")
-    canonical_message_id = record.get("canonical_message_id")
 
     if file_unique_id:
         _cache_by_unique_id.pop(file_unique_id, None)
     if public_hash:
         _cache_by_hash.pop(public_hash, None)
-    if canonical_message_id is not None:
-        _cache_by_message_id.pop(canonical_message_id, None)
 
 
 async def get_file_by_unique_id(file_unique_id: str) -> dict[str, Any] | None:
@@ -175,13 +165,6 @@ async def get_file_by_hash(
     return _remember(record) if record else None
 
 
-async def get_file_by_message_id(canonical_message_id: int) -> dict[str, Any] | None:
-    cached = _cache_get(_cache_by_message_id, canonical_message_id)
-    if cached:
-        return cached
-    return None
-
-
 async def forget_stale_record(record: dict[str, Any]) -> bool:
     """Self-healing (M10): drop a corrupted/stale record from cache + DB so
     the next upload re-ingests cleanly instead of erroring forever."""
@@ -196,20 +179,26 @@ async def forget_stale_record(record: dict[str, Any]) -> bool:
 
 async def _flush_pending_touches() -> None:
     global _flush_task, _dropped_touches
+    cancelled = False
     flushed = False
     try:
         await asyncio.sleep(_FLUSH_DELAY_SECONDS)
         await _bulk_flush()
         flushed = True
     except asyncio.CancelledError:
-        pass
+        cancelled = True
     finally:
-        if not flushed and _pending_touches:
+        if not flushed and not cancelled and _pending_touches:
             try:
                 await _bulk_flush()
             except Exception as e:
                 logger.error(f"Touch flush failed on cancel path: {e}", exc_info=True)
         _flush_task = None
+        if _pending_touches and not cancelled:
+            # touches added while this flush was in flight are invisible to it
+            # (it snapshotted before they arrived) -- re-arm or they sit
+            # unflushed until the next schedule or process exit
+            _flush_task = asyncio.create_task(_flush_pending_touches())
 
 
 async def _bulk_flush() -> None:
@@ -220,7 +209,11 @@ async def _bulk_flush() -> None:
     try:
         await db.bulk_touch_file_records([(h, reused) for h, (_, reused) in items])
     except Exception as e:
+        # merge the batch back so the next flush retries -- clearing before
+        # the write succeeded silently discarded every pending increment
         logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
+        for h, payload in items:
+            _pending_touches.setdefault(h, payload)
 
 
 def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) -> None:
@@ -332,11 +325,17 @@ async def _get_reusable_canonical_record(
     try:
         is_valid = await _is_canonical_record_valid(existing, file_unique_id, client)
     except Exception as e:
+        # RPC failure (FloodWait-exhausted, timeout, network) is NOT proof the
+        # vault message is gone -- treating it as stale made every Telegram
+        # hiccup re-copy the file into BIN and orphan the old vault message.
+        # Keep the cached record and serve it; only a definitive None /
+        # unique-id mismatch (checked inside _is_canonical_record_valid)
+        # declares staleness.
         logger.warning(
-            f"Falling back to BIN re-copy for {file_unique_id} after canonical validation failed: {e}",
+            f"Canonical validation errored for {file_unique_id}; keeping cached record: {e}",
             exc_info=True,
         )
-        is_valid = False
+        return existing, None
 
     if is_valid:
         return existing, None

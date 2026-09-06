@@ -19,6 +19,7 @@ New behaviour:
 """
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -33,6 +34,20 @@ UPSTREAM_BRANCH = os.getenv("UPSTREAM_BRANCH", "main")
 
 # config.env lives beside the app and must survive the pull
 _CONFIG_BACKUP = "../config.env.tmp"
+
+
+def _recover_config_backup() -> None:
+    """A crash between _backup_config and _restore_config would otherwise
+    leave the app permanently without config.env (next boot hard-fails).
+    Restore any orphaned backup before doing anything else."""
+    if not os.path.exists(_CONFIG_BACKUP) and not os.path.exists("config.env"):
+        return
+    if os.path.exists(_CONFIG_BACKUP) and not os.path.exists("config.env"):
+        try:
+            os.replace(_CONFIG_BACKUP, "config.env")
+            logger.info("Recovered config.env from orphaned backup.")
+        except OSError as e:
+            logger.error(f"Could not recover config.env backup: {e}")
 
 
 def _backup_config() -> bool:
@@ -53,14 +68,22 @@ def _restore_config(backed_up: bool) -> None:
             logger.error(f"Could not restore config.env: {e}")
 
 
+def _redact_credentials(text: str) -> str:
+    """git echoes remote URLs on failure; strip embedded tokens (user:pass
+    and user@host forms) before the output reaches the logs."""
+    return re.sub(r"(?<=//)[^@/\s]+@", "<redacted>@", text)
+
+
 def main() -> None:
     if not UPSTREAM_REPO:
         return
+    _recover_config_backup()
     if shutil.which("git") is None:
         logger.info("git not available; skipping self-update (image without git).")
         return
     if not os.path.isdir(".git"):
         logger.info("Not a git repository; skipping self-update.")
+        return
 
     backed_up = _backup_config()
     try:
@@ -78,7 +101,7 @@ def main() -> None:
             # keep running the old code; never hard-fail the boot
             logger.error(
                 "Self-update failed (non-destructive, keeping current code): "
-                f"{(result.stderr or result.stdout or '').strip()[:500]}"
+                f"{_redact_credentials((result.stderr or result.stdout or '').strip()[:500])}"
             )
     except subprocess.TimeoutExpired:
         logger.error("Self-update timed out; keeping current code.")

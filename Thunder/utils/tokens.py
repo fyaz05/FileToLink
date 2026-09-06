@@ -1,10 +1,10 @@
 # Thunder/utils/tokens.py
 
+import asyncio
+import random
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
-import pyrogram.errors
 
 from Thunder.utils.database import db
 from Thunder.utils.flag_cache import flags
@@ -39,7 +39,7 @@ async def _load_token_ok(user_id: int) -> bool:
     """Loader for the activated-token flag.  Raises on DB failure so the
     caller can apply its fail-closed policy."""
     token_result = await db.token_col.find_one(
-        {"user_id": user_id, "expires_at": {"$gt": datetime.utcnow()}, "activated": True},
+        {"user_id": user_id, "expires_at": {"$gt": datetime.now(UTC)}, "activated": True},
         {"_id": 1},
     )
     return bool(token_result)
@@ -49,7 +49,11 @@ async def generate(user_id: int) -> str:
     try:
         logger.debug(f"Token generation started for user: {user_id}")
         existing_token_doc = await db.token_col.find_one(
-            {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.utcnow()}},
+            {
+                "user_id": user_id,
+                "activated": False,
+                "expires_at": {"$gt": datetime.now(UTC)},
+            },
             {"token": 1},
         )
         if existing_token_doc:
@@ -61,7 +65,7 @@ async def generate(user_id: int) -> str:
         for attempt in range(max_retries):
             try:
                 ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
-                created_at = datetime.utcnow()
+                created_at = datetime.now(UTC)
                 expires_at = created_at + timedelta(hours=ttl_hours)
                 await db.save_main_token(
                     user_id=user_id,
@@ -72,17 +76,8 @@ async def generate(user_id: int) -> str:
                 )
                 logger.debug(f"New token generated and saved successfully for user: {user_id}")
                 return token_str
-            except pyrogram.errors.RPCError as e:
-                logger.error(
-                    f"Telegram API error while generating new token for user {user_id}: {e}",
-                    exc_info=True,
-                )
-                raise
             except Exception as e:
                 if attempt < max_retries - 1:
-                    import asyncio
-                    import random
-
                     delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
                     logger.warning(
                         f"Database error (attempt {attempt + 1}/{max_retries}) while saving new token: {e}. Retrying in {delay:.2f} seconds.",
@@ -111,7 +106,7 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
     Returns ``(status, hours_valid)`` with status one of
     ``"ok" | "already" | "wrong_user" | "invalid"``.
     """
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     try:
         doc = await db.token_col.find_one({"token": token})
         if not doc:
@@ -120,10 +115,19 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
             return "wrong_user", 0.0
         if doc.get("activated"):
             return "already", 0.0
+        if doc.get("expires_at") and doc["expires_at"] <= now:
+            # expired unactivated tokens must not be activatable via a stale
+            # deep-link that outraced the TTL monitor/cleanup
+            return "invalid", 0.0
 
         expires_at = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
         activated_doc = await db.token_col.find_one_and_update(
-            {"token": token, "user_id": user_id, "activated": {"$ne": True}},
+            {
+                "token": token,
+                "user_id": user_id,
+                "activated": {"$ne": True},
+                "expires_at": {"$gt": now},
+            },
             {
                 "$set": {
                     "activated": True,
@@ -164,7 +168,7 @@ async def authorize(user_id: int, authorized_by: int) -> bool:
         auth_data = {
             "user_id": user_id,
             "authorized_by": authorized_by,
-            "authorized_at": datetime.utcnow(),
+            "authorized_at": datetime.now(UTC),
         }
         await db.authorized_users_col.update_one(
             {"user_id": user_id}, {"$set": auth_data}, upsert=True
@@ -199,7 +203,7 @@ async def list_allowed() -> list[dict[str, Any]]:
 
 async def cleanup_expired_tokens() -> int:
     try:
-        current_time = datetime.utcnow()
+        current_time = datetime.now(UTC)
         logger.debug("Cleaning up expired tokens")
         result = await db.token_col.delete_many({"expires_at": {"$lte": current_time}})
         logger.debug(f"Cleaned up {result.deleted_count} expired tokens")

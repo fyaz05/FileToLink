@@ -12,6 +12,7 @@ from Thunder.server.exceptions import FileNotFound
 from Thunder.utils.file_properties import get_media
 from Thunder.utils.logger import logger
 from Thunder.utils.media_types import ext_and_mime_for_class
+from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
 
@@ -23,16 +24,18 @@ class ByteStreamer:
         self.chat_id = int(Var.BIN_CHANNEL)
 
     async def get_message(self, message_id: int) -> Message:
-        while True:
-            try:
-                message = await self.client.get_messages(self.chat_id, message_id)
-                break
-            except FloodWait as e:
-                logger.debug(f"FloodWait: get_message, sleep {e.value}s")
-                await asyncio.sleep(e.value)
-            except Exception as e:
-                logger.debug(f"Error fetching message {message_id}: {e}", exc_info=True)
-                raise FileNotFound(f"Message {message_id} not found") from e
+        # H4b/H8: bounded FloodWait handling via tg_call -- the previous
+        # open-ended sleep loop could pin an HTTP handler (and its stream
+        # slot) indefinitely on a sustained Telegram flood.
+        try:
+            message = await tg_call(
+                self.client.get_messages, self.chat_id, message_id, retries=2, timeout=60
+            )
+        except FloodWait as e:
+            raise FileNotFound(f"Message {message_id} unavailable (FloodWait {e.value}s)") from e
+        except Exception as e:
+            logger.debug(f"Error fetching message {message_id}: {e}", exc_info=True)
+            raise FileNotFound(f"Message {message_id} not found") from e
 
         if isinstance(message, list):  # defensive: pyrogram returns a list for list inputs
             if not message:
@@ -56,6 +59,7 @@ class ByteStreamer:
         # H4b: the historical fallback-message plumbing was dead (the
         # fallback id always equalled the primary ref, so the fallback ref
         # was never appended) -- removed.
+        chunks_done = 0
         while True:
             try:
                 target = (
@@ -67,8 +71,17 @@ class ByteStreamer:
                     target, offset=chunk_offset, limit=chunk_limit
                 ):
                     yield chunk
+                    chunks_done += 1
                 return
             except FloodWait as e:
+                # resume from where the CONSUMER actually is: restarting from
+                # the original offset re-yields bytes already sent, corrupting
+                # the download (duplicated middle, truncated tail).
+                if chunks_done:
+                    chunk_offset += chunks_done
+                    if chunk_limit:
+                        chunk_limit = max(chunk_limit - chunks_done, 0)
+                    chunks_done = 0
                 logger.debug(f"FloodWait: stream_file, sleep {e.value}s")
                 await asyncio.sleep(e.value)
             except Exception as e:

@@ -348,6 +348,16 @@ MSG_RATE_LIMIT_QUEUE_FULL = (
     "> 💡 **Tip:** Try again later when system load decreases"
 )
 
+MSG_RATE_LIMIT_DROPPED = (
+    "⚠️ Service is busy and your request could not be completed. Please try again in a few minutes."
+)
+
+# H7/M12 decorator gate failures (user-facing, shared by all entry points)
+MSG_ERROR_TOKEN_LINK_FAILED = (
+    "Sorry, could not generate an access token link. Please try again later."
+)
+MSG_ERROR_UNEXPECTED = "Sorry, an unexpected error occurred. Please try again later."
+
 
 # =====================================================================================
 # ====== FILE TYPE DESCRIPTIONS ======

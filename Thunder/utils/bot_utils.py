@@ -1,6 +1,7 @@
 # Thunder/utils/bot_utils.py
 
 import asyncio
+import html
 from typing import Any
 from urllib.parse import quote
 
@@ -31,9 +32,13 @@ def quote_media_name(file_name: str) -> str:
 
 
 def format_link_message(links: dict[str, str]) -> str:
-    """Render the MSG_LINKS template, appending the TTL expiry note (L2)."""
+    """Render the MSG_LINKS template, appending the TTL expiry note (L2).
+
+    ``media_name`` is user-controlled and MSG_LINKS is HTML -- escape it
+    (M7) so a crafted file name cannot inject markup into the link message.
+    """
     text = MSG_LINKS.format(
-        file_name=links["media_name"],
+        file_name=html.escape(str(links["media_name"])),
         file_size=links["media_size"],
         download_link=links["online_link"],
         stream_link=links["stream_link"],
@@ -131,7 +136,10 @@ async def log_newusr(cli: Client, uid: int, fname: str):
         if isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
             try:
                 await send_safe(
-                    cli, Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid)
+                    cli,
+                    Var.BIN_CHANNEL,
+                    # MSG_NEW_USER is HTML; first_name is user-controlled (M7)
+                    text=MSG_NEW_USER.format(first_name=html.escape(str(fname or "")), user_id=uid),
                 )
             except Exception as e:
                 logger.warning(f"Could not log new user {uid}: {e}")

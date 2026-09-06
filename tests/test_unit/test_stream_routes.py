@@ -81,6 +81,14 @@ class TestParseRangeHeader:
         assert parse_range_header("bytes=0-49", 100) == (0, 49)
 
     @pytest.mark.unit
+    def test_end_beyond_eof_clamps_instead_of_416(self):
+        # RFC 7233 §2.1: last-byte-pos >= length means "rest of the file".
+        # Download managers send fixed-chunk ends computed without the size;
+        # a hard 416 broke resume/seeking for exactly those clients.
+        assert parse_range_header("bytes=0-99999999", 100) == (0, 99)
+        assert parse_range_header("bytes=50-1000", 100) == (50, 99)
+
+    @pytest.mark.unit
     def test_suffix_range(self):
         assert parse_range_header("bytes=-10", 100) == (90, 99)
 

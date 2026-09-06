@@ -72,3 +72,22 @@ async def test_sweep_drops_expired():
     dropped = await cache.sweep()
     assert dropped == 1
     assert cache.occupancy() == 0
+
+
+@pytest.mark.unit
+async def test_concurrent_loaders_single_flight():
+    """Cold/expired keys must share ONE loader task, not stampede the backend."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    async def loader():
+        calls["n"] += 1
+        await asyncio.sleep(0.02)  # widen the race window
+        return "v"
+
+    cache = FlagCache(ttl_seconds=60)
+    results = await asyncio.gather(*(cache.get_or_load("k", loader) for _ in range(10)))
+    assert results == ["v"] * 10
+    assert calls["n"] == 1
+    assert cache._inflight == {}  # bookkeeping cleaned up

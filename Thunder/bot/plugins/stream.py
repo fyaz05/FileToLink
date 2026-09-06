@@ -1,6 +1,7 @@
 # Thunder/bot/plugins/stream.py
 
 import asyncio
+import html
 import secrets
 import time
 from typing import Any
@@ -119,7 +120,9 @@ async def send_channel_links(
     reply_to_message_id: int | None = None,
 ):
     text = MSG_NEW_FILE_REQUEST.format(
-        source_info=source_info,
+        # source_info (display name / chat title) is user-controlled and the
+        # template renders as HTML under pyrofork's DEFAULT parse mode (M7)
+        source_info=html.escape(source_info),
         id_=source_id,
         online_link=links["online_link"],
         stream_link=links["stream_link"],
@@ -162,7 +165,9 @@ async def safe_delete_message(message: Message):
 async def send_dm_links(bot: Client, user_id: int, links: dict[str, Any], chat_title: str):
     try:
         dm_text = (
-            MSG_DM_SINGLE_PREFIX.format(chat_title=chat_title) + "\n" + format_link_message(links)
+            MSG_DM_SINGLE_PREFIX.format(chat_title=html.escape(chat_title))
+            + "\n"
+            + format_link_message(links)
         )
         await send_safe(
             bot,
@@ -372,7 +377,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
                     await edit_safe(
                         notification_msg,
                         MSG_NEW_FILE_REQUEST.format(
-                            source_info=source_info,
+                            source_info=html.escape(source_info),
                             id_=message.chat.id,
                             online_link=links["online_link"],
                             stream_link=links["stream_link"],
@@ -545,7 +550,7 @@ async def process_batch(
     * the whole batch runs under a ``30 + 2n`` second deadline;
     * progress edits are throttled to every 5 completions.
     """
-    total_started = time.time()
+    total_started = time.monotonic()
     deadline = total_started + _BATCH_DEADLINE_BASE + 2 * count
     worker_count = max(1, int(getattr(Var, "BATCH_WORKERS", 5)))
 
@@ -556,8 +561,9 @@ async def process_batch(
 
     # ---- pre-fetch phase (chunked, same as the historical behavior) ----
     fetched: dict[int, Message | None] = {}
+    fetch_failed: set[int] = set()
     for chunk_start in range(0, count, BATCH_SIZE):
-        if time.time() > deadline:
+        if time.monotonic() > deadline:
             break
         chunk_ids = ids[chunk_start : chunk_start + BATCH_SIZE]
         try:
@@ -569,7 +575,10 @@ async def process_batch(
             else:
                 messages = list(fetched_msgs)
         except Exception as e:
+            # a failed chunk is a FAILED fetch, not a benign skip: counting it
+            # as skipped made whole-chunk outages invisible in the summary
             logger.error(f"Error getting messages in batch: {e}", exc_info=True)
+            fetch_failed.update(chunk_ids)
             messages = []
         for mid, m in zip(chunk_ids, messages, strict=False):
             fetched[mid] = m if (m is not None and getattr(m, "media", None)) else None
@@ -598,21 +607,20 @@ async def process_batch(
     async def worker():
         nonlocal skipped
         while True:
-            try:
-                mid = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                await asyncio.sleep(0.05)
-                continue
+            mid = await queue.get()
             try:
                 if mid is None:
                     return
-                if time.time() > deadline:
+                if time.monotonic() > deadline:
                     results[mid] = None
                     skipped += 1
                     counters["done"] += 1
                     continue
                 m = fetched.get(mid)
-                if m is not None:
+                if mid in fetch_failed:
+                    results[mid] = None
+                    counters["failed"] += 1
+                elif m is not None:
                     links = await process_single(
                         bot, msg, m, None, shortener_val, original_request_msg=msg
                     )
@@ -628,15 +636,19 @@ async def process_batch(
             finally:
                 queue.task_done()
 
-    # initial status
-    await edit_safe(
-        status_msg,
-        MSG_PROCESSING_BATCH.format(
-            batch_number=1,
-            total_batches=(count + BATCH_SIZE - 1) // BATCH_SIZE,
-            file_count=count,
-        ),
-    )
+    # initial status (guarded: a deleted/undeletable status message must not
+    # abort the whole batch before it starts)
+    try:
+        await edit_safe(
+            status_msg,
+            MSG_PROCESSING_BATCH.format(
+                batch_number=1,
+                total_batches=(count + BATCH_SIZE - 1) // BATCH_SIZE,
+                file_count=count,
+            ),
+        )
+    except Exception as e:
+        logger.debug(f"Could not update batch status message: {e}")
 
     workers = [asyncio.create_task(worker(), name=f"batch_worker_{i}") for i in range(worker_count)]
     await asyncio.gather(*workers)
@@ -662,7 +674,9 @@ async def process_batch(
                 await send_safe(
                     bot,
                     msg.from_user.id,
-                    text=MSG_DM_BATCH_PREFIX.format(chat_title=msg.chat.title or "the chat")
+                    text=MSG_DM_BATCH_PREFIX.format(
+                        chat_title=html.escape(msg.chat.title or "the chat")
+                    )
                     + "\n"
                     + chunk_text,
                     disable_web_page_preview=True,

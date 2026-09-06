@@ -25,7 +25,8 @@ load_dotenv("config.env.local")  # optional local override layer
 
 
 def str_to_bool(val: str) -> bool:
-    return val.lower() in ("true", "1", "t", "y", "yes")
+    # strip: raw env values can carry trailing whitespace/CR
+    return str(val).strip().lower() in ("true", "1", "t", "y", "yes")
 
 
 def str_to_int_set(val: str) -> set[int]:
@@ -188,10 +189,15 @@ class Var:
     # H8: default wall-clock budget for lightweight Telegram RPCs.
     TG_RPC_TIMEOUT_SECONDS: float = _get_float("TG_RPC_TIMEOUT_SECONDS", "30", min_val=0)
 
-    # H10: logging.
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
-    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "plain").lower()
 
+# Cross-flag validation (M6): with both gates on, a non-allowlisted user's
+# activation deep-link is rejected by the private-mode gate BEFORE the token
+# consume path in /start can run -- token-gated access becomes unreachable.
+if Var.PRIVATE_MODE and Var.TOKEN_ENABLED:
+    _config_errors.append(
+        "PRIVATE_MODE and TOKEN_ENABLED cannot both be enabled: token "
+        "activation links are unreachable behind the private-mode allowlist."
+    )
 
 if _config_errors:
     logger.critical(f"Invalid configuration -- {len(_config_errors)} problem(s) found:")

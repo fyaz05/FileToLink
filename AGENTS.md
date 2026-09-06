@@ -41,9 +41,11 @@ make audit       # pip-audit + bandit + vulture + dependency-count
 
 ## Test tiers
 
-- **Unit** (default, every PR): `pytest -m unit` — pure logic only.
-- **Integration** (opt-in, needs Docker): `TEST_INTEGRATION=1 pytest -m integration`
-  — testcontainers MongoDB; ingest-claim locks, token-activation atomicity.
+- **Unit** (default, every PR): `pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35`
+  — pure logic only.
+- **Integration** (opt-in, needs Docker): `TEST_INTEGRATION=1 uv run pytest -m integration`
+  — testcontainers MongoDB (`testcontainers[mongodb]`, declared in the dev
+  group); ingest-claim locks, token-activation atomicity.
 - Characterization tests pin behavior before refactors; update them
   deliberately inside the PR that changes behavior.
 

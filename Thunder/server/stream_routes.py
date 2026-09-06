@@ -154,6 +154,11 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if start_str:
         start = int(start_str)
         end = int(end_str) if end_str else file_size - 1
+        # RFC 7233 §2.1: a last-byte-pos >= length means "rest of the
+        # representation" -- clamp instead of rejecting.  Download managers
+        # commonly send a fixed-chunk end computed without knowing the size;
+        # a hard 416 broke resume/seeking for exactly those clients.
+        end = min(end, file_size - 1)
     else:
         if not end_str:
             raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
@@ -165,7 +170,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         start = max(file_size - suffix_len, 0)
         end = file_size - 1
 
-    if start < 0 or end >= file_size or start > end:
+    if start < 0 or start >= file_size or start > end:
         # L6: 416 discipline with Content-Range
         raise web.HTTPRequestRangeNotSatisfiable(headers={"Content-Range": f"bytes */{file_size}"})
 
@@ -310,7 +315,7 @@ async def status_endpoint(request):
                 "uptime": get_readable_time(uptime),
             },
             "telegram_bot": {
-                "username": f"@{StreamBot.username}",
+                "username": f"@{StreamBot.username or 'unknown'}",
                 "active_clients": len(multi_clients),
                 "dc_id": dc_id,
             },

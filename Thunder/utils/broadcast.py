@@ -46,6 +46,10 @@ _PERMANENT_ERRORS = (
 _BROADCAST_PACE_SECONDS = 0.2
 _PROGRESS_EVERY = 25
 
+# strong references to in-flight broadcast tasks (CPython only weakly
+# references tasks; unreferenced ones can be garbage-collected mid-sweep)
+_BROADCAST_TASKS: set[asyncio.Task] = set()
+
 
 async def broadcast_message(client: Client, message: Message, mode: str = "all"):
     if not message.reply_to_message:
@@ -153,34 +157,50 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
         ]
         producer_task = asyncio.create_task(producer(), name="broadcast_producer")
 
-        await producer_task
-        await asyncio.gather(*workers)
-
+        completed_normally = False
         try:
-            await status_msg.delete()
-        except Exception as e:
-            logger.debug(f"Could not delete status message: {e}")
+            await producer_task
+            results = await asyncio.gather(*workers, return_exceptions=True)
+            for r in results:
+                if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError):
+                    logger.error(f"Broadcast worker failed: {r!r}")
+            completed_normally = True
+        finally:
+            # no worker/producer/status/registry leakage on ANY exit path
+            for t in workers:
+                if not t.done():
+                    t.cancel()
+            if not producer_task.done():
+                producer_task.cancel()
+            try:
+                await status_msg.delete()
+            except Exception:
+                pass
+            broadcast_ids.pop(broadcast_id, None)
 
-        completion_msg = MSG_BROADCAST_COMPLETE.format(
-            elapsed_time=get_readable_time(int(time.time() - start_time)),
-            total_users=stats["total"],
-            successes=stats["success"],
-            failures=stats["failed"],
-            deleted_accounts=stats["deleted"],
-        )
+        if completed_normally:
+            completion_msg = MSG_BROADCAST_COMPLETE.format(
+                elapsed_time=get_readable_time(int(time.time() - start_time)),
+                total_users=stats["total"],
+                successes=stats["success"],
+                failures=stats["failed"],
+                deleted_accounts=stats["deleted"],
+            )
 
-        if stats["cancelled"]:
-            completion_msg = "🛑 **Broadcast Cancelled**\n\n" + completion_msg
+            if stats["cancelled"]:
+                completion_msg = "🛑 **Broadcast Cancelled**\n\n" + completion_msg
 
-        try:
-            await reply_safe(message, completion_msg, parse_mode=ParseMode.MARKDOWN)
-        except Exception as e:
-            logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
+            try:
+                await reply_safe(message, completion_msg, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 
-        if broadcast_id in broadcast_ids:
-            del broadcast_ids[broadcast_id]
-
-    asyncio.create_task(do_broadcast())
+    task = asyncio.create_task(do_broadcast())
+    # hold a reference -- CPython only weakly references tasks, so an
+    # unreferenced broadcast can be garbage-collected mid-sweep -- and let
+    # the module-level set keep it alive until done
+    _BROADCAST_TASKS.add(task)
+    task.add_done_callback(_BROADCAST_TASKS.discard)
 
 
 async def _send_one(client: Client, message: Message, user_id: int, stats: dict) -> None:

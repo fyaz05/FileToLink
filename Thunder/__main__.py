@@ -3,6 +3,7 @@
 import asyncio
 import glob
 import importlib.util
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +38,7 @@ from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
 from Thunder.utils.rate_limiter import rate_limiter, start_executors
 from Thunder.utils.safe_call import tg_call
+from Thunder.utils.shortener import close_shortener
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
 
@@ -194,12 +196,23 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
-        for task in locals().get("executor_tasks", []):
-            task.cancel()
+        tasks_to_cancel: list[asyncio.Task] = []
+        tasks_to_cancel.extend(locals().get("executor_tasks", []) or [])
+        for name in ("limiter_sweeper_task", "flag_sweeper_task"):
+            t = locals().get(name)
+            if t is not None:
+                tasks_to_cancel.append(t)
+        for t in tasks_to_cancel:
+            t.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        # mirror shutdown_services ordering: the touch buffer must flush
+        # BEFORE db.close, or _bulk_flush runs against a closed client and
+        # silently discards every pending increment
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
+        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         await _safe_teardown_step(cleanup_clients, "clients")
         await _safe_teardown_step(db.close, "database")
-        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         return
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
@@ -269,6 +282,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     # 3. ordered teardown
     await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", errors)
     await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", errors)
+    await _safe_teardown_step(close_shortener, "shortener", errors)
     await _safe_teardown_step(cleanup_clients, "clients", errors)
 
     if app_runner is not None:
@@ -320,9 +334,11 @@ async def schedule_limiter_sweep():
 
 
 if __name__ == "__main__":
+    # L5: session files carry bearer-equivalent auth keys -- a restrictive
+    # umask covers the window between file creation and _harden_session_files
+    os.umask(0o077)
     try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(start_services())
+        asyncio.run(start_services())
     except KeyboardInterrupt:
         print("╔═══════════════════════════════════════════════════════════╗")
         print("║                   Bot stopped by user (CTRL+C)            ║")

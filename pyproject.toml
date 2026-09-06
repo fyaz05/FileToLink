@@ -7,7 +7,7 @@ dependencies = [
     "aiohttp==3.14.3",           # OSV-clean; 3 Jan-2026 CVEs fixed (H1)
     "pyrofork==2.3.69",
     "tgcrypto-pyrofork==1.2.8",  # H1: maintained crypto backend (pyrofork[speedup])
-    "pymongo==4.18.0",           # async AsyncMongoClient; >= 4.9 for timeoutMS
+    "pymongo==4.18.0",           # async AsyncMongoClient; timeoutMS since 4.2
     "Jinja2==3.1.6",
     "python-dotenv==1.2.3",
     "psutil==7.2.2",
@@ -17,7 +17,8 @@ dependencies = [
 [project.optional-dependencies]
 # H5b/R8: escape hatch for Cloudflare-protected shortener providers.
 # Never installed by default; shortener falls back to plain aiohttp.
-shortener-cf = ["curl_cffi>=0.7"]
+# Floor 0.15.0: GHSA-qw2m-4pqf-rmpp (CVE-2026-33752, redirect-based SSRF).
+shortener-cf = ["curl_cffi>=0.15.0"]
 
 [dependency-groups]
 dev = [
@@ -29,6 +30,8 @@ dev = [
     "bandit>=1.8",
     "vulture>=2.14",
     "pip-audit>=2.7",
+    # Integration tier only (tests/integration): real MongoDB via Docker.
+    "testcontainers[mongodb]>=4.13",
 ]
 
 [tool.ruff]
@@ -60,7 +63,10 @@ markers = [
     "unit: fast, hermetic tests (no network, no Mongo)",
     "integration: testcontainers-backed tests (opt-in, see tests/integration)",
 ]
-addopts = "-m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35"
+addopts = "-m unit"
+# Coverage flags are passed explicitly by `make test` / CI so that the
+# opt-in integration tier (`pytest -m integration`) can run without the
+# unit tier's --cov-fail-under threshold breaking it.
 
 [tool.coverage.run]
 source = ["Thunder"]

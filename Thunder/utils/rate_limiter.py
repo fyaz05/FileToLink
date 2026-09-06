@@ -28,6 +28,7 @@ from pyrogram.types import Message
 
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
+    MSG_RATE_LIMIT_DROPPED,
     MSG_RATE_LIMIT_QUEUE_FULL,
     MSG_RATE_LIMIT_QUEUE_PRIORITY,
     MSG_RATE_LIMIT_QUEUE_REGULAR,
@@ -79,6 +80,11 @@ class TokenBucket:
             return 0.0
         return (1.0 - self._tokens) / self.rate
 
+    def available(self) -> float:
+        """Current token count (for /stats occupancy), without consuming."""
+        self._refill()
+        return max(self._tokens, 0.0)
+
 
 class RateLimiter:
     def __init__(self):
@@ -91,6 +97,7 @@ class RateLimiter:
 
         self.user_requests: dict[int, deque[float]] = {}
         self.global_requests: deque[float] = deque()
+        self._deferred_timer: asyncio.TimerHandle | None = None
 
         self.processing_times: deque[float] = deque(maxlen=100)
         self.file_processing_times: dict[str, deque[float]] = {}
@@ -215,11 +222,15 @@ class RateLimiter:
                 self.user_requests.pop(user_id, None)
                 dropped_users += 1
         if len(self.user_requests) > MAX_TRACKED_USERS:
-            for user_id, stamps in list(self.user_requests.items()):
+            # evict least-recently-active first -- dict-order eviction could
+            # wipe an active user's window and grant an instant quota burst
+            by_recency = sorted(
+                self.user_requests.items(),
+                key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+            )
+            for user_id, _ in by_recency:
                 if len(self.user_requests) <= MAX_TRACKED_USERS:
                     break
-                if not stamps:
-                    continue
                 self.user_requests.pop(user_id, None)
 
         dropped_global = 0
@@ -248,13 +259,13 @@ class RateLimiter:
             "stale_counts": dropped_counts,
         }
 
-    def occupancy(self) -> dict[str, int]:
+    def occupancy(self) -> dict[str, float | int]:
         """Limiter occupancy for /stats (plan PR-13)."""
         return {
             "queued": len(self.request_queue) + len(self.priority_queue),
             "tracked_users": len(self.user_requests),
             "global_window": len(self.global_requests),
-            "breaker_tokens": round(max(self.breaker._tokens, 0.0), 2),
+            "breaker_tokens": round(self.breaker.available(), 2),
         }
 
     # ---------------- queueing ----------------
@@ -268,6 +279,10 @@ class RateLimiter:
             else:
                 self.request_queue.appendleft(request_data)
             self.request_event.set()
+            # A pure requeue (nothing else runnable) must re-park the pool,
+            # or the workers spin on the deferred item until not_before.
+            if delay > 0:
+                self._park_if_all_deferred()
         logger.debug(
             f"Re-queued request for user {request_data['user_id']} to {queue_type} queue (delay={delay:.2f}s)."
         )
@@ -331,19 +346,25 @@ class RateLimiter:
             # deferred: rotate to the right so other requests can proceed
             async with self.request_lock:
                 queue.append(request_data)
+                self._park_if_all_deferred()
             return True
 
         user_id = request_data["user_id"]
 
         # charge-at-exec: the sliding window is charged exactly once, here.
+        # Retries (FloodWait/breaker requeues) must not re-charge, or one
+        # upload can burn a user's entire window on server-side failures.
         if not self.is_owner(user_id):
-            if not await self.check_limits(user_id, record=True):
+            record = not request_data.get("charged")
+            if not await self.check_limits(user_id, record=record):
                 wait = self._calculate_user_rate_limit_wait(user_id, now)
                 if self.global_rate_limit_enabled:
                     wait = max(wait, self._calculate_global_rate_limit_wait(now))
                 wait = min(max(wait, 1.0), self.rate_limit_period_seconds)
                 await self._requeue_request(request_data, queue_type, delay=wait)
                 return True
+            if record:
+                request_data["charged"] = True
             if self.global_rate_limit_enabled and not self.breaker.allow():
                 retry = max(self.breaker.retry_after(), 0.5)
                 await self._requeue_request(request_data, queue_type, delay=retry)
@@ -384,6 +405,15 @@ class RateLimiter:
             else:
                 logger.warning(f"FloodWait for user {user_id}, requeueing (attempt {attempts}).")
                 await self._requeue_request(request_data, queue_type, delay=min(e.value, 300.0))
+        except asyncio.CancelledError:
+            # Shutdown/cancellation: release the queue slot so the user's
+            # count does not leak, then propagate.
+            async with self.request_lock:
+                if user_id in self.user_queue_counts:
+                    self.user_queue_counts[user_id] -= 1
+                    if self.user_queue_counts[user_id] <= 0:
+                        self.user_queue_counts.pop(user_id, None)
+            raise
         except Exception as e:
             logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
             processed = True
@@ -401,15 +431,44 @@ class RateLimiter:
         if notification_msg is None:
             return
         try:
-            await edit_safe(
-                notification_msg,
-                "⚠️ Service is busy and your request could not be completed. Please try again in a few minutes.",
-            )
+            await edit_safe(notification_msg, MSG_RATE_LIMIT_DROPPED)
         except Exception:
             logger.debug("Could not notify user about dropped request", exc_info=True)
 
+    def _park_if_all_deferred(self) -> None:
+        """Stop the busy-spin when every queued request is deferred.
+
+        On Python 3.13, ``Event.wait()`` on a set event and an uncontended
+        ``Lock.acquire()`` return WITHOUT yielding.  Workers rotating only
+        deferred items therefore had zero yield points and froze the whole
+        event loop (all handlers, streams, sweepers) until the earliest
+        ``not_before`` passed -- up to 300s at 100% CPU.  Parking clears the
+        wakeup event and arms a timer for the earliest deferred request;
+        any new enqueue re-sets the event and wakes the pool immediately.
+        Caller must hold ``request_lock``.
+        """
+        now = time.time()
+        earliest: float | None = None
+        for q in (self.priority_queue, self.request_queue):
+            for item in q:
+                nb = item.get("not_before", 0.0)
+                if nb <= now:
+                    # something is runnable -- (re-)wake the pool and keep going
+                    self.request_event.set()
+                    return
+                if earliest is None or nb < earliest:
+                    earliest = nb
+        if earliest is None:
+            return
+        self.request_event.clear()
+        if self._deferred_timer is not None:
+            self._deferred_timer.cancel()
+        self._deferred_timer = asyncio.get_running_loop().call_later(
+            min(earliest - now, 300.0), self.request_event.set
+        )
+
     async def request_executor(self):
-        """One consumer; start :data:`Var.EXUTOR_WORKERS` -- see start_executors()."""
+        """One consumer; start :data:`Var.EXECUTOR_WORKERS` -- see start_executors()."""
         logger.debug("Request executor worker started.")
         while True:
             try:
@@ -431,6 +490,9 @@ class RateLimiter:
             self.priority_queue.clear()
             self.user_queue_counts.clear()
             self.request_event.clear()
+        if self._deferred_timer is not None:
+            self._deferred_timer.cancel()
+            self._deferred_timer = None
         logger.debug("Rate limiter queues cleared.")
 
     # ---------------- estimates (protected UX) ----------------
@@ -559,8 +621,9 @@ async def handle_rate_limited_request(
         await handler(bot, message, *args, **kwargs)
         return
 
-    # H6c: global RPS breaker sheds bursts before they hit Telegram FLOOD_WAIT.
-    if rate_limiter.global_rate_limit_enabled and not rate_limiter.breaker.allow():
+    # H6c: probe without consuming -- the exec path below is the single
+    # consumption point; charging here too halved throughput for queued traffic.
+    if rate_limiter.global_rate_limit_enabled and rate_limiter.breaker.retry_after() > 0:
         logger.warning(f"Global RPS breaker engaged; shedding request for user {user_id}.")
         if not (rl_user_id is not None and rl_user_id < 0):
             await send_queue_full_message(bot, message, file_identifier)

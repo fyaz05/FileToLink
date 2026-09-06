@@ -96,7 +96,9 @@ async def start_command(bot: Client, msg: Message):
                 return await reply_safe(msg, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours))
             return await reply_safe(msg, text=MSG_TOKEN_INVALID)
 
-    txt = MSG_WELCOME.format(user_name=html.escape(user.first_name if user else "Unknown"))
+    txt = MSG_WELCOME.format(
+        user_name=html.escape(user.first_name or "Unknown") if user else "Unknown"
+    )
     link, title = await get_force_info(bot)
     if link:
         txt += "\n\n" + MSG_COMMUNITY_CHANNEL.format(channel_title=html.escape(title or "Channel"))
@@ -222,7 +224,9 @@ async def send_file_dc(msg: Message, file_msg: Message):
 
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, msg: Message):
-    # M12: full preflight chain for /dc (banned -> private -> token -> force-sub)
+    # Gate chain for /dc (banned -> private-mode -> force-sub).  The token
+    # gate is intentionally NOT applied: /dc is informational, and applying
+    # it here would lock token-gated users out of diagnostics.
     if not await check_banned(bot, msg):
         return
     from Thunder.utils.decorators import check_private_mode

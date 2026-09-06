@@ -7,6 +7,7 @@ from pymongo import AsyncMongoClient, UpdateOne
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError
 
+from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
 from Thunder.vars import Var
 
@@ -186,6 +187,9 @@ class Database:
             await self.banned_users_col.update_one(
                 {"user_id": user_id}, {"$set": ban_data}, upsert=True
             )
+            # the ban gate is flag-cached (H7): without this invalidation a
+            # fresh ban would not take effect until the 5-min TTL expired
+            flags.invalidate(("banned_user", user_id))
             logger.debug(f"Added/Updated banned user {user_id}. Reason: {reason}")
         except Exception as e:
             logger.error(f"Error in add_banned_user for user {user_id}: {e}", exc_info=True)
@@ -195,6 +199,7 @@ class Database:
         try:
             result = await self.banned_users_col.delete_one({"user_id": user_id})
             if result.deleted_count > 0:
+                flags.invalidate(("banned_user", user_id))
                 logger.debug(f"Removed banned user {user_id}.")
                 return True
             return False
@@ -202,10 +207,17 @@ class Database:
             logger.error(f"Error in remove_banned_user for user {user_id}: {e}", exc_info=True)
             return False
 
-    async def is_user_banned(self, user_id: int) -> dict[str, Any] | None:
+    async def is_user_banned(
+        self, user_id: int, *, raise_on_error: bool = False
+    ) -> dict[str, Any] | None:
+        """Fetch a ban record.  With ``raise_on_error=True`` a Mongo failure
+        raises so fail-closed callers (the ban gate, H7) can deny instead of
+        silently treating the outage as "not banned"."""
         try:
             return await self.banned_users_col.find_one({"user_id": user_id})
         except Exception as e:
+            if raise_on_error:
+                raise
             logger.error(f"Error in is_user_banned for user {user_id}: {e}", exc_info=True)
             return None
 

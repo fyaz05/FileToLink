@@ -36,6 +36,7 @@ class FlagCache:
         self.max_items = max_items
         self.name = name
         self._data: OrderedDict[Hashable, tuple[Any, float]] = OrderedDict()
+        self._inflight: dict[Hashable, asyncio.Task] = {}
 
     def _prune_expired(self, now: float) -> None:
         expired = [key for key, (_, ts) in self._data.items() if now - ts > self.ttl_seconds]
@@ -55,8 +56,24 @@ class FlagCache:
                 return value
             self._data.pop(key, None)
 
-        value = await loader()
-        self._data[key] = (value, now)
+        # single-flight: concurrent callers of a cold/expired key share one
+        # loader task instead of stampeding the backend with N identical reads
+        task = self._inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(self._load_and_store(key, loader))
+            self._inflight[key] = task
+        return await asyncio.shield(task)
+
+    async def _load_and_store(
+        self,
+        key: Hashable,
+        loader: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        try:
+            value = await loader()
+        finally:
+            self._inflight.pop(key, None)
+        self._data[key] = (value, time.monotonic())
         self._data.move_to_end(key)
         while len(self._data) > self.max_items:
             self._data.popitem(last=False)

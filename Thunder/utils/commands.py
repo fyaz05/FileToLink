@@ -1,4 +1,3 @@
-from Thunder.bot import StreamBot
 from Thunder.bot.registry import bot_commands, help_command_rows
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_HELP_COMMANDS_HEADER, MSG_HELP_TIPS
@@ -22,6 +21,10 @@ async def set_commands():
         try:
             commands = bot_commands()
             if commands:
+                # lazy import (M12 layering: utils must not import bot at
+                # module scope -- same pattern as canonical_files/render_template)
+                from Thunder.bot import StreamBot
+
                 await StreamBot.set_bot_commands(commands)
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}", exc_info=True)

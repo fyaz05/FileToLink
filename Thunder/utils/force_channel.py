@@ -1,5 +1,7 @@
 # Thunder/utils/force_channel.py
 
+import time
+
 from pyrogram import Client
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -11,16 +13,24 @@ from Thunder.vars import Var
 
 _force_link = None
 _force_title = None
+_force_resolved = False
+_negative_until = 0.0
+_NEGATIVE_TTL_SECONDS = 60.0
 
 
 async def get_force_info(bot: Client):
-    global _force_link, _force_title
+    global _force_link, _force_title, _force_resolved, _negative_until
 
     if not Var.FORCE_CHANNEL_ID:
         return None, None
 
-    if _force_link is not None and _force_title is not None:
+    # resolved-once (a numeric channel's invite link/title does not change
+    # between messages) -- the old guard re-fetched get_chat on EVERY
+    # message whenever the channel had no link, the bot's busiest path
+    if _force_resolved:
         return _force_link, _force_title
+    if time.monotonic() < _negative_until:
+        return None, None
 
     try:
         chat = await tg_call(bot.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
@@ -32,8 +42,13 @@ async def get_force_info(bot: Client):
                 f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
             )
             _force_title = chat.title or "Channel"
+        # cache even the no-link outcome, or it re-resolves per message
+        _force_resolved = True
         return _force_link, _force_title
     except Exception as e:
+        # transient RPC failure: short negative cache so the gate path does
+        # not hammer get_chat on every message during a Telegram brownout
+        _negative_until = time.monotonic() + _NEGATIVE_TTL_SECONDS
         logger.error(f"Force channel error: {e}", exc_info=True)
         return None, None
 

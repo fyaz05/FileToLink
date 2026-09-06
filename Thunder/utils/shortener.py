@@ -6,10 +6,12 @@
   requests/urllib3 transitive tree is gone).  ``curl_cffi`` remains an
   optional escape hatch for Cloudflare-protected providers -- declared as
   the ``shortener-cf`` extra, never a hard dependency.
-* M5 hardening: LRU cache + per-URL singleflight, API key moved to an
-  ``Authorization: Bearer`` header (never the query string), https-only
+* M5 hardening: LRU cache + per-URL singleflight, https-only
   endpoints, redirects never followed, and the returned short URL's host
   must match the configured site's host (anti redirect-to-attacker).
+  API-key placement is provider-mandated: Bitly takes a Bearer header;
+  path/query-key providers (ouo.io, generic) keep their documented
+  schemes.
 * The plugin registry and the offline Linkvertise builder are preserved.
 """
 
@@ -93,7 +95,10 @@ class BitlyPlugin(ShortenerPlugin):
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return data.get("link", url)
+                short = data.get("link")
+                # same anti-substitution guard as every other HTTP plugin (M5)
+                if short and short != url and self._validate_short_url(short, domain):
+                    return short
         return url
 
 
@@ -168,6 +173,7 @@ class ShortenerSystem:
         self.ready = False
         self._cache: OrderedDict[str, str] = OrderedDict()
         self._inflight: dict[str, asyncio.Future] = {}
+        self._init_lock = asyncio.Lock()
 
     def _get_plugin_class(self, domain: str):
         for plugin_class in ShortenerPlugin.__subclasses__():
@@ -176,38 +182,41 @@ class ShortenerSystem:
         return GenericShortenerPlugin
 
     async def initialize(self) -> bool:
-        if self.ready:
-            return True
+        # lock: the first concurrent use (e.g. two shorten() calls in one
+        # gather) would otherwise build two sessions and leak one
+        async with self._init_lock:
+            if self.ready:
+                return True
 
-        if not (
-            getattr(Var, "SHORTEN_ENABLED", False) or getattr(Var, "SHORTEN_MEDIA_LINKS", False)
-        ):
-            return False
+            if not (
+                getattr(Var, "SHORTEN_ENABLED", False) or getattr(Var, "SHORTEN_MEDIA_LINKS", False)
+            ):
+                return False
 
-        site = getattr(Var, "URL_SHORTENER_SITE", "")
-        api_key = getattr(Var, "URL_SHORTENER_API_KEY", "")
+            site = getattr(Var, "URL_SHORTENER_SITE", "")
+            api_key = getattr(Var, "URL_SHORTENER_API_KEY", "")
 
-        if not (site and api_key):
-            return False
+            if not (site and api_key):
+                return False
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=SHORTEN_TIMEOUT_SECONDS)
-            self.session = aiohttp.ClientSession(
-                timeout=timeout,
-                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) FileToLink/shortener"},
-            )
-            # NOTE: redirects are disabled per-request (aiohttp does not accept
-            # ``allow_redirects`` on the session constructor -- passing it there
-            # raises TypeError at runtime and silently disabled the shortener).
-            self.domain = site
-            plugin_class = self._get_plugin_class(site)
-            self.plugin = plugin_class()
-            self.ready = True
-            logger.info(f"Shortener ready (plugin={type(plugin_class).__name__}, site={site})")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize ShortenerSystem: {e}", exc_info=True)
-            return False
+            try:
+                timeout = aiohttp.ClientTimeout(total=SHORTEN_TIMEOUT_SECONDS)
+                self.session = aiohttp.ClientSession(
+                    timeout=timeout,
+                    headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) FileToLink/shortener"},
+                )
+                # NOTE: redirects are disabled per-request (aiohttp does not accept
+                # ``allow_redirects`` on the session constructor -- passing it there
+                # raises TypeError at runtime and silently disabled the shortener).
+                self.domain = site
+                plugin_class = self._get_plugin_class(site)
+                self.plugin = plugin_class()
+                self.ready = True
+                logger.info(f"Shortener ready (plugin={type(plugin_class).__name__}, site={site})")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to initialize ShortenerSystem: {e}", exc_info=True)
+                return False
 
     async def _shorten_uncached(self, url: str) -> str:
         if self.session is None or self.plugin is None:
@@ -247,9 +256,15 @@ class ShortenerSystem:
             if not future.done():
                 future.set_result(result)
             return result
-        except Exception as e:
+        except BaseException as e:
+            # CancelledError is BaseException: without this, a cancelled
+            # runner never resolves the future and every waiter hangs forever
             if not future.done():
-                future.set_exception(e)
+                future.set_exception(
+                    e
+                    if isinstance(e, Exception)
+                    else RuntimeError(f"shortening of {url!r} aborted: {e!r}")
+                )
             raise
         finally:
             self._inflight.pop(url, None)
@@ -260,6 +275,11 @@ class ShortenerSystem:
 
 
 _system = ShortenerSystem()
+
+
+async def close_shortener() -> None:
+    """Shutdown hook: close the shared aiohttp session (H5b lifecycle)."""
+    await _system.close()
 
 
 async def shorten(url: str) -> str:

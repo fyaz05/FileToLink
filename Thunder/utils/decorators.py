@@ -24,7 +24,9 @@ from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_DECORATOR_BANNED,
     MSG_ERROR_TEMP,
+    MSG_ERROR_TOKEN_LINK_FAILED,
     MSG_ERROR_UNAUTHORIZED,
+    MSG_ERROR_UNEXPECTED,
     MSG_PRIVATE_MODE_DENIED,
     MSG_TOKEN_INVALID,
 )
@@ -46,7 +48,10 @@ async def check_banned(client, message: Message) -> bool:
         try:
             ban_details = await flags.get_or_load(
                 ("banned_user", user_id),
-                lambda: db.is_user_banned(user_id),
+                # raise_on_error=True: the DB method otherwise swallows Mongo
+                # outages into None, which the cache would treat as
+                # "not banned" (negative-cached for 5 min) -- fail-open.
+                lambda: db.is_user_banned(user_id, raise_on_error=True),
             )
         except Exception as e:
             # fail-closed: a Mongo outage must not un-ban everybody
@@ -141,10 +146,7 @@ async def require_token(client, message: Message) -> bool:
                 f"Failed to generate temporary token for user {user_id}: {e}", exc_info=True
             )
             try:
-                await reply_safe(
-                    message,
-                    "Sorry, could not generate an access token link. Please try again later.",
-                )
+                await reply_safe(message, MSG_ERROR_TOKEN_LINK_FAILED)
             except Exception:
                 pass
             return False
@@ -154,10 +156,7 @@ async def require_token(client, message: Message) -> bool:
                 f"Temporary token generation returned empty for user {user_id}.", exc_info=True
             )
             try:
-                await reply_safe(
-                    message,
-                    "Sorry, could not generate an access token link. Please try again later.",
-                )
+                await reply_safe(message, MSG_ERROR_TOKEN_LINK_FAILED)
             except Exception:
                 pass
             return False
@@ -167,18 +166,14 @@ async def require_token(client, message: Message) -> bool:
         except Exception as e:
             logger.error(f"Failed to get bot info for user {user_id}: {e}", exc_info=True)
             try:
-                await reply_safe(
-                    message, "Sorry, an unexpected error occurred. Please try again later."
-                )
+                await reply_safe(message, MSG_ERROR_UNEXPECTED)
             except Exception:
                 pass
             return False
         if not me:
             logger.error(f"get_me returned nothing for user {user_id}.", exc_info=True)
             try:
-                await reply_safe(
-                    message, "Sorry, an unexpected error occurred. Please try again later."
-                )
+                await reply_safe(message, MSG_ERROR_UNEXPECTED)
             except Exception:
                 pass
             return False
@@ -244,7 +239,7 @@ async def get_shortener_status(client, message: Message) -> bool:
 # --------------------------------------------------------------------------
 
 #: gate registry -- order is the documented contract; adding a new gate is a
-#: one-place change here (asserted by tests/test_preflight.py).
+#: one-place change here (gate chain asserted by tests/test_unit/test_registry.py).
 PREFLIGHT_GATES = {
     "banned": check_banned,
     "private_mode": check_private_mode,
@@ -257,7 +252,6 @@ async def preflight(
     message: Message,
     *,
     gates: tuple = ("banned", "private_mode", "token"),
-    skip: tuple = (),
 ) -> bool | None:
     """Run the standard gate chain in order.
 
@@ -265,10 +259,10 @@ async def preflight(
     ``None`` when any gate rejects the request.
     """
     for name in gates:
-        if name in skip:
-            continue
         gate = PREFLIGHT_GATES.get(name)
         if gate is None:
+            # a typo'd gate id must never silently disable a security check
+            logger.warning(f"preflight: unknown gate {name!r} skipped -- fix the gate id")
             continue
         if not await gate(client, message):
             return None

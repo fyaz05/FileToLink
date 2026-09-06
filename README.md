@@ -190,7 +190,6 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `/log` | Send bot logs. |
 | `/restart` | Restart the bot. |
 | `/shell` | Execute a shell command. |
-| `/speedtest` | Run network speed test and display comprehensive results. |
 | `/users` | Show total number of users. |
 | `/authorize` | Permanently authorize a user to use the bot (bypasses token system). |
 | `/deauthorize` | Remove permanent authorization from a user. |
@@ -218,7 +217,6 @@ listauth - [Admin] List authorized
 log - [Admin] Send bot logs
 restart - [Admin] Restart the bot
 shell - [Admin] Execute shell command
-speedtest - [Admin] Run network speed test
 ```
 
 </details>
@@ -272,7 +270,6 @@ Thunder implements a sophisticated multi-tier rate limiting system designed for 
 Monitor server performance with built-in speed testing:
 
 ```bash
-/speedtest
 ```
 
 Features include download/upload speeds, latency measurements, and shareable result images for performance monitoring.

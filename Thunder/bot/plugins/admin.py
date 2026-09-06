@@ -6,17 +6,18 @@ import os
 import shutil
 import time
 from io import BytesIO
+from typing import Any
 
 import psutil
 from pyrogram import filters
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
 from pyrogram.errors import MessageNotModified
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.utils.bot_utils import get_user, reply
+from Thunder.utils.bot_utils import reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
 from Thunder.utils.flag_cache import flags
@@ -243,11 +244,15 @@ async def send_logs(client: Client, message: Message):
     try:
         # H10: never upload raw logs -- stream the (capped) tail through the
         # shared redaction regexes so bot tokens / Mongo URIs cannot leak.
-        with open(LOG_FILE, "rb") as f:
-            f.seek(0, os.SEEK_END)
-            size = f.tell()
-            f.seek(max(0, size - _LOG_TAIL_BYTES))
-            payload = redact_secrets(f.read().decode("utf-8", errors="replace"))
+        # File IO + regex over megabytes must not run on the event loop (H8).
+        def _read_redacted_tail() -> str:
+            with open(LOG_FILE, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - _LOG_TAIL_BYTES))
+                return redact_secrets(f.read().decode("utf-8", errors="replace"))
+
+        payload = await asyncio.to_thread(_read_redacted_tail)
 
         doc = BytesIO(payload.encode("utf-8"))
         doc.name = "bot_redacted.txt"
@@ -313,19 +318,26 @@ async def list_authorized_command(client: Client, message: Message):
     if not users:
         return await reply(message, text=MSG_NO_AUTH_USERS)
 
-    # M7: HTML + html.escape for user-controlled display names
+    # M7: HTML + html.escape for user-controlled display names.
+    # One batched get_users RPC instead of one per row (N+1 FloodWait risk).
+    id_to_user: dict[int, Any] = {}
+    try:
+        tg_users = await tg_call(client.get_users, [u["user_id"] for u in users], retries=1)
+        if isinstance(tg_users, User):
+            tg_users = [tg_users]
+        id_to_user = {u.id: u for u in (tg_users or []) if u}
+    except Exception:
+        logger.error("Failed to batch-fetch tg_users for /listauth", exc_info=True)
+
     text = MSG_ADMIN_AUTH_LIST_HEADER
     for i, user in enumerate(users, 1):
         display_name = "Unknown"
-        try:
-            tg_user = await get_user(client, user["user_id"])
-            if tg_user is not None:
-                raw_display_name = (
-                    f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
-                )
-                display_name = html.escape(raw_display_name)
-        except Exception:
-            logger.error("Failed to fetch tg_user for user_id=%s", user["user_id"], exc_info=True)
+        tg_user = id_to_user.get(user["user_id"])
+        if tg_user is not None:
+            raw_display_name = (
+                f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
+            )
+            display_name = html.escape(raw_display_name)
 
         text += MSG_AUTH_USER_INFO.format(
             i=i,

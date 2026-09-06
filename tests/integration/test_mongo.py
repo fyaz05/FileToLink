@@ -16,7 +16,7 @@ docker_unavailable = True
 mongo_uri = None
 
 try:  # pragma: no cover - environment-dependent
-    from testcontainers.mongo import MongoContainer
+    from testcontainers.community.mongodb import MongoDbContainer as MongoContainer
 
     docker_unavailable = False
 except ImportError:
@@ -43,7 +43,7 @@ async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
 
     # M8: atomic activation -- two concurrent consume() calls, one winner
     import asyncio
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from Thunder.utils.tokens import consume
 
@@ -53,8 +53,8 @@ async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
             "token": token,
             "user_id": 424242,
             "activated": False,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(hours=1),
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
         }
     )
     results = await asyncio.gather(consume(token, 424242), consume(token, 424242))
