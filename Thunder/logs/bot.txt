@@ -54,3 +54,21 @@
 2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
 2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
 2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:25:46,103 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:25:46,103 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:25:46,103 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:25:46,184 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:27:03,783 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:27:03,783 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:27:03,783 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:27:03,843 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer

@@ -5,7 +5,6 @@ import glob
 import os
 
 from pyrogram import Client
-from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.utils.config_parser import TokenParser
@@ -65,11 +64,7 @@ async def initialize_clients():
                 max_concurrent_transmissions=1000,
                 sleep_threshold=Var.SLEEP_THRESHOLD,
             )
-            try:
-                await client.start()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.start()
+            await tg_call(client.start)
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client
