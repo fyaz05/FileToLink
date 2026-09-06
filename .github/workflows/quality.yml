@@ -9,9 +9,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
 
@@ -30,6 +35,24 @@ jobs:
 
       - name: Lockfile is current with pyproject (uv.lock must never drift)
         run: uv lock --check
+
+      - name: requirements.txt is in sync with pyproject (two sources of truth must agree)
+        run: |
+          uv run python - <<'PY'
+          import sys, tomllib
+          deps = {d.strip() for d in tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]}
+          listed = {l.strip() for l in open("requirements.txt") if l.strip() and not l.startswith("#")}
+          if deps != listed:
+              print("pyproject:", sorted(deps))
+              print("requirements.txt:", sorted(listed))
+              sys.exit("requirements.txt drifted from pyproject [project.dependencies]")
+          PY
+
+      - name: requirements.lock is in sync with uv.lock (Docker consumes this)
+        run: |
+          uv export --frozen --no-dev --hashes -o /tmp/requirements.lock.check
+          # uv embeds the export command in the header; compare content only
+          diff -u <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/requirements.lock.check)
 
       - name: Ruff (lint + format check)
         run: |
@@ -85,3 +108,26 @@ jobs:
           tags: |
             fyaz05/thunder:latest
             fyaz05/thunder:${{ github.sha }}
+
+  integration:
+    # the atomicity guarantees (token activation CAS, ingest claims) are only
+    # proven against a real MongoDB -- this tier never ran in CI before
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install --upgrade uv
+
+      - name: Install dependencies (locked, incl. testcontainers)
+        run: uv sync --frozen --group dev
+
+      - name: Integration tests (real MongoDB via testcontainers)
+        run: uv run pytest -m integration
+        env:
+          TEST_INTEGRATION: "1"

@@ -5,17 +5,18 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        git \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/bash thunder
+# no git in the image: self-update no-ops cleanly without .git/git, and a
+# container should be replaced by pulling a new image, not mutating itself.
+# python:3.13-slim already ships everything else the runtime needs.
+RUN useradd --create-home --shell /bin/bash thunder
 
-COPY requirements.txt .
+# hash-pinned FULL graph (uv export of uv.lock) -- the previous direct-pins
+# install resolved fresh, unpinned transitives on every build, so the
+# supply-chain guarantees held in CI never reached the shipped image
+COPY requirements.lock .
 
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY --chown=thunder:thunder . .
 

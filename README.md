@@ -133,7 +133,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `MAX_BATCH_FILES` | Maximum files in batch processing | `50` |
 | `CHANNEL` | Allow processing messages from channels | `False` |
 | `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
-| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
+| `SLEEP_THRESHOLD` | Client switch threshold | `600` |
 | `WORKERS` | Async workers | `8` |
 | `NAME` | Bot name | `ThunderF2L` |
 | `BIND_ADDRESS` | Bind address | `0.0.0.0` |
@@ -149,7 +149,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `MAX_FILES_PER_PERIOD` | Files per window | `2` |
 | `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
 | `MAX_QUEUE_SIZE` | Queue size | `100` |
-| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
+| `GLOBAL_RATE_LIMIT` | Global limiting | `False` |
 | `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
 
 </details>
@@ -312,7 +312,7 @@ python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt  # direct pins; Docker uses the hash-pinned requirements.lock
 
 # 4. Configure
 cp config_sample.env config.env
@@ -373,7 +373,7 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```bash
    heroku ps:scale web=1
    ```
-7. Set `UPSTREAM_REPO` for auto-updates on dyno restart:
+7. Set `UPSTREAM_REPO` for auto-updates on dyno restart (requires a git checkout — Docker images update by pulling a new image instead):
    ```bash
    heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
    ```

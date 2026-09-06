@@ -18,11 +18,14 @@ bash thunder.sh            # best-effort self-update (shell-free) + python3 -m T
 Managed in `pyproject.toml`, exported to `requirements.txt` (8 direct deps,
 all exact-pinned; the CI dependency-count gate fails beyond 8).
 `uv.lock` pins the full transitive graph with hashes — regenerate it with
-`uv lock` whenever `pyproject.toml` changes (CI fails if it drifts):
+`uv lock` whenever `pyproject.toml` changes (CI fails if it drifts).
+`requirements.lock` is the hash-pinned full-graph export that the Dockerfile
+installs with `--require-hashes`; CI fails if it drifts from `uv.lock`:
 
 ```bash
 uv sync --frozen      # reproducible env from the lockfile
-pip install -r requirements.txt
+pip install -r requirements.txt        # direct pins (human installs)
+pip install --require-hashes -r requirements.lock  # what Docker ships
 # aiohttp, pyrofork, tgcrypto-pyrofork, pymongo, Jinja2, python-dotenv, psutil, uvloop
 ```
 
