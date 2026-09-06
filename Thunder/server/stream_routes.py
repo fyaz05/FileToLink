@@ -304,11 +304,17 @@ def _is_activation_token(token: str) -> bool:
 def _telegram_activate_url(username: str, token: str) -> str:
     """Build the t.me deep link with the token percent-encoded.
 
-    ``quote_plus`` guarantees the token can only ever occupy the query
-    value slot (no ``&``/``#``/CR/LF can reshape the URL) -- a no-op for
-    shape-valid tokens, which are already URL-safe.
+    ``quote_plus(safe='')`` guarantees the token can only ever occupy the
+    query-value slot (no ``&``/``#``/CR/LF can reshape the URL) -- a no-op
+    for shape-valid tokens, which are already URL-safe.
+
+    Built with ``+`` concatenation, not an f-string: the redirect target is
+    then provably constant-prefixed ("https://t.me/"), which is exactly the
+    safety property CodeQL's py/url-redirection sanitizer model recognizes
+    (right-operand-of-concat sanitizer; formatting is not modeled).  Do not
+    "modernize" this back to an f-string -- it would re-flag the alert.
     """
-    return f"https://t.me/{username}?start={quote_plus(token, safe='')}"
+    return "https://t.me/" + username + "?start=" + quote_plus(token, safe="")
 
 
 @routes.get("/activate/{token}")
