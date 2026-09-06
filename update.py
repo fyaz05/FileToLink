@@ -77,6 +77,11 @@ def _redact_credentials(text: str) -> str:
 def main() -> None:
     if not UPSTREAM_REPO:
         return
+    if UPSTREAM_REPO.startswith("-") or UPSTREAM_BRANCH.startswith("-"):
+        # git would treat leading-dash values as its own options; these are
+        # operator-supplied env vars, but stay on the safe side of argv
+        logger.info("UPSTREAM_REPO/UPSTREAM_BRANCH must not start with '-'; skipping self-update.")
+        return
     _recover_config_backup()
     if shutil.which("git") is None:
         logger.info("git not available; skipping self-update (image without git).")

@@ -1,5 +1,6 @@
 # Thunder/server/__init__.py
 
+import re
 import time
 
 from aiohttp import web
@@ -9,12 +10,9 @@ from .stream_routes import routes
 # H10: access log middleware -- logs method, redacted path (file tokens are
 # replaced by their sha256 prefix), status, bytes and duration.
 # Modeled on ThunderGo's http/server.go logMiddleware + redactPath.
-_REDACT_SEGMENTS = ("f/", "watch/")
 
 
 def _redact_path(path: str) -> str:
-    import re
-
     # canonical: /f/<32-hex>/<name> or /watch/f/<32-hex>/<name>
     path = re.sub(
         r"(?<=/f/)[0-9a-f]{20,32}",
@@ -41,6 +39,7 @@ def _hash_token(token: str) -> str:
 @web.middleware
 async def access_log_middleware(request: web.Request, handler):
     start = time.perf_counter()
+    response: web.Response | None = None
     try:
         response = await handler(request)
     except web.HTTPException as e:
@@ -51,6 +50,8 @@ async def access_log_middleware(request: web.Request, handler):
         try:
             from Thunder.utils.logger import logger
 
+            # response stays None when the handler raised a non-HTTP
+            # exception; getattr(None, ...) then falls back to 500
             status = getattr(response, "status", 500)
             size = getattr(response, "content_length", None)
             logger.info(

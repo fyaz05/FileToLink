@@ -1,3 +1,6 @@
+# NOTE: Dependabot cannot regenerate uv.lock.  When a pip PR arrives,
+# run `uv lock` locally, commit the updated lockfile, and push it to
+# the PR branch -- CI's `uv lock --check` gate fails otherwise.
 version: 2
 updates:
   - package-ecosystem: pip

@@ -50,8 +50,8 @@ jobs:
       - name: Bandit (medium+ severity)
         run: uv run bandit -r Thunder -ll --skip B101
 
-      - name: Vulture (dead-code gate, whitelisted)
-        run: uv run vulture Thunder whitelist.py --min-confidence 80
+      - name: Vulture (dead-code gate)
+        run: uv run vulture Thunder --min-confidence 80
 
       - name: Dependency count gate (leanness is permanent)
         run: |
@@ -82,4 +82,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: fyaz05/thunder:latest
+          tags: |
+            fyaz05/thunder:latest
+            fyaz05/thunder:${{ github.sha }}

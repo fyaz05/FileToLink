@@ -40,6 +40,7 @@ MSG_DEAUTHORIZE_FAILED = (
 MSG_TOKEN_FAILED = (
     "⚠️ **Token Activation Failed!**\n\n"
     "> ❗ Reason: {reason}\n\n"
+    "> 🆔 Support ID: {error_id}\n\n"
     "🔑 Please check your token or contact support."
 )
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
@@ -223,18 +224,18 @@ MSG_PING_RESPONSE = (
 
 # ------ DC Info ------
 MSG_DC_USER_INFO = (
-    "📍 **Information**\n"
-    "> 👤 **User:** [{user_name}](tg://user?id={user_id})\n"
-    "> 🆔 **User ID:** `{user_id}`\n"
-    "> 🌍 **DC ID:** `{dc_id}`"
+    "📍 <b>Information</b>\n"
+    '👤 <b>User:</b> <a href="tg://user?id={user_id}">{user_name}</a>\n'
+    "🆔 <b>User ID:</b> <code>{user_id}</code>\n"
+    "🌍 <b>DC ID:</b> <code>{dc_id}</code>"
 )
 
 MSG_DC_FILE_INFO = (
-    "🗂️ **File Information**\n"
-    ">`{file_name}`\n"
-    "💾 **File Size:** `{file_size}`\n"
-    "📁 **File Type:** `{file_type}`\n"
-    "🌍 **DC ID:** `{dc_id}`"
+    "🗂️ <b>File Information</b>\n"
+    "<code>{file_name}</code>\n"
+    "💾 <b>File Size:</b> <code>{file_size}</code>\n"
+    "📁 <b>File Type:</b> <code>{file_type}</code>\n"
+    "🌍 <b>DC ID:</b> <code>{dc_id}</code>"
 )
 
 MSG_DC_UNKNOWN = "Unknown"

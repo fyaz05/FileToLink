@@ -114,9 +114,8 @@ class ByteStreamer:
         }
 
     async def get_file_info(self, message_id: int) -> dict[str, Any]:
-        try:
-            message = await self.get_message(message_id)
-            return self.get_file_info_sync(message)
-        except Exception as e:
-            logger.debug(f"Error getting file info for {message_id}: {e}", exc_info=True)
-            return {"message_id": message_id, "error": str(e)}
+        # no blanket swallow: the legacy route's error ladder already maps
+        # FileNotFound -> 404 and everything else -> 500 with an error_id;
+        # masking them here turned transient outages into misleading 404s
+        message = await self.get_message(message_id)
+        return self.get_file_info_sync(message)

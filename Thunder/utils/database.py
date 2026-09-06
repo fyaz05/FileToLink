@@ -68,6 +68,11 @@ class Database:
             await self.banned_users_col.create_index("user_id", unique=True)
             await self.banned_channels_col.create_index("channel_id", unique=True)
             await self.token_col.create_index("token", unique=True)
+            # /start + generate() look tokens up by user; without this the
+            # per-user scans walk the whole collection (H8-adjacent gap)
+            await self.token_col.create_index(
+                [("user_id", 1), ("activated", 1), ("expires_at", -1)]
+            )
             await self.authorized_users_col.create_index("user_id", unique=True)
             try:
                 await self.col.create_index("id", unique=True)
@@ -234,6 +239,7 @@ class Database:
             await self.banned_channels_col.update_one(
                 {"channel_id": channel_id}, {"$set": ban_data}, upsert=True
             )
+            flags.invalidate(("banned_channel", channel_id))
             logger.debug(f"Added/Updated banned channel {channel_id}. Reason: {reason}")
         except Exception as e:
             logger.error(
@@ -244,6 +250,7 @@ class Database:
     async def remove_banned_channel(self, channel_id: int) -> bool:
         try:
             result = await self.banned_channels_col.delete_one({"channel_id": channel_id})
+            flags.invalidate(("banned_channel", channel_id))
             if result.deleted_count > 0:
                 logger.debug(f"Removed banned channel {channel_id}.")
                 return True
@@ -254,10 +261,18 @@ class Database:
             )
             return False
 
-    async def is_channel_banned(self, channel_id: int) -> dict[str, Any] | None:
+    async def is_channel_banned(
+        self, channel_id: int, *, raise_on_error: bool = False
+    ) -> dict[str, Any] | None:
+        """Fetch a channel-ban record.  ``raise_on_error`` mirrors
+        ``is_user_banned`` for fail-closed callers; the default (swallow →
+        None) is what the auto-leave gate wants, since a Mongo outage must
+        not trigger the destructive leave_chat action."""
         try:
             return await self.banned_channels_col.find_one({"channel_id": channel_id})
         except Exception as e:
+            if raise_on_error:
+                raise
             logger.error(f"Error in is_channel_banned for channel {channel_id}: {e}", exc_info=True)
             return None
 

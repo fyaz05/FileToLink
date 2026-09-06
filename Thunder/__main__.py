@@ -83,7 +83,7 @@ def schedule_index_ensure() -> None:
 
 async def import_plugins():
     print("╠════════════════════ IMPORTING PLUGINS ════════════════════╣")
-    plugins = glob.glob(PLUGIN_PATH)
+    plugins = sorted(glob.glob(PLUGIN_PATH))  # deterministic registration order
     if not plugins:
         print("   ▶ No plugins found to import!")
         return 0

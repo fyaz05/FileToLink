@@ -5,7 +5,6 @@ from Thunder.utils.media_types import (
     canonical_media_type,
     ext_and_mime_for_class,
     ext_for,
-    mime_for,
 )
 
 
@@ -42,5 +41,4 @@ def test_attr_resolution():
 @pytest.mark.unit
 def test_direct_helpers():
     assert ext_for("photo") == "jpg"
-    assert mime_for("voice") == "audio/ogg"
     assert ext_for("nope") == "bin"

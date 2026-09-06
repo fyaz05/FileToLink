@@ -122,6 +122,14 @@ class RateLimiter:
             self.enabled = Var.RATE_LIMIT_ENABLED
             self.global_rate_limit_enabled = Var.GLOBAL_RATE_LIMIT
             self.max_global_requests_per_minute = Var.MAX_GLOBAL_REQUESTS_PER_MINUTE
+            if Var.GLOBAL_RPS_LIMIT and not self.global_rate_limit_enabled:
+                # M6 philosophy: surface dead knobs instead of silently
+                # ignoring them -- the RPS cap only bites when the breaker
+                # itself is enabled (see _breaker_rate)
+                logger.warning(
+                    "GLOBAL_RPS_LIMIT is set but GLOBAL_RATE_LIMIT is disabled; "
+                    "the per-second cap has no effect until the global breaker is enabled."
+                )
 
             if not self._validate_configuration():
                 logger.warning("Rate limiter disabled due to invalid configuration.")
@@ -585,10 +593,6 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
-async def request_executor():
-    await rate_limiter.request_executor()
-
-
 def start_executors() -> list[asyncio.Task]:
     """Start the worker pool (H6b) -- callers keep the tasks for shutdown."""
     workers: list[asyncio.Task] = []
@@ -621,8 +625,11 @@ async def handle_rate_limited_request(
         await handler(bot, message, *args, **kwargs)
         return
 
-    # H6c: probe without consuming -- the exec path below is the single
-    # consumption point; charging here too halved throughput for queued traffic.
+    # H6c: probe without consuming -- the queued exec path below is where
+    # breaker tokens are consumed.  The immediate path is gated by the 60s
+    # user window only (charging here == charging at exec); sub-second
+    # breaker throttling therefore applies to queued traffic, not bursts of
+    # within-window users.
     if rate_limiter.global_rate_limit_enabled and rate_limiter.breaker.retry_after() > 0:
         logger.warning(f"Global RPS breaker engaged; shedding request for user {user_id}.")
         if not (rl_user_id is not None and rl_user_id < 0):

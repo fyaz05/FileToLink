@@ -16,6 +16,8 @@ Documented ordering (see AGENTS.md):
   silently letting everyone through.
 """
 
+import html
+
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder.utils.database import db
@@ -75,7 +77,10 @@ async def check_banned(client, message: Message) -> bool:
                 await reply_safe(
                     message,
                     MSG_DECORATOR_BANNED.format(
-                        reason=ban_details.get("reason", "Not specified"), ban_time=ban_time
+                        # reason is owner-set free text; escape so the
+                        # DEFAULT parse pass cannot reflow it into markup
+                        reason=html.escape(ban_details.get("reason", "Not specified")),
+                        ban_time=ban_time,
                     ),
                 )
             except Exception:

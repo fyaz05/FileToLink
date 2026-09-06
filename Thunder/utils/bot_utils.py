@@ -169,24 +169,20 @@ async def gen_links(fwd_msg: Message, shortener: bool = True) -> dict[str, str]:
 
 async def gen_dc_txt(usr: User) -> str:
     dc_id_val = usr.dc_id if usr.dc_id is not None else MSG_DC_UNKNOWN
+    # user_name lands in an HTML <a> label; escape it (attacker-controlled)
     return MSG_DC_USER_INFO.format(
-        user_name=usr.first_name or "User", user_id=usr.id, dc_id=dc_id_val
+        user_name=html.escape(usr.first_name or "User", quote=False),
+        user_id=usr.id,
+        dc_id=dc_id_val,
     )
 
 
 async def get_user(cli: Client, qry: Any) -> User | None:
-    if isinstance(qry, str) and qry.startswith("@"):
-        try:
-            result = await tg_call(cli.get_users, qry)
-        except Exception as e:
-            logger.debug(f"get_users failed for {qry}: {e}")
-            return None
-        if isinstance(result, list):  # defensive: pyrogram returns a list for list inputs
-            return result[0] if result else None
-        return result
-    if isinstance(qry, str) and qry.isdigit():
+    # @username stays a str; numeric strings become ints -- then one shared
+    # lookup path (the two blocks below used to be copy-pasted verbatim)
+    if isinstance(qry, str) and not qry.startswith("@") and qry.isdigit():
         qry = int(qry)
-    if isinstance(qry, int):
+    if isinstance(qry, (str, int)):
         try:
             result = await tg_call(cli.get_users, qry)
         except Exception as e:

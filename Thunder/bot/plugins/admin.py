@@ -229,6 +229,12 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
+    # mirror __main__ teardown ordering (M13): the touch buffer batches view
+    # counts for up to a few seconds -- execv skips every finally block, so
+    # drain it here or the restart loses those increments
+    from Thunder.utils.canonical_files import drain_background_touch_tasks
+
+    await drain_background_touch_tasks()
     os.execv("/bin/bash", ["bash", "thunder.sh"])
 
 

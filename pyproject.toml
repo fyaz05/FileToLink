@@ -74,7 +74,7 @@ omit = ["Thunder/bot/plugins/*", "Thunder/__main__.py"]
 
 [tool.vulture]
 min_confidence = 80
-paths = ["Thunder", "whitelist.py"]
+paths = ["Thunder"]
 
 [tool.bandit]
 exclude_dirs = ["tests", ".venv"]

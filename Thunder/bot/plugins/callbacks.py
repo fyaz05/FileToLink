@@ -10,6 +10,7 @@ from Thunder.bot import StreamBot
 from Thunder.utils.broadcast import broadcast_ids
 from Thunder.utils.commands import build_help_text
 from Thunder.utils.decorators import owner_only
+from Thunder.utils.force_channel import get_force_info
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_ABOUT,
@@ -24,7 +25,7 @@ from Thunder.utils.messages import (
     MSG_ERROR_CALLBACK_UNSUPPORTED,
     MSG_ERROR_CLOSE_NOT_ALLOWED,
 )
-from Thunder.utils.safe_call import answer_safe, edit_safe, tg_call
+from Thunder.utils.safe_call import answer_safe, edit_safe
 from Thunder.vars import Var
 
 
@@ -69,19 +70,16 @@ async def get_force_channel_button(client: Client):
     if not Var.FORCE_CHANNEL_ID:
         return None
     try:
-        chat = await tg_call(client.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
-        if chat:
-            # numeric channel id always resolves a full Chat (see force_channel.py)
-            invite_link = chat.invite_link or (  # type: ignore[union-attr]
-                f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
-            )
-            if invite_link:
-                return [
-                    InlineKeyboardButton(
-                        MSG_BUTTON_JOIN_CHANNEL.format(channel_title=chat.title or "Channel"),
-                        url=invite_link,
-                    )
-                ]
+        # reuse the resolved-once cache in force_channel.get_force_info
+        # instead of a fresh get_chat RPC on every help-panel render
+        link, title = await get_force_info(client)
+        if link:
+            return [
+                InlineKeyboardButton(
+                    MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title or "Channel"),
+                    url=link,
+                )
+            ]
     except Exception as e:
         logger.error(f"Error getting force channel button: {e}", exc_info=True)
     return None

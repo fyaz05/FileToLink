@@ -7,6 +7,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.file_properties import get_fname, get_uniqid
 from Thunder.utils.logger import logger
 from Thunder.utils.safe_call import tg_call
@@ -106,7 +107,7 @@ async def render_page(
     cached = _legacy_cache_get(key)
     if cached is not None:
         file_name, _ = cached
-        quoted_filename = urllib.parse.quote(file_name.replace("/", "_"), safe="")
+        quoted_filename = quote_media_name(file_name)
         src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
         return await render_media_page(file_name, src, requested_action)
 
@@ -137,7 +138,7 @@ async def render_page(
 
         _legacy_cache_put(key, file_name, file_unique_id)
 
-        quoted_filename = urllib.parse.quote(file_name.replace("/", "_"), safe="")
+        quoted_filename = quote_media_name(file_name)
         src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
         return await render_media_page(file_name, src, requested_action)
     except Exception as e:

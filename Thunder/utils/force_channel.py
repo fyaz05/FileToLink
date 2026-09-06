@@ -1,8 +1,10 @@
 # Thunder/utils/force_channel.py
 
+import html
 import time
 
 from pyrogram import Client
+from pyrogram.enums import ParseMode
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -80,7 +82,12 @@ async def force_channel_check(client: Client, message: Message):
             try:
                 await reply_safe(
                     message,
-                    MSG_COMMUNITY_CHANNEL.format(channel_title=title),
+                    MSG_COMMUNITY_CHANNEL.format(
+                        # escaped twin of the /help panel line (common.py);
+                        # HTML parse mode skips the markdown pre-pass
+                        channel_title=html.escape(title or "Channel")
+                    ),
+                    parse_mode=ParseMode.HTML,
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Join", url=link)]]),
                 )
             except Exception as e:

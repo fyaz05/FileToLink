@@ -7,6 +7,7 @@ build-tag-gated tier) when Docker is unavailable.
 """
 
 import os
+from datetime import UTC
 
 import pytest
 
@@ -28,14 +29,23 @@ def db():
     if docker_unavailable or os.getenv("TEST_INTEGRATION") != "1":
         pytest.skip("integration tier disabled (set TEST_INTEGRATION=1 with Docker)")
     with MongoContainer("mongo:7") as mongo:
-        os.environ["DATABASE_URL"] = mongo.get_connection_url()
-        # re-import a fresh Database bound to the container URI
-        import importlib
-
         import Thunder.utils.database as database_module
+        import Thunder.utils.tokens as tokens_module
 
-        importlib.reload(database_module)
-        yield database_module.db
+        # Bind a fresh Database directly to the container URI.  Rebinding is
+        # required because Thunder.vars is cached in sys.modules by the unit
+        # tier's imports (Var.DATABASE_URL still points at the platform
+        # config), and `from ... import db` copies froze the old instance in
+        # every consumer module.  Reload-based approaches never worked.
+        fresh = database_module.Database(mongo.get_connection_url(), "thunder_test")
+        original = database_module.db
+        database_module.db = fresh
+        tokens_module.db = fresh
+        try:
+            yield fresh
+        finally:
+            database_module.db = original
+            tokens_module.db = original
 
 
 async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
@@ -43,7 +53,7 @@ async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
 
     # M8: atomic activation -- two concurrent consume() calls, one winner
     import asyncio
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from Thunder.utils.tokens import consume
 
@@ -53,8 +63,8 @@ async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
             "token": token,
             "user_id": 424242,
             "activated": False,
-            "created_at": datetime.now(timezone.utc),
-            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+            "created_at": datetime.now(UTC),
+            "expires_at": datetime.now(UTC) + timedelta(hours=1),
         }
     )
     results = await asyncio.gather(consume(token, 424242), consume(token, 424242))

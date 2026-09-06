@@ -31,7 +31,6 @@
   - [Token System](#token-system)
   - [URL Shortening](#url-shortening)
   - [Rate Limiting System](#rate-limiting-system)
-  - [Network Speed Testing](#network-speed-testing)
 - [Deployment Guide](#deployment-guide)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -265,15 +264,6 @@ Thunder implements a sophisticated multi-tier rate limiting system designed for 
 - **Queue Size Limits**: Configurable maximum queue size.
 - **Flood Protection**: Built-in protection against Telegram flood waits.
 
-### Network Speed Testing
-
-Monitor server performance with built-in speed testing:
-
-```bash
-```
-
-Features include download/upload speeds, latency measurements, and shareable result images for performance monitoring.
-
 ## Deployment Guide
 
 This section covers the complete setup process for deploying Thunder, from prerequisites to production deployment.
@@ -304,7 +294,9 @@ nano config.env  # Edit your settings
 
 # 3. Build and run
 docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 thunder
+# config.env is excluded from the build context; mount it at runtime
+docker run -d --name thunder -p 8080:8080 \
+  -v $(pwd)/config.env:/app/config.env:ro thunder
 ```
 
 <details>

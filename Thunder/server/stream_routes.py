@@ -366,11 +366,6 @@ async def status_endpoint(request):
     )
 
 
-@routes.options("/status")
-async def status_options(request: web.Request):
-    return web.Response(headers={**CORS_HEADERS, "Access-Control-Max-Age": "86400"})
-
-
 @routes.options(r"/{path:.+}")
 async def media_options(request: web.Request):
     return web.Response(headers={**CORS_HEADERS, "Access-Control-Max-Age": "86400"})

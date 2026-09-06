@@ -4,6 +4,7 @@ import html
 import time
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
@@ -178,6 +179,9 @@ async def send_user_dc(msg: Message, user: User):
     await reply_safe(
         msg,
         text=txt,
+        # DC templates are HTML (M7): pin the parse mode so pyrofork's
+        # DEFAULT markdown pre-pass cannot reinterpret user data
+        parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
     )
 
@@ -207,13 +211,18 @@ async def send_file_dc(msg: Message, file_msg: Message):
             dc_id = fid.dc_id
 
         txt = MSG_DC_FILE_INFO.format(
-            file_name=fname, file_size=fsize, file_type=type_display, dc_id=dc_id
+            # file_name is attacker-controlled; template is HTML (M7)
+            file_name=html.escape(fname, quote=False),
+            file_size=fsize,
+            file_type=type_display,
+            dc_id=dc_id,
         )
 
         btns = [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
         await reply_safe(
             msg,
             text=txt,
+            parse_mode=ParseMode.HTML,  # template is HTML (M7); skip md pre-pass
             reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
         )
 
@@ -238,7 +247,7 @@ async def dc_command(bot: Client, msg: Message):
     if not msg.from_user and not msg.reply_to_message:
         return await reply_user_err(msg, MSG_DC_ANON_ERROR)
 
-    args = msg.text.strip().split(maxsplit=1)
+    args = (msg.text or msg.caption or "").strip().split(maxsplit=1)
     if len(args) > 1:
         user = await get_user(bot, args[1].strip())
         if user:

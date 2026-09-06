@@ -1,5 +1,5 @@
 """Regression: deferred requeue must park the worker pool, not busy-spin."""
-import asyncio
+
 import time
 
 import pytest

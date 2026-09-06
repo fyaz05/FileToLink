@@ -31,10 +31,6 @@ SHORTEN_TIMEOUT_SECONDS = 10
 CACHE_MAX_ITEMS = 10_000
 
 
-class ShortenerError(Exception):
-    pass
-
-
 class ShortenerPlugin(ABC):
     @classmethod
     @abstractmethod
@@ -51,8 +47,9 @@ class ShortenerPlugin(ABC):
     def _validate_short_url(short_url: str, domain: str) -> bool:
         """The response host must match the configured site (M5)."""
         try:
-            result_host = urlparse(short_url).hostname or ""
-            site_host = urlparse(f"https://{domain}").hostname or ""
+            # trailing-dot tolerant, matching _host_matches semantics
+            result_host = (urlparse(short_url).hostname or "").removesuffix(".")
+            site_host = (urlparse(f"https://{domain}").hostname or "").removesuffix(".")
             return result_host == site_host
         except ValueError:
             return False

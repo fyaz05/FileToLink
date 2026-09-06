@@ -63,10 +63,6 @@ def ext_for(media_key: str) -> str:
     return _MEDIA_EXT_MIME.get(media_key, (DEFAULT_EXT, DEFAULT_MIME))[0]
 
 
-def mime_for(media_key: str) -> str:
-    return _MEDIA_EXT_MIME.get(media_key, (DEFAULT_EXT, DEFAULT_MIME))[1]
-
-
 def ext_and_mime_for_class(class_name_lower: str) -> tuple[str, str]:
     """Direct lookup by pyrogram class name (``videonote``, ``photo``, ...)."""
     key = _CLASS_TO_MEDIA_TYPE.get(class_name_lower)
@@ -78,7 +74,6 @@ def ext_and_mime_for_class(class_name_lower: str) -> tuple[str, str]:
 __all__ = [
     "canonical_media_type",
     "ext_for",
-    "mime_for",
     "ext_and_mime_for_class",
     "DEFAULT_EXT",
     "DEFAULT_MIME",

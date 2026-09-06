@@ -23,6 +23,7 @@ from Thunder.utils.bot_utils import (
 from Thunder.utils.canonical_files import get_or_create_canonical_file
 from Thunder.utils.database import db
 from Thunder.utils.decorators import preflight
+from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_BATCH_LINKS_READY,
@@ -129,7 +130,13 @@ async def send_channel_links(
     )
     try:
         if target_msg:
-            await tg_call(target_msg.reply_text, text, disable_web_page_preview=True, quote=True)
+            await tg_call(
+                target_msg.reply_text,
+                text,
+                disable_web_page_preview=True,
+                quote=True,
+                parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
+            )
         else:
             await send_safe(
                 StreamBot,
@@ -137,6 +144,7 @@ async def send_channel_links(
                 text=text,
                 disable_web_page_preview=True,
                 reply_to_message_id=reply_to_message_id,
+                parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
             )
     except Exception as e:
         logger.error(f"Error sending channel links: {e}", exc_info=True)
@@ -230,7 +238,9 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
 
         notification_msg = handler_kwargs.get("notification_msg")
 
-        parts = message.text.split()
+        # filters.command also matches captions, where .text is None --
+        # parse from the caption too or a captioned /link crashes with dead air
+        parts = (message.text or message.caption or "").split()
         num_files = 1
         if len(parts) > 1:
             try:
@@ -326,7 +336,18 @@ async def channel_receive_handler(bot: Client, msg: Message):
         is_banned_statically = (
             hasattr(Var, "BANNED_CHANNELS") and message.chat.id in Var.BANNED_CHANNELS
         )
-        is_banned_dynamically = await db.is_channel_banned(message.chat.id) is not None
+        # flag-cached (one DB hit per channel per TTL instead of per post).
+        # Fail-open is DELIBERATE here: the action on a hit is leave_chat,
+        # which is destructive and irreversible -- a Mongo outage must not
+        # make the bot leave every channel it serves (H7's fail-closed
+        # applies to the user-ban gate, where denial is cheap and safe).
+        is_banned_dynamically = (
+            await flags.get_or_load(
+                ("banned_channel", message.chat.id),
+                lambda: db.is_channel_banned(message.chat.id),
+            )
+            is not None
+        )
 
         if is_banned_statically or is_banned_dynamically:
             try:
@@ -383,6 +404,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
                             stream_link=links["stream_link"],
                         ),
                         disable_web_page_preview=True,
+                        parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
                     )
                 except Exception as e:
                     logger.error(
