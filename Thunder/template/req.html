@@ -8,6 +8,9 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f7">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#030304">
 
+    <!-- M2: per-file player pages must never be indexed -->
+    <meta name="robots" content="noindex, nofollow">
+
     <!-- Logo & Favicon -->
     <link rel="icon" type="image/jpeg" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
@@ -27,10 +30,20 @@
     <meta name="twitter:description" content="Stream '{{ file_name }}' in a beautiful, atmospheric environment.">
     <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- Vidstack Player -->
+    <!-- L7: preconnect hints on the remaining CDN origins -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdn.vidstack.io" crossorigin>
+
+    <!-- Vidstack Player (video layout only) -->
+    {% if kind == 'video' %}
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
     <script type="module" src="https://cdn.vidstack.io/player"></script>
+    {% elif kind == 'audio' %}
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/audio.css" />
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    {% endif %}
 
     <!-- Typography: Outfit (geometric display) + DM Sans (refined body) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -47,9 +60,34 @@
     <!-- Styles (CDN-hosted) -->
     <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/styles.css">
+
+    <!-- L7: minimal inline fallback so the page stays usable with all
+         CDNs blocked (title + download button + basic layout). -->
+    <style>
+        body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; gap:1.25rem;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:#0b0a09; color:#f3ede4; padding:2rem; text-align:center; }
+        .fallback-title { font-size:1.25rem; font-weight:600; word-break:break-word; max-width:36rem; }
+        .fallback-meta { opacity:.65; font-size:.875rem; }
+        .fallback-actions { display:flex; gap:.75rem; flex-wrap:wrap; justify-content:center; }
+        .fallback-actions a, .fallback-actions button {
+            display:inline-flex; align-items:center; gap:.5rem; padding:.65rem 1.1rem;
+            border-radius:999px; border:1px solid rgba(243,237,228,.25);
+            background:rgba(243,237,228,.08); color:inherit; cursor:pointer;
+            text-decoration:none; font-size:.95rem; }
+        .fallback-actions a.primary { background:#e0862a; border-color:#e0862a; color:#14100b; font-weight:600; }
+        .cinema, .command-bar, .drawer, .atmosphere, .masthead .file-meta { display:none; }
+        body.fallback-ready .cinema, body.fallback-ready .command-bar { display:block; }
+    </style>
 </head>
 
 <body>
+    <noscript>
+        <div style="padding:.75rem 1rem;text-align:center;background:#2a1c0d;color:#ffd9a0;">
+            JavaScript is disabled — direct playback is unavailable, but the download link below still works.
+        </div>
+    </noscript>
     <!-- Atmospheric Background -->
     <div class="atmosphere" aria-hidden="true">
         <div class="gradient-mesh"></div>
@@ -105,10 +143,29 @@
                     <span class="bg-msg-title">If video not playing</span>
                     <span class="bg-msg-sub">Use External Player</span>
                 </div>
+                {% if kind == 'video' %}
                 <media-player id="player" title="{{ file_name }}" playsinline keyTarget="document">
                     <media-provider></media-provider>
                     <media-video-layout></media-video-layout>
                 </media-player>
+                {% elif kind == 'audio' %}
+                <media-player id="player" title="{{ file_name }}" playsinline keyTarget="document">
+                    <media-provider></media-provider>
+                    <media-audio-layout></media-audio-layout>
+                </media-player>
+                {% elif kind == 'image' %}
+                <div class="image-viewer" style="display:flex;align-items:center;justify-content:center;max-height:70vh;">
+                    <img src="{{ src|safe }}" alt="{{ file_name }}" loading="lazy"
+                        style="max-width:100%;max-height:70vh;border-radius:.75rem;object-fit:contain;">
+                </div>
+                {% else %}
+                <!-- M2: non-media types get a download card, not a broken player -->
+                <div class="unsupported-card" style="display:flex;flex-direction:column;align-items:center;gap:.75rem;padding:2.5rem;border:1px solid rgba(243,237,228,.15);border-radius:1rem;max-width:28rem;">
+                    <span style="font-size:2rem;">📦</span>
+                    <span style="font-weight:600;">Preview not available</span>
+                    <span style="opacity:.7;font-size:.875rem;">{{ mime_type }} — use the download button below.</span>
+                </div>
+                {% endif %}
             </div>
         </section>
 
@@ -349,11 +406,24 @@
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <!-- Config for external script (template injection happens here) -->
+    {% if kind in ('video', 'audio') %}
     <script>
         window.__CINEMA_CONFIG__ = { src: {{ src | tojson }} };
     </script>
     <!-- Main Script (CDN-hosted) -->
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/script.js"></script>
+    {% endif %}
+    <!-- L7 fallback: copy-link without the CDN script -->
+    <script>
+        (function () {
+            var btn = document.getElementById('copyBtn');
+            if (btn) btn.addEventListener('click', function () {
+                var src = {{ src | tojson }};
+                if (navigator.clipboard) navigator.clipboard.writeText(src);
+            });
+            document.body.classList.add('fallback-ready');
+        })();
+    </script>
 </body>
 
 </html>

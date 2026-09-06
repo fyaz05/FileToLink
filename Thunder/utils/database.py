@@ -1,16 +1,23 @@
 # Thunder/utils/database.py
 
 import datetime
-from typing import Any, Dict, Optional
-from pymongo import AsyncMongoClient
+from typing import Any
+
+from pymongo import AsyncMongoClient, UpdateOne
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError
-from Thunder.vars import Var
+
 from Thunder.utils.logger import logger
+from Thunder.vars import Var
+
+# H8: every Mongo operation gets a server-side budget so a brownout cannot
+# pin handlers forever.  Per-op overrides remain possible at call sites.
+MONGO_TIMEOUT_MS = 5000
+
 
 class Database:
     def __init__(self, uri: str, database_name: str, *args, **kwargs):
-        self._client = AsyncMongoClient(uri, *args, **kwargs)
+        self._client = AsyncMongoClient(uri, *args, timeoutMS=MONGO_TIMEOUT_MS, **kwargs)
         self.db = self._client[database_name]
         self.col: AsyncCollection = self.db.users
         self.banned_users_col: AsyncCollection = self.db.banned_users
@@ -25,7 +32,7 @@ class Database:
         pipeline = [
             {"$sort": {"join_date": 1}},
             {"$group": {"_id": "$id", "doc_id": {"$first": "$_id"}}},
-            {"$project": {"_id": "$doc_id"}}
+            {"$project": {"_id": "$doc_id"}},
         ]
         keep_ids = []
         async for doc in self.col.aggregate(pipeline):
@@ -37,6 +44,23 @@ class Database:
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
+            # L2: optional file TTL -- backfill first so pre-existing rows do
+            # not vanish the moment the index is created (default off).
+            if Var.FILE_TTL_DAYS > 0:
+                await self.files_col.update_many(
+                    {"last_seen_at": {"$exists": False}},
+                    {"$set": {"last_seen_at": datetime.datetime.now(datetime.UTC)}},
+                )
+                await self.files_col.create_index(
+                    "last_seen_at", expireAfterSeconds=Var.FILE_TTL_DAYS * 86400
+                )
+                logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")
+            else:
+                try:
+                    await self.files_col.drop_index("last_seen_at_1")
+                except Exception:
+                    pass
+
             await self.banned_users_col.create_index("user_id", unique=True)
             await self.banned_channels_col.create_index("channel_id", unique=True)
             await self.token_col.create_index("token", unique=True)
@@ -55,7 +79,6 @@ class Database:
             await self.files_col.create_index("public_hash", unique=True)
             await self.files_col.create_index("canonical_message_id", unique=True)
             await self.files_col.create_index("created_at")
-            await self.files_col.create_index("last_seen_at")
             await self.file_ingest_locks_col.create_index("expires_at", expireAfterSeconds=0)
 
             logger.debug("Database indexes ensured.")
@@ -68,10 +91,7 @@ class Database:
 
     def new_user(self, user_id: int) -> dict:
         try:
-            return {
-                'id': user_id,
-                'join_date': datetime.datetime.now(datetime.timezone.utc)
-            }
+            return {"id": user_id, "join_date": datetime.datetime.now(datetime.UTC)}
         except Exception as e:
             logger.error(f"Error in new_user for user {user_id}: {e}", exc_info=True)
             raise
@@ -79,9 +99,7 @@ class Database:
     async def add_user(self, user_id: int) -> bool:
         try:
             result = await self.col.update_one(
-                {'id': user_id},
-                {'$setOnInsert': self.new_user(user_id)},
-                upsert=True
+                {"id": user_id}, {"$setOnInsert": self.new_user(user_id)}, upsert=True
             )
             if result.upserted_id:
                 logger.debug(f"Added new user {user_id} to database.")
@@ -91,11 +109,10 @@ class Database:
             logger.error(f"Error in add_user for user {user_id}: {e}", exc_info=True)
             raise
 
-
     async def is_user_exist(self, user_id: int) -> bool:
         """Read-only existence check. For user registration, use add_user() instead."""
         try:
-            user = await self.col.find_one({'id': user_id}, {'_id': 1})
+            user = await self.col.find_one({"id": user_id}, {"_id": 1})
             return bool(user)
         except Exception as e:
             logger.error(f"Error in is_user_exist for user {user_id}: {e}", exc_info=True)
@@ -147,28 +164,24 @@ class Database:
 
     async def delete_user(self, user_id: int):
         try:
-            await self.col.delete_one({'id': user_id})
+            await self.col.delete_one({"id": user_id})
             logger.debug(f"Deleted user {user_id}.")
         except Exception as e:
             logger.error(f"Error in delete_user for user {user_id}: {e}", exc_info=True)
             raise
 
-
     async def add_banned_user(
-        self, user_id: int, banned_by: Optional[int] = None,
-        reason: Optional[str] = None
+        self, user_id: int, banned_by: int | None = None, reason: str | None = None
     ):
         try:
             ban_data = {
                 "user_id": user_id,
-                "banned_at": datetime.datetime.now(datetime.timezone.utc),
+                "banned_at": datetime.datetime.now(datetime.UTC),
                 "banned_by": banned_by,
-                "reason": reason
+                "reason": reason,
             }
             await self.banned_users_col.update_one(
-                {"user_id": user_id},
-                {"$set": ban_data},
-                upsert=True
+                {"user_id": user_id}, {"$set": ban_data}, upsert=True
             )
             logger.debug(f"Added/Updated banned user {user_id}. Reason: {reason}")
         except Exception as e:
@@ -186,7 +199,7 @@ class Database:
             logger.error(f"Error in remove_banned_user for user {user_id}: {e}", exc_info=True)
             return False
 
-    async def is_user_banned(self, user_id: int) -> Optional[Dict[str, Any]]:
+    async def is_user_banned(self, user_id: int) -> dict[str, Any] | None:
         try:
             return await self.banned_users_col.find_one({"user_id": user_id})
         except Exception as e:
@@ -194,24 +207,23 @@ class Database:
             return None
 
     async def add_banned_channel(
-        self, channel_id: int, banned_by: Optional[int] = None,
-        reason: Optional[str] = None
+        self, channel_id: int, banned_by: int | None = None, reason: str | None = None
     ):
         try:
             ban_data = {
                 "channel_id": channel_id,
-                "banned_at": datetime.datetime.now(datetime.timezone.utc),
+                "banned_at": datetime.datetime.now(datetime.UTC),
                 "banned_by": banned_by,
-                "reason": reason
+                "reason": reason,
             }
             await self.banned_channels_col.update_one(
-                {"channel_id": channel_id},
-                {"$set": ban_data},
-                upsert=True
+                {"channel_id": channel_id}, {"$set": ban_data}, upsert=True
             )
             logger.debug(f"Added/Updated banned channel {channel_id}. Reason: {reason}")
         except Exception as e:
-            logger.error(f"Error in add_banned_channel for channel {channel_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error in add_banned_channel for channel {channel_id}: {e}", exc_info=True
+            )
             raise
 
     async def remove_banned_channel(self, channel_id: int) -> bool:
@@ -222,46 +234,59 @@ class Database:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error in remove_banned_channel for channel {channel_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error in remove_banned_channel for channel {channel_id}: {e}", exc_info=True
+            )
             return False
 
-    async def is_channel_banned(self, channel_id: int) -> Optional[Dict[str, Any]]:
+    async def is_channel_banned(self, channel_id: int) -> dict[str, Any] | None:
         try:
             return await self.banned_channels_col.find_one({"channel_id": channel_id})
         except Exception as e:
             logger.error(f"Error in is_channel_banned for channel {channel_id}: {e}", exc_info=True)
             return None
 
-    async def save_main_token(self, user_id: int, token_value: str, expires_at: datetime.datetime, created_at: datetime.datetime, activated: bool) -> None:
+    async def save_main_token(
+        self,
+        user_id: int,
+        token_value: str,
+        expires_at: datetime.datetime,
+        created_at: datetime.datetime,
+        activated: bool,
+    ) -> None:
         try:
             await self.token_col.update_one(
                 {"user_id": user_id, "token": token_value},
-                {"$set": {
-                    "expires_at": expires_at,
-                    "created_at": created_at,
-                    "activated": activated
+                {
+                    "$set": {
+                        "expires_at": expires_at,
+                        "created_at": created_at,
+                        "activated": activated,
                     }
                 },
-                upsert=True
+                upsert=True,
             )
-            logger.debug(f"Saved main token {token_value} for user {user_id} with activated status {activated}.")
+            logger.debug(
+                f"Saved main token {token_value} for user {user_id} with activated status {activated}."
+            )
         except Exception as e:
             logger.error(f"Error saving main token for user {user_id}: {e}", exc_info=True)
             raise
 
-
     async def add_restart_message(self, message_id: int, chat_id: int) -> None:
         try:
-            await self.restart_message_col.insert_one({
-                "message_id": message_id,
-                "chat_id": chat_id,
-                "timestamp": datetime.datetime.now(datetime.timezone.utc)
-            })
+            await self.restart_message_col.insert_one(
+                {
+                    "message_id": message_id,
+                    "chat_id": chat_id,
+                    "timestamp": datetime.datetime.now(datetime.UTC),
+                }
+            )
             logger.debug(f"Added restart message {message_id} for chat {chat_id}.")
         except Exception as e:
             logger.error(f"Error adding restart message {message_id}: {e}", exc_info=True)
 
-    async def get_restart_message(self) -> Optional[Dict[str, Any]]:
+    async def get_restart_message(self) -> dict[str, Any] | None:
         try:
             return await self.restart_message_col.find_one(sort=[("timestamp", -1)])
         except Exception as e:
@@ -277,13 +302,13 @@ class Database:
 
     async def is_user_authorized(self, user_id: int) -> bool:
         try:
-            user = await self.authorized_users_col.find_one({'user_id': user_id}, {'_id': 1})
+            user = await self.authorized_users_col.find_one({"user_id": user_id}, {"_id": 1})
             return bool(user)
         except Exception as e:
             logger.error(f"Error in is_user_authorized for user {user_id}: {e}", exc_info=True)
             return False
 
-    async def get_file_by_unique_id(self, file_unique_id: str) -> Optional[Dict[str, Any]]:
+    async def get_file_by_unique_id(self, file_unique_id: str) -> dict[str, Any] | None:
         try:
             return await self.files_col.find_one({"file_unique_id": file_unique_id})
         except Exception as e:
@@ -291,11 +316,8 @@ class Database:
             return None
 
     async def get_file_by_hash(
-        self,
-        public_hash: str,
-        *,
-        raise_on_error: bool = True
-    ) -> Optional[Dict[str, Any]]:
+        self, public_hash: str, *, raise_on_error: bool = True
+    ) -> dict[str, Any] | None:
         try:
             return await self.files_col.find_one({"public_hash": public_hash})
         except Exception as e:
@@ -304,51 +326,35 @@ class Database:
                 raise
             return None
 
-    async def get_file_by_message_id(self, canonical_message_id: int) -> Optional[Dict[str, Any]]:
-        try:
-            return await self.files_col.find_one({"canonical_message_id": canonical_message_id})
-        except Exception as e:
-            logger.error(
-                f"Error getting file by message_id {canonical_message_id}: {e}",
-                exc_info=True
-            )
-            return None
-
-    async def create_file_record(self, file_record: Dict[str, Any]) -> None:
+    async def create_file_record(self, file_record: dict[str, Any]) -> None:
         try:
             await self.files_col.insert_one(file_record)
         except Exception as e:
             logger.error(
                 f"Error creating canonical file record for {file_record.get('file_unique_id')}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             raise
 
-    async def replace_file_record(self, file_record: Dict[str, Any]) -> None:
+    async def replace_file_record(self, file_record: dict[str, Any]) -> None:
         try:
             await self.files_col.replace_one(
-                {"file_unique_id": file_record["file_unique_id"]},
-                file_record,
-                upsert=True
+                {"file_unique_id": file_record["file_unique_id"]}, file_record, upsert=True
             )
         except Exception as e:
             logger.error(
                 f"Error replacing canonical file record for {file_record.get('file_unique_id')}: {e}",
-                exc_info=True
+                exc_info=True,
             )
             raise
 
     async def touch_file_record(
-        self,
-        public_hash: str,
-        *,
-        reused: bool = False,
-        raise_on_error: bool = False
+        self, public_hash: str, *, reused: bool = False, raise_on_error: bool = False
     ) -> bool:
         try:
-            update_doc: Dict[str, Any] = {
-                "$set": {"last_seen_at": datetime.datetime.now(datetime.timezone.utc)},
-                "$inc": {"seen_count": 1}
+            update_doc: dict[str, Any] = {
+                "$set": {"last_seen_at": datetime.datetime.now(datetime.UTC)},
+                "$inc": {"seen_count": 1},
             }
             if reused:
                 update_doc["$inc"]["reuse_count"] = 1
@@ -360,22 +366,53 @@ class Database:
                 raise
             return False
 
+    async def bulk_touch_file_records(
+        self, items: list[tuple[str, bool]], *, raise_on_error: bool = False
+    ) -> bool:
+        """Batched touch (M14): one BulkWrite for the whole flush cycle.
+
+        ``items`` is a list of ``(public_hash, reused)`` pairs; increments are
+        merged per hash by the caller before reaching this method.
+        """
+        if not items:
+            return True
+        now = datetime.datetime.now(datetime.UTC)
+        ops: list[UpdateOne] = []
+        for public_hash, reused in items:
+            inc: dict[str, int] = {"seen_count": 1}
+            if reused:
+                inc["reuse_count"] = 1
+            ops.append(
+                UpdateOne(
+                    {"public_hash": public_hash},
+                    {"$set": {"last_seen_at": now}, "$inc": inc},
+                )
+            )
+        try:
+            await self.files_col.bulk_write(ops, ordered=False)
+            return True
+        except Exception as e:
+            logger.error(f"Error bulk-touching {len(ops)} file records: {e}", exc_info=True)
+            if raise_on_error:
+                raise
+            return False
+
+    async def delete_file_record(self, public_hash: str) -> bool:
+        """Remove a stale canonical record (M10 self-healing)."""
+        try:
+            result = await self.files_col.delete_one({"public_hash": public_hash})
+            return result.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting stale file record {public_hash}: {e}", exc_info=True)
+            return False
+
     async def update_file_id(
-        self,
-        public_hash: str,
-        file_id: str,
-        *,
-        raise_on_error: bool = False
+        self, public_hash: str, file_id: str, *, raise_on_error: bool = False
     ) -> bool:
         try:
             await self.files_col.update_one(
                 {"public_hash": public_hash},
-                {
-                    "$set": {
-                        "file_id": file_id,
-                        "last_seen_at": datetime.datetime.now(datetime.timezone.utc)
-                    }
-                }
+                {"$set": {"file_id": file_id, "last_seen_at": datetime.datetime.now(datetime.UTC)}},
             )
             return True
         except Exception as e:
@@ -385,40 +422,31 @@ class Database:
             return False
 
     async def acquire_file_ingest_claim(
-        self,
-        file_unique_id: str,
-        *,
-        ttl_seconds: int = 60
+        self, file_unique_id: str, *, ttl_seconds: int = 60
     ) -> bool:
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         claim_fields = {
             "created_at": now,
-            "expires_at": now + datetime.timedelta(seconds=ttl_seconds)
+            "expires_at": now + datetime.timedelta(seconds=ttl_seconds),
         }
         try:
-            await self.file_ingest_locks_col.insert_one({
-                "_id": file_unique_id,
-                **claim_fields
-            })
+            await self.file_ingest_locks_col.insert_one({"_id": file_unique_id, **claim_fields})
             return True
         except DuplicateKeyError:
             try:
                 result = await self.file_ingest_locks_col.find_one_and_update(
                     {
                         "_id": file_unique_id,
-                        "$or": [
-                            {"expires_at": {"$lte": now}},
-                            {"expires_at": {"$exists": False}}
-                        ]
+                        "$or": [{"expires_at": {"$lte": now}}, {"expires_at": {"$exists": False}}],
                     },
-                    {
-                        "$set": claim_fields
-                    },
-                    return_document=False
+                    {"$set": claim_fields},
+                    return_document=False,
                 )
                 return bool(result)
             except Exception as e:
-                logger.error(f"Error updating ingest claim for {file_unique_id}: {e}", exc_info=True)
+                logger.error(
+                    f"Error updating ingest claim for {file_unique_id}: {e}", exc_info=True
+                )
                 raise
         except Exception as e:
             logger.error(f"Error acquiring ingest claim for {file_unique_id}: {e}", exc_info=True)
@@ -435,11 +463,8 @@ class Database:
     async def is_file_ingest_claim_active(self, file_unique_id: str) -> bool:
         try:
             claim = await self.file_ingest_locks_col.find_one(
-                {
-                    "_id": file_unique_id,
-                    "expires_at": {"$gt": datetime.datetime.now(datetime.timezone.utc)}
-                },
-                {"_id": 1}
+                {"_id": file_unique_id, "expires_at": {"$gt": datetime.datetime.now(datetime.UTC)}},
+                {"_id": 1},
             )
             return bool(claim)
         except Exception as e:
@@ -449,5 +474,6 @@ class Database:
     async def close(self):
         if self._client:
             await self._client.close()
+
 
 db = Database(Var.DATABASE_URL, Var.NAME)

@@ -1,21 +1,27 @@
 # Thunder/utils/bot_utils.py
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import quote
 
 from pyrogram import Client
 from pyrogram.enums import ChatMemberStatus
-from pyrogram.errors import FloodWait
-from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            Message, User)
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
 from Thunder.utils.database import db
 from Thunder.utils.file_properties import get_fname, get_fsize, get_hash
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import (MSG_BUTTON_GET_HELP, MSG_DC_UNKNOWN,
-                                    MSG_DC_USER_INFO, MSG_NEW_USER)
+from Thunder.utils.messages import (
+    MSG_BUTTON_GET_HELP,
+    MSG_DC_UNKNOWN,
+    MSG_DC_USER_INFO,
+    MSG_FILE_EXPIRY_NOTE,
+    MSG_FILE_TTL_DAYS_LABEL,
+    MSG_LINKS,
+    MSG_NEW_USER,
+)
+from Thunder.utils.safe_call import reply_safe, send_safe, tg_call
 from Thunder.utils.shortener import shorten
 from Thunder.vars import Var
 
@@ -24,14 +30,29 @@ def quote_media_name(file_name: str) -> str:
     return quote(str(file_name).replace("/", "_"), safe="")
 
 
+def format_link_message(links: dict[str, str]) -> str:
+    """Render the MSG_LINKS template, appending the TTL expiry note (L2)."""
+    text = MSG_LINKS.format(
+        file_name=links["media_name"],
+        file_size=links["media_size"],
+        download_link=links["online_link"],
+        stream_link=links["stream_link"],
+    )
+    if getattr(Var, "FILE_TTL_DAYS", 0) > 0:
+        text += "\n\n" + MSG_FILE_EXPIRY_NOTE.format(
+            days=MSG_FILE_TTL_DAYS_LABEL.format(days=Var.FILE_TTL_DAYS)
+        )
+    return text
+
+
 async def _build_links(
     *,
     download_path: str,
     stream_path: str,
     media_name: str,
     media_size: str,
-    shortener: bool = True
-) -> Dict[str, str]:
+    shortener: bool = True,
+) -> dict[str, str]:
     base_url = Var.URL.rstrip("/")
     slink = f"{base_url}{stream_path}"
     olink = f"{base_url}{download_path}"
@@ -50,16 +71,17 @@ async def _build_links(
         except Exception as e:
             logger.error(f"Error during link shortening: {e}")
 
-    return {"stream_link": slink, "online_link": olink, "media_name": media_name, "media_size": media_size}
+    return {
+        "stream_link": slink,
+        "online_link": olink,
+        "media_name": media_name,
+        "media_size": media_size,
+    }
 
 
 async def gen_canonical_links(
-    *,
-    file_name: str,
-    file_size: int,
-    public_hash: str,
-    shortener: bool = True
-) -> Dict[str, str]:
+    *, file_name: str, file_size: int, public_hash: str, shortener: bool = True
+) -> dict[str, str]:
     media_name = str(file_name)
     media_size = humanbytes(file_size)
     encoded_name = quote_media_name(media_name)
@@ -68,51 +90,37 @@ async def gen_canonical_links(
         stream_path=f"/watch/f/{public_hash}/{encoded_name}",
         media_name=media_name,
         media_size=media_size,
-        shortener=shortener
+        shortener=shortener,
     )
-
-
-
-async def notify_ch(cli: Client, txt: str):
-    if not (hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0):
-        return
-    try:
-        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
 
 
 async def notify_own(cli: Client, txt: str):
     o_ids = Var.OWNER_ID if isinstance(Var.OWNER_ID, (list, tuple, set)) else [Var.OWNER_ID]
-    
+
     async def send_with_flood_wait(chat_id: int):
         try:
-            await cli.send_message(chat_id=chat_id, text=txt)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await cli.send_message(chat_id=chat_id, text=txt)
-    
+            await send_safe(cli, chat_id, text=txt)
+        except Exception as e:
+            logger.warning(f"Could not notify chat {chat_id}: {e}")
+
     tasks = [send_with_flood_wait(oid) for oid in o_ids]
-    if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
+    if isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
         tasks.append(send_with_flood_wait(Var.BIN_CHANNEL))
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def reply_user_err(msg: Message, err_txt: str):
     try:
-        await msg.reply_text(
-            text=err_txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
-            disable_web_page_preview=True
+        await reply_safe(
+            msg,
+            err_txt,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]
+            ),
+            disable_web_page_preview=True,
         )
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await msg.reply_text(
-            text=err_txt,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")]]),
-            disable_web_page_preview=True
-        )
+    except Exception as e:
+        logger.error(f"Error sending user error reply: {e}", exc_info=True)
 
 
 async def log_newusr(cli: Client, uid: int, fname: str):
@@ -120,20 +128,25 @@ async def log_newusr(cli: Client, uid: int, fname: str):
         is_new = await db.add_user(uid)
         if not is_new:
             return
-        if hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
+        if isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
             try:
-                await cli.send_message(chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await cli.send_message(chat_id=Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid))
+                await send_safe(
+                    cli, Var.BIN_CHANNEL, text=MSG_NEW_USER.format(first_name=fname, user_id=uid)
+                )
+            except Exception as e:
+                logger.warning(f"Could not log new user {uid}: {e}")
     except Exception as e:
         logger.error(f"Database error in log_newusr for user {uid}: {e}")
 
 
-async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
+async def gen_links(fwd_msg: Message, shortener: bool = True) -> dict[str, str]:
     fid = fwd_msg.id
     m_name_raw = get_fname(fwd_msg)
-    m_name = m_name_raw.decode('utf-8', errors='replace') if isinstance(m_name_raw, bytes) else str(m_name_raw)
+    m_name = (
+        m_name_raw.decode("utf-8", errors="replace")
+        if isinstance(m_name_raw, bytes)
+        else str(m_name_raw)
+    )
     m_size_hr = humanbytes(get_fsize(fwd_msg))
     enc_fname = quote_media_name(m_name)
     f_hash = get_hash(fwd_msg)
@@ -142,47 +155,38 @@ async def gen_links(fwd_msg: Message, shortener: bool = True) -> Dict[str, str]:
         stream_path=f"/watch/{f_hash}{fid}/{enc_fname}",
         media_name=m_name,
         media_size=m_size_hr,
-        shortener=shortener
+        shortener=shortener,
     )
 
 
 async def gen_dc_txt(usr: User) -> str:
     dc_id_val = usr.dc_id if usr.dc_id is not None else MSG_DC_UNKNOWN
-    return MSG_DC_USER_INFO.format(user_name=usr.first_name or 'User', user_id=usr.id, dc_id=dc_id_val)
+    return MSG_DC_USER_INFO.format(
+        user_name=usr.first_name or "User", user_id=usr.id, dc_id=dc_id_val
+    )
 
 
-async def get_user(cli: Client, qry: Any) -> Optional[User]:
-    if isinstance(qry, str):
-        if qry.startswith('@'):
-            try:
-                return await cli.get_users(qry)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                return await cli.get_users(qry)
-        elif qry.isdigit():
-            try:
-                return await cli.get_users(int(qry))
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                return await cli.get_users(int(qry))
-    elif isinstance(qry, int):
+async def get_user(cli: Client, qry: Any) -> User | None:
+    if isinstance(qry, str) and qry.startswith("@"):
         try:
-            return await cli.get_users(qry)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            return await cli.get_users(qry)
+            return await tg_call(cli.get_users, qry)
+        except Exception as e:
+            logger.debug(f"get_users failed for {qry}: {e}")
+            return None
+    if isinstance(qry, str) and qry.isdigit():
+        qry = int(qry)
+    if isinstance(qry, int):
+        try:
+            return await tg_call(cli.get_users, qry)
+        except Exception as e:
+            logger.debug(f"get_users failed for {qry}: {e}")
+            return None
     return None
 
 
 async def is_admin(cli: Client, chat_id_val: int) -> bool:
     try:
-        member = await cli.get_chat_member(chat_id_val, cli.me.id)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        try:
-            member = await cli.get_chat_member(chat_id_val, cli.me.id)
-        except Exception:
-            return False
+        member = await tg_call(cli.get_chat_member, chat_id_val, cli.me.id, retries=1)
     except Exception:
         return False
     if member is None:
@@ -191,8 +195,21 @@ async def is_admin(cli: Client, chat_id_val: int) -> bool:
 
 
 async def reply(msg: Message, **kwargs):
-    try:
-        return await msg.reply_text(**kwargs, quote=True, disable_web_page_preview=True)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        return await msg.reply_text(**kwargs, quote=True, disable_web_page_preview=True)
+    kwargs.setdefault("disable_web_page_preview", True)
+    return await reply_safe(msg, kwargs.pop("text", ""), **kwargs)
+
+
+__all__ = [
+    "quote_media_name",
+    "format_link_message",
+    "gen_canonical_links",
+    "notify_own",
+    "reply_user_err",
+    "log_newusr",
+    "gen_links",
+    "gen_dc_txt",
+    "get_user",
+    "is_admin",
+    "reply",
+    "MSG_BUTTON_GET_HELP",
+]

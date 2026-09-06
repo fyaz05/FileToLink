@@ -1,6 +1,7 @@
 # Thunder/bot/__init__.py
 
 from pyrogram import Client
+
 from Thunder.vars import Var
 
 StreamBot = Client(

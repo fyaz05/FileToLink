@@ -2,54 +2,60 @@
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
-import asyncio
-import random
+from typing import Any
+
 import pyrogram.errors
+
 from Thunder.utils.database import db
-from Thunder.vars import Var
+from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import logger
+from Thunder.vars import Var
+
+
+def _invalidate_user_flags(user_id: int) -> None:
+    flags.invalidate(("allowed", user_id), ("token_ok", user_id))
+
 
 async def check(user_id: int) -> bool:
+    """Token/authorization gate (H7: cached, fail-closed)."""
     try:
-        logger.debug(f"Token validation started for user: {user_id}")
         if not getattr(Var, "TOKEN_ENABLED", False):
-            logger.debug("Token system disabled - access granted")
             return True
         if user_id == Var.OWNER_ID:
-            logger.debug("Owner access granted")
             return True
-        current_time = datetime.utcnow()
-        auth_result = await db.authorized_users_col.find_one(
-            {"user_id": user_id},
-            {"_id": 1}
-        )
-        if auth_result:
+        # cached authorized-user lookup (5 min TTL)
+        if await allowed(user_id):
             return True
-        token_result = await db.token_col.find_one(
-            {"user_id": user_id, "expires_at": {"$gt": current_time}, "activated": True},
-            {"_id": 1}
+        return await flags.get_or_load(
+            ("token_ok", user_id),
+            lambda: _load_token_ok(user_id),
         )
-        access_granted = bool(token_result)
-        logger.debug(f"Token validation {'SUCCESS' if access_granted else 'FAILURE'} for user: {user_id}")
-        return access_granted
     except Exception as e:
         logger.error(f"Error in check for user {user_id}: {e}", exc_info=True)
         raise
+
+
+async def _load_token_ok(user_id: int) -> bool:
+    """Loader for the activated-token flag.  Raises on DB failure so the
+    caller can apply its fail-closed policy."""
+    token_result = await db.token_col.find_one(
+        {"user_id": user_id, "expires_at": {"$gt": datetime.utcnow()}, "activated": True},
+        {"_id": 1},
+    )
+    return bool(token_result)
+
 
 async def generate(user_id: int) -> str:
     try:
         logger.debug(f"Token generation started for user: {user_id}")
         existing_token_doc = await db.token_col.find_one(
             {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.utcnow()}},
-            {"token": 1}
+            {"token": 1},
         )
         if existing_token_doc:
             logger.debug(f"Returning existing unactivated token for user: {user_id}")
             return existing_token_doc["token"]
         token_str = secrets.token_urlsafe(32)
-        masked_token = f"{token_str[:4]}...{token_str[-4:]}"
-        logger.debug(f"Generated new token: {masked_token}")
         max_retries = 3
         base_delay = 0.5
         for attempt in range(max_retries):
@@ -62,91 +68,134 @@ async def generate(user_id: int) -> str:
                     token_value=token_str,
                     expires_at=expires_at,
                     created_at=created_at,
-                    activated=False
+                    activated=False,
                 )
                 logger.debug(f"New token generated and saved successfully for user: {user_id}")
                 return token_str
             except pyrogram.errors.RPCError as e:
-                logger.error(f"Telegram API error while generating new token for user {user_id}: {e}", exc_info=True)
+                logger.error(
+                    f"Telegram API error while generating new token for user {user_id}: {e}",
+                    exc_info=True,
+                )
                 raise
             except Exception as e:
                 if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
-                    logger.warning(f"Database error (attempt {attempt+1}/{max_retries}) while saving new token: {e}. Retrying in {delay:.2f} seconds.", exc_info=True)
+                    import asyncio
+                    import random
+
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.1)
+                    logger.warning(
+                        f"Database error (attempt {attempt + 1}/{max_retries}) while saving new token: {e}. Retrying in {delay:.2f} seconds.",
+                        exc_info=True,
+                    )
                     await asyncio.sleep(delay)
                 else:
-                    logger.error(f"Failed to generate and save new token for user {user_id} after {max_retries} attempts: {e}", exc_info=True)
+                    logger.error(
+                        f"Failed to generate and save new token for user {user_id} after {max_retries} attempts: {e}",
+                        exc_info=True,
+                    )
                     raise
         return ""
     except Exception as e:
         logger.error(f"Error in generate for user {user_id}: {e}", exc_info=True)
         raise
 
-async def allowed(user_id: int) -> bool:
+
+async def consume(token: str, user_id: int) -> tuple[str, float]:
+    """Atomically activate a token (plan M8).
+
+    Replaces the historical ``find_one`` -> ``update_one`` pair that allowed
+    a double-activation race.  Uses ``find_one_and_update`` conditioned on
+    ``activated != True`` so exactly one concurrent activation can win.
+
+    Returns ``(status, hours_valid)`` with status one of
+    ``"ok" | "already" | "wrong_user" | "invalid"``.
+    """
+    now = datetime.utcnow()
     try:
-        result = await db.authorized_users_col.find_one(
-            {"user_id": user_id},
-            {"_id": 1}
+        doc = await db.token_col.find_one({"token": token})
+        if not doc:
+            return "invalid", 0.0
+        if doc.get("user_id") != user_id:
+            return "wrong_user", 0.0
+        if doc.get("activated"):
+            return "already", 0.0
+
+        expires_at = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
+        activated_doc = await db.token_col.find_one_and_update(
+            {"token": token, "user_id": user_id, "activated": {"$ne": True}},
+            {
+                "$set": {
+                    "activated": True,
+                    "activated_at": now,
+                    "created_at": now,
+                    "expires_at": expires_at,
+                }
+            },
+            return_document=True,
         )
-        return bool(result)
+        if activated_doc is None:
+            # lost the race to a concurrent activation
+            return "already", 0.0
+        _invalidate_user_flags(user_id)
+        hours = round((expires_at - now).total_seconds() / 3600, 1)
+        logger.debug(f"Token atomically activated for user {user_id} ({hours}h)")
+        return "ok", hours
     except Exception as e:
-        logger.error(f"Error in allowed for user {user_id}: {e}", exc_info=True)
+        logger.error(f"Error in consume for user {user_id}: {e}", exc_info=True)
         raise
+
+
+async def allowed(user_id: int) -> bool:
+    """Cached authorized-user check (H7).  Raises on DB failure."""
+    return await flags.get_or_load(
+        ("allowed", user_id),
+        lambda: _load_allowed(user_id),
+    )
+
+
+async def _load_allowed(user_id: int) -> bool:
+    result = await db.authorized_users_col.find_one({"user_id": user_id}, {"_id": 1})
+    return bool(result)
+
 
 async def authorize(user_id: int, authorized_by: int) -> bool:
     try:
         auth_data = {
             "user_id": user_id,
             "authorized_by": authorized_by,
-            "authorized_at": datetime.utcnow()
+            "authorized_at": datetime.utcnow(),
         }
         await db.authorized_users_col.update_one(
-            {"user_id": user_id},
-            {"$set": auth_data},
-            upsert=True
+            {"user_id": user_id}, {"$set": auth_data}, upsert=True
         )
+        _invalidate_user_flags(user_id)
         return True
     except Exception as e:
         logger.error(f"Error in authorize for user {user_id}: {e}", exc_info=True)
         raise
 
+
 async def deauthorize(user_id: int) -> bool:
     try:
         result = await db.authorized_users_col.delete_one({"user_id": user_id})
+        _invalidate_user_flags(user_id)
         return result.deleted_count > 0
     except Exception as e:
         logger.error(f"Error in deauthorize for user {user_id}: {e}", exc_info=True)
         raise
 
-async def get_user(user_id: int) -> Optional[Dict[str, Any]]:
-    try:
-        return await db.token_col.find_one({"user_id": user_id})
-    except Exception as e:
-        logger.error(f"Error in get_user for user {user_id}: {e}", exc_info=True)
-        return None
 
-async def list_allowed() -> List[Dict[str, Any]]:
+async def list_allowed() -> list[dict[str, Any]]:
     try:
         cursor = db.authorized_users_col.find(
-            {},
-            {"user_id": 1, "authorized_by": 1, "authorized_at": 1}
+            {}, {"user_id": 1, "authorized_by": 1, "authorized_at": 1}
         )
         return await cursor.to_list(length=None)
     except Exception as e:
         logger.error(f"Error in list_allowed: {e}", exc_info=True)
         return []
 
-async def list_tokens() -> List[Dict[str, Any]]:
-    try:
-        current_time = datetime.utcnow()
-        cursor = db.token_col.find(
-            {"expires_at": {"$gt": current_time}},
-            {"user_id": 1, "expires_at": 1, "created_at": 1, "activated": 1}
-        )
-        return await cursor.to_list(length=None)
-    except Exception as e:
-        logger.error(f"Error in list_tokens: {e}", exc_info=True)
-        return []
 
 async def cleanup_expired_tokens() -> int:
     try:

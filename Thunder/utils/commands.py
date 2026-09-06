@@ -1,37 +1,26 @@
-from pyrogram.types import BotCommand
-
 from Thunder.bot import StreamBot
+from Thunder.bot.registry import bot_commands, help_command_rows
 from Thunder.utils.logger import logger
+from Thunder.utils.messages import MSG_HELP_COMMANDS_HEADER, MSG_HELP_TIPS
 from Thunder.vars import Var
 
-def get_commands():
-    command_descriptions = {
-        "start": "Start the bot and get a welcome message",
-        "link": "(Group) Generate a direct link for a file or batch",
-        "dc": "Retrieve the data center (DC) information of a user or file",
-        "ping": "Check the bot's status and response time",
-        "about": "Get information about the bot",
-        "help": "Show help and usage instructions",
-        "status": "(Admin) View bot details and current workload",
-        "stats": "(Admin) View usage statistics and resource consumption",
-        "broadcast": "(Admin) Send a message to all users",
-        "ban": "(Admin) Ban a user",
-        "unban": "(Admin) Unban a user",
-        "log": "(Admin) Send bot logs",
-        "restart": "(Admin) Update and restart the bot",
-        "shell": "(Admin) Execute a shell command",
-        "speedtest": "(Admin) Run network speed test",
-        "users": "(Admin) Show the total number of users",
-        "authorize": "(Admin) Grant permanent access to a user",
-        "deauthorize": "(Admin) Remove permanent access from a user",
-        "listauth": "(Admin) List all authorized users"
-    }
-    return [BotCommand(name, desc) for name, desc in command_descriptions.items()]
+
+def build_help_text(max_files: int) -> str:
+    """Assemble /help from its three parts (M1: commands come from the registry)."""
+    from Thunder.utils.messages import MSG_HELP_INTRO
+
+    return (
+        MSG_HELP_INTRO.format(max_files=max_files)
+        + MSG_HELP_COMMANDS_HEADER
+        + help_command_rows()
+        + MSG_HELP_TIPS
+    )
+
 
 async def set_commands():
     if Var.SET_COMMANDS:
         try:
-            commands = get_commands()
+            commands = bot_commands()
             if commands:
                 await StreamBot.set_bot_commands(commands)
         except Exception as e:

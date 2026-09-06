@@ -5,7 +5,9 @@
 # =====================================================================================
 
 # ------ General Errors ------
-MSG_ERROR_GENERIC = "⚠️ **Oops!** Something went wrong. Please try again. If the issue persists, contact support."
+MSG_ERROR_GENERIC = (
+    "⚠️ **Oops!** Something went wrong. Please try again. If the issue persists, contact support."
+)
 MSG_ERROR_USER_INFO = "❗ **User Not Found:** Couldn't find user. Please check the ID or Username."
 
 # ------ User Input & Validation Errors ------
@@ -17,17 +19,23 @@ MSG_ERROR_INVALID_NUMBER = "⚠️ **Invalid number specified.**"
 MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and {max_files}.**"
 MSG_ERROR_DM_FAILED = "⚠️ I couldn't send you a Direct Message. Please start the bot first."
 
+# H7/M12: fail-closed + private-mode surfaces
+MSG_ERROR_TEMP = (
+    "⚠️ **Temporary service error.** Access checks are unavailable right now, "
+    "so your request was rejected. Please try again in a few minutes."
+)
+MSG_PRIVATE_MODE_DENIED = (
+    "🔒 **Private bot.** This instance is restricted to authorized users. "
+    "If you believe you should have access, contact the owner."
+)
+
 # ------ File & Media Errors ------
 MSG_ERROR_PROCESSING_MEDIA = "⚠️ **Oops!** Something went wrong while processing your media. Please try again. If the issue persists, contact support."
 
 # ------ Admin Action Errors (Ban, Auth, etc.) ------
-MSG_AUTHORIZE_FAILED = (
-    "❌ **Authorization Failed:** "
-    "Could not authorize user `{user_id}`."
-)
+MSG_AUTHORIZE_FAILED = "❌ **Authorization Failed:** Could not authorize user `{user_id}`."
 MSG_DEAUTHORIZE_FAILED = (
-    "❌ **Deauthorization Failed:** "
-    "User `{user_id}` was not authorized or an error occurred."
+    "❌ **Deauthorization Failed:** User `{user_id}` was not authorized or an error occurred."
 )
 MSG_TOKEN_FAILED = (
     "⚠️ **Token Activation Failed!**\n\n"
@@ -39,10 +47,13 @@ MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
 
 # ------ System & Bot Errors ------
 MSG_ERROR_NOT_ADMIN = "⚠️ **Admin Required:** I need admin privileges to work here."
-MSG_DC_INVALID_USAGE = "🤔 **Invalid Usage:** Please reply to a user's message or a media file to get DC info."
+MSG_DC_INVALID_USAGE = (
+    "🤔 **Invalid Usage:** Please reply to a user's message or a media file to get DC info."
+)
 MSG_DC_ANON_ERROR = "😥 **Cannot Get Your DC Info:** Unable to identify you. This command might not work for anonymous users."
-MSG_DC_FILE_ERROR = "⚙️ **Error Getting File DC Info:** Could not fetch details. File might be inaccessible."
-MSG_STATS_ERROR = "❌ **Stats Error:** Could not retrieve system statistics."
+MSG_DC_FILE_ERROR = (
+    "⚙️ **Error Getting File DC Info:** Could not fetch details. File might be inaccessible."
+)
 MSG_STATUS_ERROR = "❌ **Status Error:** Could not retrieve system status."
 MSG_DB_ERROR = "❌ **Database Error:** Could not retrieve user count."
 MSG_CRITICAL_ERROR = (
@@ -55,20 +66,22 @@ MSG_CRITICAL_ERROR = (
 # ====== ADMIN MESSAGES ======
 # =====================================================================================
 
-# ------ Ban/Unban ------
-MSG_DECORATOR_BANNED = "You are currently banned and cannot use this bot.\nReason: {reason}\nBanned on: {ban_time}"
+# ------ Ban/Unban (HTML for reason surfaces: reason is user-controlled, M7) ------
+MSG_DECORATOR_BANNED = (
+    "You are currently banned and cannot use this bot.\nReason: {reason}\nBanned on: {ban_time}"
+)
 MSG_BAN_USAGE = "⚠️ **Usage:** /ban [user_id] [reason]"
 MSG_CANNOT_BAN_OWNER = "❌ **Cannot ban an owner.**"
-MSG_ADMIN_USER_BANNED = "✅ **User {user_id} has been banned."
-MSG_BAN_REASON_SUFFIX = "\n📝 **Reason:** {reason}"
+MSG_ADMIN_USER_BANNED = "✅ <b>User {user_id} has been banned.</b>"
+MSG_BAN_REASON_SUFFIX = "\n📝 <b>Reason:</b> {reason}"
 MSG_ADMIN_NO_BAN_REASON = "No reason provided"
 MSG_USER_BANNED_NOTIFICATION = "🚫 **You have been banned from using this bot.**"
 MSG_UNBAN_USAGE = "⚠️ **Usage:** /unban <user_id>"
-MSG_ADMIN_USER_UNBANNED = "✅ **User {user_id} has been unbanned."
+MSG_ADMIN_USER_UNBANNED = "✅ <b>User {user_id} has been unbanned.</b>"
 MSG_USER_UNBANNED_NOTIFICATION = "🎉 **You have been unbanned from using this bot.**"
 MSG_USER_NOT_IN_BAN_LIST = "ℹ️ **User {user_id} was not found in the ban list."
-MSG_CHANNEL_BANNED = "✅ **Channel {channel_id} has been banned.**"
-MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 **Reason:** {reason}"
+MSG_CHANNEL_BANNED = "✅ <b>Channel {channel_id} has been banned.</b>"
+MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 <b>Reason:</b> {reason}"
 MSG_CHANNEL_UNBANNED = "✅ **Channel {channel_id} has been unbanned.**"
 MSG_CHANNEL_NOT_BANNED = "ℹ️ **Channel {channel_id} was not found in the ban list.**"
 
@@ -76,30 +89,30 @@ MSG_CHANNEL_NOT_BANNED = "ℹ️ **Channel {channel_id} was not found in the ban
 MSG_AUTHORIZE_USAGE = "🔑 **Usage:** `/authorize <user_id>`"
 MSG_DEAUTHORIZE_USAGE = "🔒 **Usage:** `/deauthorize <user_id>`"
 MSG_AUTHORIZE_SUCCESS = (
-    "✅ **User Authorized!**\n\n"
-    "> 👤 User ID: `{user_id}`\n"
-    "> 🔑 Access: Permanent"
+    "✅ **User Authorized!**\n\n> 👤 User ID: `{user_id}`\n> 🔑 Access: Permanent"
 )
 MSG_DEAUTHORIZE_SUCCESS = (
-    "✅ **User Deauthorized!**\n\n"
-    "> 👤 User ID: `{user_id}`\n"
-    "> 🔒 Access: Revoked"
+    "✅ **User Deauthorized!**\n\n> 👤 User ID: `{user_id}`\n> 🔒 Access: Revoked"
 )
-MSG_TOKEN_ACTIVATED = "✅ Token successfully activated!\n\n⏳ This token is valid for {duration_hours} hours."
-MSG_TOKEN_INVALID = "🚫 **Expired or Invalid Token.** Please click the button below to activate your access token."
+MSG_TOKEN_ACTIVATED = (
+    "✅ Token successfully activated!\n\n⏳ This token is valid for {duration_hours} hours."
+)
+MSG_TOKEN_INVALID = (
+    "🚫 **Expired or Invalid Token.** Please click the button below to activate your access token."
+)
 MSG_NO_AUTH_USERS = "ℹ️ **No Authorized Users Found:** The list is currently empty."
 MSG_AUTH_USER_INFO = """{i}. 👤: {display_name}
-   • User ID: `{user_id}`
-   • Authorized by: `{authorized_by}`
-   • Date: `{auth_time}`\n\n"""
-MSG_ADMIN_AUTH_LIST_HEADER = "🔐 **Authorized Users List**\n\n"
+   • User ID: <code>{user_id}</code>
+   • Authorized by: <code>{authorized_by}</code>
+   • Date: <code>{auth_time}</code>\n\n"""
+MSG_ADMIN_AUTH_LIST_HEADER = "🔐 <b>Authorized Users List</b>\n\n"
 
-# ------ Shell Commands ------
-MSG_SHELL_USAGE = (
-    "<b>Usage:</b>\n"
-    "/shell <command>\n\n"
-    "<b>Example:</b>\n"
-    "/shell ls -l"
+# ------ Shell Commands (guarded by ENABLE_SHELL, L10) ------
+MSG_SHELL_USAGE = "<b>Usage:</b>\n/shell <command>\n\n<b>Example:</b>\n/shell ls -l"
+MSG_SHELL_DISABLED = (
+    "⛔ <b>Shell is disabled.</b>\n\n"
+    "Set <code>ENABLE_SHELL=True</code> in the environment to enable this "
+    "owner-only command."
 )
 MSG_SHELL_EXECUTING = "Executing Command... ⚙️\n<pre>{command}</pre>"
 MSG_SHELL_OUTPUT = """**Shell Command Output:**
@@ -138,62 +151,65 @@ MSG_BUTTON_CLOSE = "✖ Close"
 # ====== COMMAND RESPONSES (User-facing) ======
 # =====================================================================================
 
+# M7: welcome/help/about are HTML and interpolate html.escape()d values.
 MSG_WELCOME = (
-    "🌟 **Welcome, {user_name}!** 🌟\n\n"
-    "I'm **Thunder File to Link Bot** ⚡\n"
+    "🌟 <b>Welcome, {user_name}!</b> 🌟\n\n"
+    "I'm <b>Thunder File to Link Bot</b> ⚡\n"
     "I generate direct download and streaming links for your files.\n\n"
-    "**How to use:**\n"
+    "<b>How to use:</b>\n"
     "1. Send any file to me for private links.\n"
-    "2. In groups, reply to a file with `/link`.\n\n"
-    "» Use `/help` for all commands and detailed information.\n\n"
+    "2. In groups, reply to a file with /link.\n\n"
+    "» Use /help for all commands and detailed information.\n\n"
     "🚀 Send a file to begin!"
 )
 
-MSG_HELP = (
-    "📘 **Thunder Bot - Help Guide** 📖\n\n"
-    "How to get direct download & streaming links:\n\n"
-    "**🚀 Private Chat (with me):**\n"
-    "> 1. Send me **any file** (document, video, audio, photo, etc.).\n"
+MSG_HELP_INTRO = (
+    "📘 <b>Thunder Bot - Help Guide</b> 📖\n\n"
+    "How to get direct download &amp; streaming links:\n\n"
+    "<b>🚀 Private Chat (with me):</b>\n"
+    "> 1. Send me <b>any file</b> (document, video, audio, photo, etc.).\n"
     "> 2. I'll instantly reply with your links! ⚡\n\n"
-    "**👥 Using in Groups:**\n"
-    "> • Reply to any file with `/link`.\n"
-    "> • **Batch Mode:** Reply to the **first** file with `/link <number>` (e.g., `/link 5` for 5 files, up to {max_files}).\n"
+    "<b>👥 Using in Groups:</b>\n"
+    "> • Reply to any file with /link.\n"
+    "> • <b>Batch Mode:</b> Reply to the <b>first</b> file with <code>/link &lt;number&gt;</code> "
+    "(e.g., <code>/link 5</code> for 5 files, up to {max_files}).\n"
     "> • Bot needs administrator rights in the group to function.\n"
-    "> • Links are posted in the group & sent to you privately.\n\n"
-    "**📢 Using in Channels:**\n"
+    "> • Links are posted in the group &amp; sent to you privately.\n\n"
+    "<b>📢 Using in Channels:</b>\n"
     "> • Add me as an administrator with necessary permissions.\n"
     "> • I can be configured to auto-detect new media files.\n"
     "> • Inline stream/download buttons can be added to files automatically.\n"
     "> • Files from banned channels (owner configuration) are rejected.\n"
-    "> • Auto-posting links if the bot has admin privileges with delete rights.\n\n"
-    "**⚙️ Available Commands:**\n"
-    "> `/start` 👋 - Welcome message & quick start information.\n"
-    "> `/help` 📖 - Shows this help message.\n"
-    "> `/link <num>` 🔗 - (Groups) Generate links. \n"
-    "> `/about` ℹ️ - Learn more about me and my features.\n"
-    "> `/ping` 📡 - Check my responsiveness and online status.\n"
-    "> `/dc` 🌍 - View DC information (for yourself, another user, or a file).\n\n"
-    "**💡 Pro Tips:**\n"
+    "> • Auto-posting links if the bot has admin privileges with delete rights.\n"
+)
+
+# M1: the commands section is generated from bot/registry.py.
+MSG_HELP_COMMANDS_HEADER = "\n<b>⚙️ Available Commands:</b>\n"
+MSG_HELP_COMMAND_ROW = "> /{name} - {description}\n"
+
+MSG_HELP_TIPS = (
+    "\n<b>💡 Pro Tips:</b>\n"
     "> • You can forward files from other chats directly to me.\n"
     "> • If you encounter a rate limit message, please wait the specified time. ⏳\n"
-    "> • For `/link` in groups to work reliably (and for private link delivery), ensure you've started a private chat with me first.\n"
+    "> • For /link in groups to work reliably (and for private link delivery), "
+    "ensure you've started a private chat with me first.\n"
     "> • Processing batch files might take a bit longer. Please be patient. 🐌\n\n"
     "❓ Questions? Please ask in our support group!"
 )
 
 MSG_ABOUT = (
-    "🌟 **About Thunder File to Link Bot** ℹ️\n\n"
-    "I'm your go-to bot for **instant download & streaming!** ⚡\n\n"
-    "**🚀 Key Features:**\n"
-    "> **Instant Links:** Get your links within seconds.\n"
-    "> **Online Streaming:** Watch videos or listen to audio directly (for supported formats).\n"
-    "> **Universal File Support:** Handles documents, videos, audio, photos, and more.\n"
-    "> **High-Speed Access:** Optimized for fast link generation and file access.\n"
-    "> **Secure & Reliable:** Your files are handled with care during processing.\n"
-    "> **User-Friendly Interface:** Designed for ease of use on any device.\n"
-    "> **Efficient Processing:** Built for speed and reliability.\n"
-    "> **Batch Mode:** Process multiple files at once in groups using `/link <number>`.\n"
-    "> **Versatile Usage:** Works in private chats, groups, and channels (with admin setup).\n\n"
+    "🌟 <b>About Thunder File to Link Bot</b> ℹ️\n\n"
+    "I'm your go-to bot for <b>instant download &amp; streaming!</b> ⚡\n\n"
+    "<b>🚀 Key Features:</b>\n"
+    "> <b>Instant Links:</b> Get your links within seconds.\n"
+    "> <b>Online Streaming:</b> Watch videos or listen to audio directly (for supported formats).\n"
+    "> <b>Universal File Support:</b> Handles documents, videos, audio, photos, and more.\n"
+    "> <b>High-Speed Access:</b> Optimized for fast link generation and file access.\n"
+    "> <b>Secure &amp; Reliable:</b> Your files are handled with care during processing.\n"
+    "> <b>User-Friendly Interface:</b> Designed for ease of use on any device.\n"
+    "> <b>Efficient Processing:</b> Built for speed and reliability.\n"
+    "> <b>Batch Mode:</b> Process multiple files at once in groups using <code>/link &lt;number&gt;</code>.\n"
+    "> <b>Versatile Usage:</b> Works in private chats, groups, and channels (with admin setup).\n\n"
     "💖 If you find me useful, please consider sharing me with your friends!"
 )
 
@@ -223,27 +239,31 @@ MSG_DC_FILE_INFO = (
 
 MSG_DC_UNKNOWN = "Unknown"
 
-# ------ File Link Generation ------
-MSG_DM_SINGLE_PREFIX = "📬 **From {chat_title}**\n"
+# ------ File Link Generation (HTML: file names are user-controlled, M7) ------
+MSG_DM_SINGLE_PREFIX = "📬 <b>From {chat_title}</b>\n"
 MSG_LINKS = (
-    "✨ **Your Links are Ready!** ✨\n\n"
-    "> `{file_name}`\n\n"
-    "📂 **File Size:** `{file_size}`\n\n"
-    "🚀 **Download Link:**\n`{download_link}`\n\n"
-    "🖥️ **Stream Link:**\n`{stream_link}`\n\n"
-    "⌛️ **Note: Links remain active while the bot is running and the file is accessible.**"
+    "✨ <b>Your Links are Ready!</b> ✨\n\n"
+    "> <code>{file_name}</code>\n\n"
+    "📂 <b>File Size:</b> <code>{file_size}</code>\n\n"
+    "🚀 <b>Download Link:</b>\n<code>{download_link}</code>\n\n"
+    "🖥️ <b>Stream Link:</b>\n<code>{stream_link}</code>\n\n"
+    "⌛️ <b>Note: Links remain active while the bot is running and the file is accessible.</b>"
 )
+
+# L2: appended to link messages only when FILE_TTL_DAYS > 0
+MSG_FILE_EXPIRY_NOTE = "⏳ <b>Files expire after {days} of inactivity.</b>"
+MSG_FILE_TTL_DAYS_LABEL = "{days} day(s)"
 
 # =====================================================================================
 # ====== USER NOTIFICATIONS ======
 # =====================================================================================
 
 MSG_NEW_USER = (
-    "✨ **New User Alert!** ✨\n"
-    "> 👤 **Name:** [{first_name}](tg://user?id={user_id})\n"
-    "> 🆔 **User ID:** `{user_id}`\n\n"
+    "✨ <b>New User Alert!</b> ✨\n"
+    '> 👤 <b>Name:</b> <a href="tg://user?id={user_id}">{first_name}</a>\n'
+    "> 🆔 <b>User ID:</b> <code>{user_id}</code>\n\n"
 )
-MSG_COMMUNITY_CHANNEL = "📢 **{channel_title}:** 🔒 Join this channel to use the bot."
+MSG_COMMUNITY_CHANNEL = "📢 <b>{channel_title}:</b> 🔒 Join this channel to use the bot."
 
 # =====================================================================================
 # ====== PROCESSING MESSAGES ======
@@ -253,18 +273,20 @@ MSG_COMMUNITY_CHANNEL = "📢 **{channel_title}:** 🔒 Join this channel to use
 MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
 MSG_PROCESSING_FILE = "⏳ **Processing your file...**"
 MSG_NEW_FILE_REQUEST = (
-    "> 👤 **Source:** [{source_info}](tg://user?id={id_})\n"
-    "> 🆔 **ID:** `{id_}`\n\n"
-    "🚀 **Download:** `{online_link}`\n\n"
-    "🖥️ **Stream:** `{stream_link}`"
+    '> 👤 <b>Source:</b> <a href="tg://user?id={id_}">{source_info}</a>\n'
+    "> 🆔 <b>ID:</b> <code>{id_}</code>\n\n"
+    "🚀 <b>Download:</b> <code>{online_link}</code>\n\n"
+    "🖥️ <b>Stream:</b> <code>{stream_link}</code>"
 )
 
-# ------ Batch Processing ------
+# ------ Batch Processing (M4b: skipped counts non-media files) ------
 MSG_PROCESSING_BATCH = "♻️ **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
-MSG_DM_BATCH_PREFIX = "📬 **Batch Links from {chat_title}**\n"
-MSG_PROCESSING_RESULT = "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
+MSG_DM_BATCH_PREFIX = "📬 <b>Batch Links from {chat_title}</b>\n"
+MSG_PROCESSING_RESULT = (
+    "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
+)
 
 # =====================================================================================
 # ====== BROADCAST MESSAGES ======
@@ -279,7 +301,9 @@ MSG_BROADCAST_COMPLETE = (
     "❌ **Failed Deliveries:** `{failures}`\n"
     "🗑️ **Accounts Removed (Blocked/Deactivated):** `{deleted_accounts}`\n"
 )
-MSG_BROADCAST_CANCEL = "🛑 **Cancelling Broadcast:** `{broadcast_id}`\n\n> ⏳ Stopping operations..."
+MSG_BROADCAST_CANCEL = (
+    "🛑 **Cancelling Broadcast:** `{broadcast_id}`\n\n> ⏳ Stopping operations..."
+)
 MSG_INVALID_BROADCAST_CMD = "Please reply to the message you want to broadcast."
 MSG_BROADCAST_USAGE = (
     "📣 **Broadcast Command Usage:**\n\n"
@@ -297,6 +321,9 @@ MSG_ERROR_UNAUTHORIZED = "You are not authorized to view this information."
 MSG_ERROR_BROADCAST_RESTART = "Please use the /broadcast command to start a new broadcast."
 MSG_ERROR_BROADCAST_INSTRUCTION = "To start a new broadcast, use the /broadcast command and reply to the message you want to broadcast."
 MSG_ERROR_CALLBACK_UNSUPPORTED = "This button is not active or no longer supported."
+MSG_ERROR_CLOSE_NOT_ALLOWED = (
+    "⚠️ Only the person who triggered this panel (or the owner) can close it."
+)
 
 # =====================================================================================
 # ====== RATE LIMITING MESSAGES ======
@@ -349,31 +376,6 @@ MSG_SYSTEM_STATUS = (
     "> ♻️ **Version:** `{version}`"
 )
 
-# ------ Speedtest Messages ------
-MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...**"
-MSG_SPEEDTEST_ERROR = "❌ **Speed Test Failed!**\n\n> Unable to complete the speed test. Please try again later."
-MSG_SPEEDTEST_RESULT = (
-    "⚡ **Speed Test Results**\n\n"
-    "**SPEEDTEST INFO:**\n"
-    "> **Download:** `{download_mbps} Mbps` (`{download_bps}/s`)\n"
-    "> **Upload:** `{upload_mbps} Mbps` (`{upload_bps}/s`)\n"
-    "> **Ping:** `{ping} ms`\n"
-    "> **Timestamp:** `{timestamp}`\n"
-    "> **Data Sent:** `{bytes_sent}`\n"
-    "> **Data Received:** `{bytes_received}`\n\n"
-    "**SERVER INFO:**\n"
-    "> **Name:** `{server_name}`\n"
-    "> **Country:** `{server_country}`\n"
-    "> **Sponsor:** `{server_sponsor}`\n"
-    "> **Latency:** `{server_latency} ms`\n"
-    "> **Coordinates:** `{server_lat}, {server_lon}`\n\n"
-    "**CLIENT DETAILS:**\n"
-    "> **IP:** `{client_ip}`\n"
-    "> **Coordinates:** `{client_lat}, {client_lon}`\n"
-    "> **ISP:** `{client_isp}`\n"
-    "> **ISP Rating:** `{client_isprating}`\n"
-    "> **Country:** `{client_country}`"
-)
 MSG_SYSTEM_STATS = (
     "📊 **System Statistics**\n\n"
     "> System Uptime: {sys_uptime}\n"
@@ -393,7 +395,8 @@ MSG_SYSTEM_STATS = (
     "> Free: `{free}`\n\n"
     "📶 **Network:**\n"
     "> 🔺 Upload: `{upload}`\n"
-    "> 🔻 Download: `{download}`\n"
+    "> 🔻 Download: `{download}`\n\n"
+    "🚦 **Limiter:** {limiter}"
 )
 
 MSG_DB_STATS = "📊 **Database Statistics**\n\n> 👥 **Total Users:** `{total_users}`"

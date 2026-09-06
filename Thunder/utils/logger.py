@@ -1,39 +1,107 @@
 # Thunder/utils/logger.py
 
+import atexit
+import json
 import logging
-from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 import os
 import queue
-import atexit
+import re
 import sys
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, 'bot.txt')
+LOG_FILE = os.path.join(LOG_DIR, "bot.txt")
 
 logging._srcfile = None
 logging.logThreads = 0
-logging.logProcesses = 0 
+logging.logProcesses = 0
+
+# --------------------------------------------------------------------------
+# H10: shared secret redaction -- used by the access-log middleware and by
+# /log before upload so no token / Mongo URI can leave the machine.
+# --------------------------------------------------------------------------
+
+BOT_TOKEN_PATTERN = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35,}")
+MONGO_URI_PATTERN = re.compile(r"mongodb(\+srv)?://[^:]+:[^@]+@")
+SESSION_TOKEN_PATTERN = re.compile(r"(?i)(authorization:\s*)(Bearer\s+)?[A-Za-z0-9._\-]{20,}")
+
+REDACTED = "***REDACTED***"
+
+
+def redact_secrets(text: str) -> str:
+    """Strip bot tokens and Mongo credentials from a log payload."""
+    if not text:
+        return text
+    text = BOT_TOKEN_PATTERN.sub(REDACTED, text)
+    text = MONGO_URI_PATTERN.sub("mongodb://***:***@", text)
+    text = SESSION_TOKEN_PATTERN.sub(r"\1\2" + REDACTED, text)
+    return text
+
+
+def hash_path_token(token: str) -> str:
+    """Stable short pseudonym for a file token in access logs."""
+    import hashlib
+
+    return hashlib.sha256(token.encode("utf-8", "ignore")).hexdigest()[:8]
+
+
+class RedactingFormatter(logging.Formatter):
+    def __init__(self, fmt: str, redact: bool = True):
+        super().__init__(fmt)
+        self._redact = redact
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        if self._redact:
+            message = redact_secrets(message)
+        return message
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "level": record.levelname,
+            "name": record.name,
+            "msg": redact_secrets(record.getMessage()),
+        }
+        if record.exc_info:
+            payload["exc"] = redact_secrets(self.formatException(record.exc_info))
+        return json.dumps(payload, ensure_ascii=False)
+
+
+_log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_level = getattr(logging, _log_level_name, logging.INFO)
+_log_format = os.getenv("LOG_FORMAT", "plain").lower()
 
 log_queue = queue.Queue(maxsize=10000)
 
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+if _log_format == "json":
+    file_formatter: logging.Formatter = JsonFormatter()
+    console_formatter: logging.Formatter = JsonFormatter()
+else:
+    plain = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file_formatter = RedactingFormatter(plain)
+    console_formatter = RedactingFormatter(plain)
 
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8')
-file_handler.setFormatter(formatter)
+file_handler = RotatingFileHandler(
+    LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+file_handler.setFormatter(file_formatter)
 
 console_handler = logging.StreamHandler(stream=sys.__stdout__)
-console_handler.setFormatter(formatter)
-console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
+console_handler.setFormatter(console_formatter)
+console_handler.stream.reconfigure(encoding="utf-8", errors="replace")
 
 listener = QueueListener(log_queue, file_handler, console_handler, respect_handler_level=True)
 listener.start()
 
-logger = logging.getLogger('ThunderBot')
-logger.setLevel(logging.INFO)
+logger = logging.getLogger("ThunderBot")
+logger.setLevel(_log_level)
 logger.propagate = False
 logger.addHandler(QueueHandler(log_queue))
 
 atexit.register(listener.stop)
 
-__all__ = ['logger', 'LOG_FILE']
+__all__ = ["logger", "LOG_FILE", "redact_secrets", "hash_path_token"]

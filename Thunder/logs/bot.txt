@@ -1,0 +1,56 @@
+2026-09-06 10:14:29,282 - ThunderBot - INFO - Gate mode: public; legacy links: on
+2026-09-06 10:15:02,579 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:15:02,579 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:15:02,579 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:15:02,637 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:15:38,814 - ThunderBot - INFO - Gate mode: public; legacy links: on
+2026-09-06 10:16:56,293 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:16:56,293 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:16:56,293 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:16:56,349 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:18:46,850 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:18:46,850 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:18:46,850 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:18:46,908 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:20:07,765 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:20:07,765 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:20:07,765 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:20:07,834 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:20:07,834 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:20:07,834 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:20:07,835 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:20:07,835 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:20:07,835 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:22:36,612 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:22:36,612 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:22:36,612 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:22:36,673 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer
+2026-09-06 10:23:21,576 - ThunderBot - CRITICAL - Invalid configuration -- 2 problem(s) found:
+2026-09-06 10:23:21,576 - ThunderBot - CRITICAL -   ✖ OWNER_ID='' is not a valid integer
+2026-09-06 10:23:21,576 - ThunderBot - CRITICAL -   ✖ OWNER_ID is required (your Telegram user id (get from @userinfobot))
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL - Invalid configuration -- 5 problem(s) found:
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ API_ID='not-a-number' is not a valid integer
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ API_ID is required (numeric app id from my.telegram.org)
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL='also-bad' is not a valid integer
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ BIN_CHANNEL is required (storage channel id, e.g. -1001234567890)
+2026-09-06 10:23:21,636 - ThunderBot - CRITICAL -   ✖ MAX_BATCH_FILES='not-int' is not a valid integer

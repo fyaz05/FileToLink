@@ -15,7 +15,6 @@ The ``Var`` facade is kept so no import site changes.
 """
 
 import os
-from typing import List, Optional, Set
 
 from dotenv import load_dotenv
 
@@ -29,10 +28,10 @@ def str_to_bool(val: str) -> bool:
     return val.lower() in ("true", "1", "t", "y", "yes")
 
 
-def str_to_int_set(val: str) -> Set[int]:
+def str_to_int_set(val: str) -> set[int]:
     if not val:
         return set()
-    result: Set[int] = set()
+    result: set[int] = set()
     for x in val.split():
         try:
             result.add(int(x))
@@ -41,12 +40,13 @@ def str_to_int_set(val: str) -> Set[int]:
     return result
 
 
-_config_errors: List[str] = []
-_config_warnings: List[str] = []
+_config_errors: list[str] = []
+_config_warnings: list[str] = []
 
 
-def _get_int(name: str, default: str, *, min_val: Optional[int] = None,
-             max_val: Optional[int] = None) -> int:
+def _get_int(
+    name: str, default: str, *, min_val: int | None = None, max_val: int | None = None
+) -> int:
     raw = os.getenv(name, default)
     try:
         value = int(str(raw).strip())
@@ -60,7 +60,7 @@ def _get_int(name: str, default: str, *, min_val: Optional[int] = None,
     return value
 
 
-def _get_float(name: str, default: str, *, min_val: Optional[float] = None) -> float:
+def _get_float(name: str, default: str, *, min_val: float | None = None) -> float:
     raw = os.getenv(name, default)
     try:
         value = float(str(raw).strip())
@@ -94,7 +94,7 @@ class Var:
     _require(BIN_CHANNEL, "BIN_CHANNEL", "storage channel id, e.g. -1001234567890")
 
     PORT: int = _get_int("PORT", "8080", min_val=1, max_val=65535)
-    BIND_ADDRESS: str = os.getenv("BIND_ADDRESS", "0.0.0.0")
+    BIND_ADDRESS: str = os.getenv("BIND_ADDRESS", "0.0.0.0")  # nosec B104 -- user-configured listen address
     PING_INTERVAL: int = _get_int("PING_INTERVAL", "840", min_val=30)
     NO_PORT: bool = str_to_bool(os.getenv("NO_PORT", "True"))
 
@@ -121,20 +121,15 @@ class Var:
     MAX_BATCH_FILES: int = _get_int("MAX_BATCH_FILES", "50", min_val=1, max_val=100)
 
     CHANNEL: bool = str_to_bool(os.getenv("CHANNEL", "False"))
-    BANNED_CHANNELS: Set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
+    BANNED_CHANNELS: set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
 
-    # Kept for backward compatibility of env parsing; no longer read at runtime.
-    MULTI_CLIENT: bool = False
-
-    FORCE_CHANNEL_ID: Optional[int] = None
+    FORCE_CHANNEL_ID: int | None = None
     force_channel_env = os.getenv("FORCE_CHANNEL_ID", "").strip()
     if force_channel_env:
         try:
             FORCE_CHANNEL_ID = int(force_channel_env)
         except ValueError:
-            _config_errors.append(
-                f"FORCE_CHANNEL_ID={force_channel_env!r} must be an integer"
-            )
+            _config_errors.append(f"FORCE_CHANNEL_ID={force_channel_env!r} must be an integer")
 
     TOKEN_ENABLED: bool = str_to_bool(os.getenv("TOKEN_ENABLED", "False"))
     TOKEN_TTL_HOURS: int = _get_int("TOKEN_TTL_HOURS", "24", min_val=1)
@@ -143,17 +138,19 @@ class Var:
     SHORTEN_MEDIA_LINKS: bool = str_to_bool(os.getenv("SHORTEN_MEDIA_LINKS", "False"))
     URL_SHORTENER_API_KEY: str = os.getenv("URL_SHORTENER_API_KEY", "")
     URL_SHORTENER_SITE: str = os.getenv("URL_SHORTENER_SITE", "")
-    if (SHORTEN_ENABLED or SHORTEN_MEDIA_LINKS) and not (URL_SHORTENER_SITE and URL_SHORTENER_API_KEY):
+    if (SHORTEN_ENABLED or SHORTEN_MEDIA_LINKS) and not (
+        URL_SHORTENER_SITE and URL_SHORTENER_API_KEY
+    ):
         _config_warnings.append(
             "Shortener enabled but URL_SHORTENER_SITE/URL_SHORTENER_API_KEY "
             "missing; links will not be shortened."
         )
 
     GLOBAL_RATE_LIMIT: bool = str_to_bool(os.getenv("GLOBAL_RATE_LIMIT", "False"))
-    MAX_GLOBAL_REQUESTS_PER_MINUTE: int = _get_int(
-        "MAX_GLOBAL_REQUESTS_PER_MINUTE", "4", min_val=1)
+    MAX_GLOBAL_REQUESTS_PER_MINUTE: int = _get_int("MAX_GLOBAL_REQUESTS_PER_MINUTE", "4", min_val=1)
     GLOBAL_RPS_LIMIT: float = _get_float(
-        "GLOBAL_RPS_LIMIT", "0", min_val=0)  # 0 = derive from per-minute value
+        "GLOBAL_RPS_LIMIT", "0", min_val=0
+    )  # 0 = derive from per-minute value
 
     RATE_LIMIT_ENABLED: bool = str_to_bool(os.getenv("RATE_LIMIT_ENABLED", "False"))
     MAX_FILES_PER_PERIOD: int = _get_int("MAX_FILES_PER_PERIOD", "2", min_val=1)
@@ -197,7 +194,7 @@ class Var:
 
 
 if _config_errors:
-    logger.critical("Invalid configuration -- %d problem(s) found:" % len(_config_errors))
+    logger.critical(f"Invalid configuration -- {len(_config_errors)} problem(s) found:")
     for err in _config_errors:
         logger.critical(f"  ✖ {err}")
     raise SystemExit(
