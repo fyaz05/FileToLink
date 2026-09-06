@@ -620,8 +620,8 @@ async def _send_notification(
             logger.debug("Skipping notification for channel message (no from_user)")
             return None
     except (FloodWait, RPCError) as e:
-        user_id = message.from_user.id if message.from_user else "channel"
-        logger.warning(f"Error sending notification to user {user_id}: {e}")
+        who: int | str = message.from_user.id if message.from_user else "channel"
+        logger.warning(f"Error sending notification to user {who}: {e}")
     except Exception as e:
         logger.error(f"Unexpected error sending notification: {e}", exc_info=True)
     return None

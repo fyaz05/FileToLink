@@ -124,6 +124,10 @@ async def render_page(
 
         if not message:
             raise InvalidHash("Message not found")
+        if isinstance(message, list):  # defensive: pyrogram returns a list for list inputs
+            if not message:
+                raise InvalidHash("Message not found")
+            message = message[0]
 
         file_unique_id = get_uniqid(message)
         file_name = get_fname(message)

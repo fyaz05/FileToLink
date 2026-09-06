@@ -74,8 +74,9 @@ async def get_force_channel_button(client: Client):
     try:
         chat = await tg_call(client.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
         if chat:
-            invite_link = chat.invite_link or (
-                f"https://t.me/{chat.username}" if chat.username else None
+            # numeric channel id always resolves a full Chat (see force_channel.py)
+            invite_link = chat.invite_link or (  # type: ignore[union-attr]
+                f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
             )
             if invite_link:
                 return [
@@ -108,7 +109,7 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
         await edit_safe(
             callback_query.message,
             help_text,
-            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_markup=InlineKeyboardMarkup(buttons),  # type: ignore[arg-type]
             disable_web_page_preview=True,
         )
     except Exception as e:
@@ -130,7 +131,7 @@ async def about_callback(client: Client, callback_query: CallbackQuery):
         await edit_safe(
             callback_query.message,
             MSG_ABOUT,
-            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_markup=InlineKeyboardMarkup(buttons),  # type: ignore[arg-type]
             disable_web_page_preview=True,
         )
     except Exception as e:
@@ -153,7 +154,7 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
         await edit_safe(
             callback_query.message,
             MSG_ERROR_BROADCAST_INSTRUCTION,
-            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_markup=InlineKeyboardMarkup(buttons),  # type: ignore[arg-type]
             disable_web_page_preview=True,
         )
     except Exception as e:
@@ -193,7 +194,11 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
 @StreamBot.on_callback_query(filters.regex(r"^cancel_"))
 @guard_callback
 async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
-    broadcast_id = callback_query.data.split("_")[1]
+    # callback data is always a str for sent buttons; tolerate the stub union
+    raw = callback_query.data or ""
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    broadcast_id = raw.split("_", 1)[1]
     if broadcast_id in broadcast_ids:
         broadcast_ids[broadcast_id]["cancelled"] = True
         try:

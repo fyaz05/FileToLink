@@ -25,8 +25,11 @@ async def get_force_info(bot: Client):
     try:
         chat = await tg_call(bot.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
         if chat:
-            _force_link = chat.invite_link or (
-                f"https://t.me/{chat.username}" if chat.username else None
+            # Var.FORCE_CHANNEL_ID is a numeric channel id: get_chat always
+            # resolves a full Chat there (ChatPreview only comes from link
+            # resolution), so the stub-union members are unreachable.
+            _force_link = chat.invite_link or (  # type: ignore[union-attr]
+                f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
             )
             _force_title = chat.title or "Channel"
         return _force_link, _force_title

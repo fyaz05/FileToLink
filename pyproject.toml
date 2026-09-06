@@ -28,6 +28,7 @@ dev = [
     "mypy>=1.13",
     "bandit>=1.8",
     "vulture>=2.14",
+    "pip-audit>=2.7",
 ]
 
 [tool.ruff]

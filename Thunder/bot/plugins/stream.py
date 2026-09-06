@@ -66,17 +66,21 @@ _BATCH_DEADLINE_BASE = 30
 
 async def fwd_media(m_msg: Message) -> Message | None:
     try:
-        return await tg_call(m_msg.copy, chat_id=Var.BIN_CHANNEL)
+        result = await tg_call(m_msg.copy, chat_id=Var.BIN_CHANNEL)
     except Exception as e:
         if "MEDIA_CAPTION_TOO_LONG" in str(e):
             logger.debug(f"MEDIA_CAPTION_TOO_LONG error, retrying without caption: {e}")
             try:
-                return await tg_call(m_msg.copy, chat_id=Var.BIN_CHANNEL, caption=None)
+                result = await tg_call(m_msg.copy, chat_id=Var.BIN_CHANNEL, caption=None)
             except Exception as e2:
                 logger.error(f"Error fwd_media copy (no caption): {e2}", exc_info=True)
                 return None
-        logger.error(f"Error fwd_media copy: {e}", exc_info=True)
-        return None
+        else:
+            logger.error(f"Error fwd_media copy: {e}", exc_info=True)
+            return None
+    if isinstance(result, list):  # defensive: pyrogram returns a list for multi-chat copies
+        return result[0] if result else None
+    return result
 
 
 def get_link_buttons(links):
@@ -189,7 +193,9 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         if shortener_val is None:
             return
         if message.from_user and not await db.is_user_exist(message.from_user.id):
-            invite_link = f"https://t.me/{client.me.username}?start=start"
+            # client.me is always populated after client.start(); the stub union
+            # is unavoidable at this layer.
+            invite_link = f"https://t.me/{client.me.username}?start=start"  # type: ignore[union-attr]
             try:
                 await reply_safe(
                     message,
@@ -555,8 +561,13 @@ async def process_batch(
             break
         chunk_ids = ids[chunk_start : chunk_start + BATCH_SIZE]
         try:
-            messages = await tg_call(bot.get_messages, msg.chat.id, chunk_ids, retries=1)
-            messages = list(messages) if messages else []
+            fetched_msgs = await tg_call(bot.get_messages, msg.chat.id, chunk_ids, retries=1)
+            if fetched_msgs is None:
+                messages = []
+            elif isinstance(fetched_msgs, Message):  # single id -> single message
+                messages = [fetched_msgs]
+            else:
+                messages = list(fetched_msgs)
         except Exception as e:
             logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             messages = []
@@ -633,7 +644,7 @@ async def process_batch(
     failed = counters["failed"]
     processed = sum(1 for r in results.values() if r)
 
-    links_list = [results[mid]["online_link"] for mid in ids if results.get(mid)]
+    links_list = [rec["online_link"] for mid in ids if (rec := results.get(mid))]
     for i in range(0, len(links_list), LINK_CHUNK_SIZE):
         chunk = links_list[i : i + LINK_CHUNK_SIZE]
         chunk_text = (

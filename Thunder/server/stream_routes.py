@@ -3,6 +3,7 @@
 import re
 import secrets
 import time
+from collections.abc import Mapping
 from urllib.parse import quote, unquote
 
 from aiohttp import web
@@ -53,7 +54,7 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 
-streamers = {}
+streamers: dict[int, "ByteStreamer"] = {}
 
 
 def get_streamer(client_id: int) -> ByteStreamer:
@@ -62,7 +63,7 @@ def get_streamer(client_id: int) -> ByteStreamer:
     return streamers[client_id]
 
 
-def parse_media_request(path: str, query: dict) -> tuple[int, str]:
+def parse_media_request(path: str, query: Mapping[str, str]) -> tuple[int, str]:
     clean_path = unquote(path).strip("/")
 
     match = PATTERN_HASH_FIRST.match(clean_path)

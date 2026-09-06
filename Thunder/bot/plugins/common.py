@@ -173,7 +173,11 @@ async def send_user_dc(msg: Message, user: User):
         [InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=url)],
         [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")],
     ]
-    await reply_safe(msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+    await reply_safe(
+        msg,
+        text=txt,
+        reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
+    )
 
 
 async def send_file_dc(msg: Message, file_msg: Message):
@@ -195,7 +199,7 @@ async def send_file_dc(msg: Message, file_msg: Message):
         file_type = next((attr for attr in type_map if getattr(file_msg, attr, None)), "unknown")
         type_display = type_map.get(file_type, MSG_FILE_TYPE_UNKNOWN)
 
-        dc_id = MSG_DC_UNKNOWN
+        dc_id: int | str = MSG_DC_UNKNOWN
         fid = parse_fid(file_msg)
         if fid:
             dc_id = fid.dc_id
@@ -205,7 +209,11 @@ async def send_file_dc(msg: Message, file_msg: Message):
         )
 
         btns = [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
-        await reply_safe(msg, text=txt, reply_markup=InlineKeyboardMarkup(btns))
+        await reply_safe(
+            msg,
+            text=txt,
+            reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
+        )
 
     except Exception as e:
         logger.error(f"File DC error: {e}", exc_info=True)
@@ -280,7 +288,7 @@ async def ping_command(bot: Client, msg: Message):
         await edit_safe(
             sent,
             MSG_PING_RESPONSE.format(time_taken_ms=ms),
-            reply_markup=InlineKeyboardMarkup(btns),
+            reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
             disable_web_page_preview=True,
         )
     except MessageNotModified:

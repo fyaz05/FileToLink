@@ -29,13 +29,16 @@ class Database:
         self.file_ingest_locks_col: AsyncCollection = self.db.file_ingest_locks
 
     async def _deduplicate_users(self) -> None:
-        pipeline = [
+        pipeline: list[dict[str, Any]] = [
             {"$sort": {"join_date": 1}},
             {"$group": {"_id": "$id", "doc_id": {"$first": "$_id"}}},
             {"$project": {"_id": "$doc_id"}},
         ]
         keep_ids = []
-        async for doc in self.col.aggregate(pipeline):
+        # AsyncCollection.aggregate() is a coroutine in pymongo's async API:
+        # iterate the awaited cursor, never the coroutine itself.
+        cursor = await self.col.aggregate(pipeline)
+        async for doc in cursor:
             keep_ids.append(doc["_id"])
         if keep_ids:
             result = await self.col.delete_many({"_id": {"$nin": keep_ids}})

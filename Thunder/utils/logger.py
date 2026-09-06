@@ -14,8 +14,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "bot.txt")
 
 logging._srcfile = None
-logging.logThreads = 0
-logging.logProcesses = 0
+logging.logThreads = False
+logging.logProcesses = False
 
 # --------------------------------------------------------------------------
 # H10: shared secret redaction -- used by the access-log middleware and by
@@ -75,7 +75,7 @@ _log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
 _log_level = getattr(logging, _log_level_name, logging.INFO)
 _log_format = os.getenv("LOG_FORMAT", "plain").lower()
 
-log_queue = queue.Queue(maxsize=10000)
+log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=10000)
 
 if _log_format == "json":
     file_formatter: logging.Formatter = JsonFormatter()
@@ -92,7 +92,11 @@ file_handler.setFormatter(file_formatter)
 
 console_handler = logging.StreamHandler(stream=sys.__stdout__)
 console_handler.setFormatter(console_formatter)
-console_handler.stream.reconfigure(encoding="utf-8", errors="replace")
+# reconfigure exists on io.TextIOWrapper (the real sys.__stdout__ under
+# CPython); guard so wrapped/replaced streams can never crash boot.
+_stream = console_handler.stream
+if hasattr(_stream, "reconfigure"):
+    _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
 
 listener = QueueListener(log_queue, file_handler, console_handler, respect_handler_level=True)
 listener.start()

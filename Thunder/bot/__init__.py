@@ -14,5 +14,5 @@ StreamBot = Client(
     max_concurrent_transmissions=1000,
 )
 
-multi_clients = {}
-work_loads = {}
+multi_clients: dict[int, Client] = {}
+work_loads: dict[int, int] = {}

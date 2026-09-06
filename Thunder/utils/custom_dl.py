@@ -34,6 +34,10 @@ class ByteStreamer:
                 logger.debug(f"Error fetching message {message_id}: {e}", exc_info=True)
                 raise FileNotFound(f"Message {message_id} not found") from e
 
+        if isinstance(message, list):  # defensive: pyrogram returns a list for list inputs
+            if not message:
+                raise FileNotFound(f"Message {message_id} not found")
+            message = message[0]
         if not message or not message.media:
             raise FileNotFound(f"Message {message_id} not found")
         return message
@@ -57,7 +61,9 @@ class ByteStreamer:
                 target = (
                     await self.get_message(media_ref) if isinstance(media_ref, int) else media_ref
                 )
-                async for chunk in self.client.stream_media(
+                # stream_media is an async generator in pyrofork; the stubs
+                # union it with file_ref types, so narrow via ignore here.
+                async for chunk in self.client.stream_media(  # type: ignore[union-attr]
                     target, offset=chunk_offset, limit=chunk_limit
                 ):
                     yield chunk

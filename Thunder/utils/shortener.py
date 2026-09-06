@@ -89,6 +89,7 @@ class BitlyPlugin(ShortenerPlugin):
             "https://api-ssl.bit.ly/v4/shorten",
             json={"long_url": url},
             headers={"Authorization": f"Bearer {api_key}"},
+            allow_redirects=False,  # M5: a 30x can never pass for a short URL
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -104,7 +105,9 @@ class OuoIoPlugin(ShortenerPlugin):
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
     ) -> str:
-        async with session.get(f"https://ouo.io/api/{api_key}", params={"s": url}) as resp:
+        async with session.get(
+            f"https://ouo.io/api/{api_key}", params={"s": url}, allow_redirects=False
+        ) as resp:
             if resp.status == 200:
                 text = (await resp.text()).strip()
                 if text and self._validate_short_url(text, domain):
@@ -121,7 +124,9 @@ class CuttLyPlugin(ShortenerPlugin):
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
     ) -> str:
         async with session.get(
-            "https://cutt.ly/api/api.php", params={"key": api_key, "short": url}
+            "https://cutt.ly/api/api.php",
+            params={"key": api_key, "short": url},
+            allow_redirects=False,
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -143,6 +148,7 @@ class GenericShortenerPlugin(ShortenerPlugin):
             f"https://{domain}/api",
             params={"api": api_key, "url": url},
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            allow_redirects=False,
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -188,11 +194,11 @@ class ShortenerSystem:
             timeout = aiohttp.ClientTimeout(total=SHORTEN_TIMEOUT_SECONDS)
             self.session = aiohttp.ClientSession(
                 timeout=timeout,
-                # never follow redirects (M5): a 30x can never be mistaken
-                # for a successful shortening
-                allow_redirects=False,
                 headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) FileToLink/shortener"},
             )
+            # NOTE: redirects are disabled per-request (aiohttp does not accept
+            # ``allow_redirects`` on the session constructor -- passing it there
+            # raises TypeError at runtime and silently disabled the shortener).
             self.domain = site
             plugin_class = self._get_plugin_class(site)
             self.plugin = plugin_class()

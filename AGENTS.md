@@ -16,9 +16,12 @@ bash thunder.sh            # best-effort self-update (shell-free) + python3 -m T
 ## Dependencies
 
 Managed in `pyproject.toml`, exported to `requirements.txt` (8 direct deps,
-all exact-pinned; the CI dependency-count gate fails beyond 8):
+all exact-pinned; the CI dependency-count gate fails beyond 8).
+`uv.lock` pins the full transitive graph with hashes — regenerate it with
+`uv lock` whenever `pyproject.toml` changes (CI fails if it drifts):
 
 ```bash
+uv sync --frozen      # reproducible env from the lockfile
 pip install -r requirements.txt
 # aiohttp, pyrofork, tgcrypto-pyrofork, pymongo, Jinja2, python-dotenv, psutil, uvloop
 ```
@@ -31,7 +34,7 @@ For Cloudflare-protected shorteners install the optional extra:
 
 ```bash
 make format      # ruff autofix + format
-make lint        # ruff + mypy (permissive)
+make lint        # ruff + mypy (blocking: 0 errors expected)
 make test        # unit tier (hermetic: no network, no Mongo)
 make audit       # pip-audit + bandit + vulture + dependency-count
 ```

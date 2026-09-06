@@ -22,20 +22,22 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov ruff mypy bandit vulture pip-audit
 
+      - name: Lockfile is current with pyproject (uv.lock must never drift)
+        run: uv lock --check
+
       - name: Ruff (lint + format check)
         run: |
           ruff check Thunder/ update.py
           ruff format --check Thunder/ update.py
 
-      - name: Mypy (permissive baseline, tightened per phase)
+      - name: Mypy (blocking since the Sep 2026 quality pass: 44 errors fixed, 0 remain)
         run: mypy Thunder --ignore-missing-imports
-        continue-on-error: true
 
       - name: Unit tests
         run: pytest -m unit
 
       - name: pip-audit
-        run: pip-audit -r requirements.txt --strict || pip-audit -r requirements.txt
+        run: pip-audit -r requirements.txt
 
       - name: Bandit (medium+ severity)
         run: bandit -r Thunder -ll --skip B101
@@ -53,7 +55,9 @@ jobs:
           fi
 
   docker:
-    if: github.repository == 'fyaz05/FileToLink' && github.event_name == 'push'
+    # publish images from main only (a feature-branch push must never
+    # overwrite the fyaz05/thunder:latest tag)
+    if: github.repository == 'fyaz05/FileToLink' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: quality
     runs-on: ubuntu-latest
     steps:

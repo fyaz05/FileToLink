@@ -3,6 +3,7 @@
 import asyncio
 import os
 import time
+from typing import Any
 
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
@@ -29,7 +30,7 @@ from Thunder.utils.safe_call import reply_safe, tg_call
 from Thunder.utils.time_format import get_readable_time
 from Thunder.vars import Var
 
-broadcast_ids = {}
+broadcast_ids: dict[str, dict[str, Any]] = {}
 
 # Errors that mean the recipient will never be reachable again.
 _PERMANENT_ERRORS = (

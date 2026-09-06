@@ -60,14 +60,14 @@ async def _build_links(
     if shortener and getattr(Var, "SHORTEN_MEDIA_LINKS", False):
         try:
             s_results = await asyncio.gather(shorten(slink), shorten(olink), return_exceptions=True)
-            if not isinstance(s_results[0], Exception):
-                slink = s_results[0]
-            else:
+            if isinstance(s_results[0], BaseException):
                 logger.warning(f"Failed to shorten stream_link: {s_results[0]}")
-            if not isinstance(s_results[1], Exception):
-                olink = s_results[1]
             else:
+                slink = s_results[0]
+            if isinstance(s_results[1], BaseException):
                 logger.warning(f"Failed to shorten online_link: {s_results[1]}")
+            else:
+                olink = s_results[1]
         except Exception as e:
             logger.error(f"Error during link shortening: {e}")
 
@@ -169,24 +169,33 @@ async def gen_dc_txt(usr: User) -> str:
 async def get_user(cli: Client, qry: Any) -> User | None:
     if isinstance(qry, str) and qry.startswith("@"):
         try:
-            return await tg_call(cli.get_users, qry)
+            result = await tg_call(cli.get_users, qry)
         except Exception as e:
             logger.debug(f"get_users failed for {qry}: {e}")
             return None
+        if isinstance(result, list):  # defensive: pyrogram returns a list for list inputs
+            return result[0] if result else None
+        return result
     if isinstance(qry, str) and qry.isdigit():
         qry = int(qry)
     if isinstance(qry, int):
         try:
-            return await tg_call(cli.get_users, qry)
+            result = await tg_call(cli.get_users, qry)
         except Exception as e:
             logger.debug(f"get_users failed for {qry}: {e}")
             return None
+        if isinstance(result, list):  # defensive: pyrogram returns a list for list inputs
+            return result[0] if result else None
+        return result
     return None
 
 
 async def is_admin(cli: Client, chat_id_val: int) -> bool:
     try:
-        member = await tg_call(cli.get_chat_member, chat_id_val, cli.me.id, retries=1)
+        # cli.me is always populated after client.start(); fall back to an id
+        # that cannot match any chat member if it somehow is not.
+        me_id = cli.me.id if cli.me else 0
+        member = await tg_call(cli.get_chat_member, chat_id_val, me_id, retries=1)
     except Exception:
         return False
     if member is None:

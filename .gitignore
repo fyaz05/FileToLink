@@ -11,6 +11,8 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 log.text
+log.txt
+Thunder/logs/
 .vscode/
 **/__pycache__/
 *.session
