@@ -14,35 +14,30 @@ from .stream_routes import routes
 # Modeled on ThunderGo's http/server.go logMiddleware + redactPath.
 
 
+# Single combined pass: every path segment is pseudonymized exactly once.
+# Sequential re.sub rules would let the id-first rule re-match 8-hex
+# pseudonyms produced by the canonical rule (~39% of them end in two
+# digits), double-hashing the same file and stamping a misleading "…".
+_PSEUDONYM_RE = re.compile(
+    r"(?P<canon>(?<=/f/)[0-9a-f]{20,32})"
+    r"|(?P<legacy>(?<=/watch/)[a-zA-Z0-9_-]{6}\d+)"
+    r"|(?P<activate>(?<=/activate/)[A-Za-z0-9_-]{43})"
+    r"|(?P<idfirst>(?<=/)[a-zA-Z0-9_-]{6}\d+(?=/))"
+)
+
+# "…" marks legacy segments whose id suffix was consumed by the hash;
+# canonical /f/ and /activate/ tokens keep their bare pseudonym.
+_TRUNCATED_GROUPS = frozenset({"legacy", "idfirst"})
+
+
+def _pseudonymize(m: re.Match) -> str:
+    token = m.group(0)
+    suffix = "…" if m.lastgroup in _TRUNCATED_GROUPS else ""
+    return hash_path_token(token) + suffix
+
+
 def _redact_path(path: str) -> str:
-    # canonical: /f/<32-hex>/<name> or /watch/f/<32-hex>/<name>
-    path = re.sub(
-        r"(?<=/f/)[0-9a-f]{20,32}",
-        lambda m: hash_path_token(m.group(0)),
-        path,
-    )
-    # legacy: /watch/<6-char-hash><id>/<name> -> hash part
-    path = re.sub(
-        r"(?<=/watch/)[a-zA-Z0-9_-]{6}\d+",
-        # hash the match itself -- the previous `m.group(0)[:-len(m.group(0))]`
-        # slice always evaluated to "" so every file logged the same pseudonym
-        lambda m: hash_path_token(m.group(0)) + "…",
-        path,
-    )
-    # legacy id-first family: /<6-char-hash><id>/<name> -- the capability hash
-    # is the path segment itself (previously logged in plaintext)
-    path = re.sub(
-        r"(?<=/)[a-zA-Z0-9_-]{6}\d+(?=/)",
-        lambda m: hash_path_token(m.group(0)) + "…",
-        path,
-    )
-    # activation tokens: /activate/<43-char urlsafe token>
-    path = re.sub(
-        r"(?<=/activate/)[A-Za-z0-9_-]{43}",
-        lambda m: hash_path_token(m.group(0)),
-        path,
-    )
-    return path
+    return _PSEUDONYM_RE.sub(_pseudonymize, path)
 
 
 def _escape_control_chars(path: str) -> str:
