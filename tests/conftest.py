@@ -29,3 +29,9 @@ _required = {
 }
 for _key, _value in _required.items():
     os.environ[_key] = _value
+
+# Hermeticity: never read the developer's own config.env / config.env.local
+# in-process (optional knobs like PRIVATE_MODE would silently leak into
+# assertions). The subprocess-based precedence tests opt back out; the
+# kill-switch is honoured by vars._load_env_layers().
+os.environ["THUNDER_SKIP_CONFIG_FILES"] = "1"

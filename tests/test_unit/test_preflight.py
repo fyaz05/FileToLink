@@ -5,8 +5,8 @@ import pytest
 
 from Thunder.utils.decorators import (
     GATES_INFO,
-    GATES_START,
     GATES_STANDARD,
+    GATES_START,
     PREFLIGHT_GATES,
     preflight,
 )
@@ -17,7 +17,11 @@ from Thunder.vars import Var
 def test_gate_presets_exist_in_registry():
     """Every preset id must resolve in PREFLIGHT_GATES -- a typo'd id is a
     fail-closed rejection in production, and this test fails in CI first."""
-    for preset, name in ((GATES_STANDARD, "GATES_STANDARD"), (GATES_START, "GATES_START"), (GATES_INFO, "GATES_INFO")):
+    for preset, name in (
+        (GATES_STANDARD, "GATES_STANDARD"),
+        (GATES_START, "GATES_START"),
+        (GATES_INFO, "GATES_INFO"),
+    ):
         for gate_id in preset:
             assert gate_id in PREFLIGHT_GATES, f"{name}: unknown gate id {gate_id!r}"
 

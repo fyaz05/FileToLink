@@ -30,7 +30,13 @@ def _load_env_layers() -> None:
     were silently ignored.  Precedence now is: real environment >
     config.env.local > config.env; existing os.environ entries still win
     (same contract as load_dotenv's default).
+
+    ``THUNDER_SKIP_CONFIG_FILES=1`` disables both files entirely -- the test
+    tiers use it so a developer's own config.env cannot leak values into a
+    run that is supposed to be hermetic.
     """
+    if os.environ.get("THUNDER_SKIP_CONFIG_FILES") == "1":
+        return
     merged: dict[str, str | None] = {}
     for path in ("config.env", "config.env.local"):
         try:

@@ -56,8 +56,8 @@ jobs:
 
       - name: Ruff (lint + format check)
         run: |
-          uv run ruff check Thunder/ update.py
-          uv run ruff format --check Thunder/ update.py
+          uv run ruff check Thunder/ update.py tests/
+          uv run ruff format --check Thunder/ update.py tests/
 
       - name: Mypy (blocking)
         run: uv run mypy Thunder --ignore-missing-imports

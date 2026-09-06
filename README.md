@@ -106,6 +106,11 @@ User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct 
 
 Copy `config_sample.env` to `config.env` and fill in your values.
 
+> **Tip:** for machine-local overrides, create a `config.env.local`. It is
+> loaded after `config.env` and its values win (precedence: real
+> environment > `config.env.local` > `config.env`). Keep it out of version
+> control for machine-specific tweaks.
+
 ### Essential Configuration
 
 | Variable | Description | Example |
@@ -488,7 +493,7 @@ Your reverse proxy is now securely streaming files behind Cloudflare!
 A: This is usually a configuration issue. Please check the following:
 
 1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) are filled in correctly.
-2. **Use `config.env` Only**: Do not edit `vars.py` or `config_sample.env`. The bot is designed to only read your settings from `config.env`.
+2. **Use `config.env` (plus optional `config.env.local` overrides)**: Do not edit `vars.py` or `config_sample.env`. The bot reads your settings from `config.env` and, if present, `config.env.local` (local layer wins).
 3. **Check Logs**: Review the console logs on your server or hosting platform (Koyeb, Render, Heroku) for any startup errors.
 
 **Q: What do I use for the `FQDN` variable?**

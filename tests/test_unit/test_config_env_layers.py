@@ -15,10 +15,13 @@ _PROBE = "import Thunder.vars as v; print(int(v.Var.PRIVATE_MODE), v.Var.MAX_BAT
 
 
 def _run_in(tmp_path, extra_env=None):
+    # These tests exercise the config-file layers themselves, so they must
+    # opt back OUT of the conftest's THUNDER_SKIP_CONFIG_FILES hermeticity
+    # switch before spawning the probe process.
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("PRIVATE_", "MAX_BATCH"))
+        if not k.startswith(("PRIVATE_", "MAX_BATCH")) and k != "THUNDER_SKIP_CONFIG_FILES"
     }
     env.update(
         {
