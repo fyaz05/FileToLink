@@ -57,13 +57,29 @@ class ShortenerPlugin(ABC):
         except ValueError:
             return False
 
+    @staticmethod
+    def _host_matches(domain: str, *bases: str) -> bool:
+        """Exact-host or subdomain match against the provider's hostnames.
+
+        Substring checks (``"bitly.com" in domain``) accept lookalikes such
+        as ``evil.com/bitly.com`` or ``bitly.com.evil.com`` (CodeQL
+        py/incomplete-url-substring-sanitization); parsing the hostname
+        closes those.  A trailing root dot (FQDN form) is tolerated.
+        """
+        try:
+            host = urlparse(f"https://{domain}").hostname or ""
+        except ValueError:
+            return False
+        host = host.removesuffix(".")
+        return any(host == base or host.endswith(f".{base}") for base in bases)
+
 
 class LinkvertisePlugin(ShortenerPlugin):
     """Offline constructor: no HTTP call involved, host check not needed."""
 
     @classmethod
     def matches(cls, domain: str) -> bool:
-        return "linkvertise" in domain
+        return cls._host_matches(domain, "linkvertise.com")
 
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
@@ -82,7 +98,7 @@ class LinkvertisePlugin(ShortenerPlugin):
 class BitlyPlugin(ShortenerPlugin):
     @classmethod
     def matches(cls, domain: str) -> bool:
-        return "bitly.com" in domain or "bit.ly" in domain
+        return cls._host_matches(domain, "bitly.com", "bit.ly")
 
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
@@ -105,7 +121,7 @@ class BitlyPlugin(ShortenerPlugin):
 class OuoIoPlugin(ShortenerPlugin):
     @classmethod
     def matches(cls, domain: str) -> bool:
-        return "ouo.io" in domain
+        return cls._host_matches(domain, "ouo.io")
 
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
@@ -123,7 +139,7 @@ class OuoIoPlugin(ShortenerPlugin):
 class CuttLyPlugin(ShortenerPlugin):
     @classmethod
     def matches(cls, domain: str) -> bool:
-        return "cutt.ly" in domain
+        return cls._host_matches(domain, "cutt.ly")
 
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str

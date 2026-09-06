@@ -287,6 +287,20 @@ async def health_endpoint(request):
     )
 
 
+_ACTIVATION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+
+
+def _is_activation_token(token: str) -> bool:
+    """Strict shape check for tokens issued by tokens.generate().
+
+    Activation tokens are ``secrets.token_urlsafe(32)`` -- exactly 43
+    URL-safe base64 chars.  Validating the shape before interpolation into
+    the t.me redirect keeps untrusted input out of the Location header
+    (CodeQL py/url-redirection) and skips a DB roundtrip for garbage input.
+    """
+    return bool(_ACTIVATION_TOKEN_RE.fullmatch(token))
+
+
 @routes.get("/activate/{token}")
 async def activate_endpoint(request: web.Request):
     """M8: web entry for activation -- shorteners can produce real URLs."""
@@ -294,6 +308,8 @@ async def activate_endpoint(request: web.Request):
     username = getattr(StreamBot, "username", None)
     if not token:
         raise web.HTTPBadRequest(text="Missing activation token")
+    if not _is_activation_token(token):
+        raise web.HTTPBadRequest(text="Malformed activation token")
     if not username:
         raise web.HTTPServiceUnavailable(text="Bot is still starting; try again shortly.")
     raise web.HTTPFound(f"https://t.me/{username}?start={token}")

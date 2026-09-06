@@ -5,8 +5,10 @@ import pytest
 
 from Thunder.utils.shortener import (
     BitlyPlugin,
+    CuttLyPlugin,
     GenericShortenerPlugin,
     LinkvertisePlugin,
+    OuoIoPlugin,
     ShortenerSystem,
 )
 
@@ -64,3 +66,40 @@ async def test_cache_hit_is_returned_without_http():
     system.ready = True
     system._cache["https://long.example/a"] = "https://shrinkme.dev/xyz"
     assert await system.short_url("https://long.example/a") == "https://shrinkme.dev/xyz"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "domain,plugin,expected",
+    [
+        # legit hosts match (exact, subdomain, FQDN trailing dot)
+        ("bitly.com", BitlyPlugin, True),
+        ("bit.ly", BitlyPlugin, True),
+        ("www.bit.ly", BitlyPlugin, True),
+        ("bit.ly.", BitlyPlugin, True),
+        ("linkvertise.com", LinkvertisePlugin, True),
+        ("sub.linkvertise.com", LinkvertisePlugin, True),
+        ("ouo.io", OuoIoPlugin, True),
+        ("cutt.ly", CuttLyPlugin, True),
+        # lookalikes that substring matching used to accept must not match
+        ("evil.com/bitly.com", BitlyPlugin, False),
+        ("bitly.com.evil.com", BitlyPlugin, False),
+        ("notbitly.com", BitlyPlugin, False),
+        ("bit.ly.evil.io", BitlyPlugin, False),
+        ("evillinkvertise.com", LinkvertisePlugin, False),
+        ("linkvertise.com.evil.net", LinkvertisePlugin, False),
+        ("ouo.io.evil.dev", OuoIoPlugin, False),
+        ("cutt.ly.evil.org", CuttLyPlugin, False),
+        # cross-provider isolation
+        ("ouo.io", BitlyPlugin, False),
+        ("bit.ly", OuoIoPlugin, False),
+    ],
+)
+def test_plugin_host_matching(domain, plugin, expected):
+    assert plugin.matches(domain) is expected
+
+
+@pytest.mark.unit
+def test_registry_lookup_rejects_lookalike_host():
+    system = ShortenerSystem()
+    assert system._get_plugin_class("bitly.com.evil.com") is GenericShortenerPlugin

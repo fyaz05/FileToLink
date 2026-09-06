@@ -5,6 +5,7 @@ import pytest
 from aiohttp.web import HTTPBadRequest, HTTPRequestRangeNotSatisfiable
 
 from Thunder.server.stream_routes import (
+    _is_activation_token,
     build_content_disposition,
     parse_media_request,
     parse_range_header,
@@ -117,3 +118,22 @@ class TestContentDisposition:
         assert header.startswith("attachment;")
         assert 'filename="' in header and "视频" not in header.split("filename*")[0]
         assert "%E8%A7%86%E9%A2%91" in header  # encoded filename*
+
+
+class TestActivationTokenShape:
+    @pytest.mark.unit
+    def test_accepts_real_token_urlsafe_shape(self):
+        import secrets
+
+        assert _is_activation_token(secrets.token_urlsafe(32))
+
+    @pytest.mark.unit
+    def test_rejects_wrong_length_and_chars(self):
+        assert not _is_activation_token("short")
+        assert not _is_activation_token("a" * 42)
+        assert not _is_activation_token("a" * 44)
+        assert not _is_activation_token("a" * 42 + "$$")
+        # redirect / header injection payloads must fail the shape check
+        assert not _is_activation_token("../../evil.com?")
+        assert not _is_activation_token("x\r\nLocation: https://evil.com")
+        assert not _is_activation_token("a" * 20 + "/" + "b" * 22)
