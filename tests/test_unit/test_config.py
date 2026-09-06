@@ -34,9 +34,15 @@ def test_str_to_bool(raw, expected):
 
 @pytest.mark.unit
 def test_str_to_int_set():
+    import Thunder.vars as vars_mod
+
     assert str_to_int_set("") == set()
     assert str_to_int_set("-100111 -100222") == {-100111, -100222}
-    assert str_to_int_set("1 junk 2") == {1, 2}  # junk skipped
+    before = len(vars_mod._config_errors)
+    assert str_to_int_set("1 junk 2") == {1, 2}
+    # junk is surfaced (M6 collect-all-errors), never silently skipped
+    assert len(vars_mod._config_errors) == before + 1
+    assert "junk" in vars_mod._config_errors[-1]
 
 
 @pytest.mark.unit

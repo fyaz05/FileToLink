@@ -68,3 +68,26 @@ def test_merge_falls_back_to_refreshed_sources():
     merged = _merge_replacement_record(existing, refreshed)
     assert merged["first_source_chat_id"] == -1
     assert merged["first_source_message_id"] == 1
+
+
+@pytest.mark.unit
+def test_merge_preserves_legacy_public_hash():
+    """Self-heal replacement must keep the existing public_hash: rewriting a
+    legacy 20-char hash to 32-hex would permanently break published links."""
+    from Thunder.utils.canonical_files import _merge_replacement_record
+
+    existing = {
+        "public_hash": "a" * 20,
+        "created_at": "t0",
+        "seen_count": 3,
+        "reuse_count": 1,
+        "first_source_chat_id": 11,
+        "first_source_message_id": 22,
+    }
+    refreshed = {"public_hash": "b" * 32, "created_at": "t1"}
+    merged = _merge_replacement_record(existing, refreshed)
+    assert merged["public_hash"] == "a" * 20
+    assert merged["seen_count"] == 4
+    assert merged["reuse_count"] == 1
+    assert merged["first_source_chat_id"] == 11
+    assert merged["first_source_message_id"] == 22

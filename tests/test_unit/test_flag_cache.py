@@ -43,8 +43,7 @@ async def test_loader_exception_propagates():
     with pytest.raises(RuntimeError):
         await cache.get_or_load("k", boom)
     # nothing cached on failure
-    hit, _ = cache.peek("k")
-    assert not hit
+    assert "k" not in cache._data
 
 
 @pytest.mark.unit
@@ -57,9 +56,8 @@ async def test_lru_bound():
     await cache.get_or_load("a", lambda: loader("a"))
     await cache.get_or_load("b", lambda: loader("b"))
     await cache.get_or_load("c", lambda: loader("c"))
-    assert cache.occupancy() == 2
-    hit, _ = cache.peek("a")  # oldest evicted
-    assert not hit
+    assert len(cache._data) == 2
+    assert "a" not in cache._data  # oldest evicted
 
 
 @pytest.mark.unit
@@ -71,7 +69,7 @@ async def test_sweep_drops_expired():
     await cache.get_or_load("k", loader)
     dropped = await cache.sweep()
     assert dropped == 1
-    assert cache.occupancy() == 0
+    assert not cache._data
 
 
 @pytest.mark.unit
