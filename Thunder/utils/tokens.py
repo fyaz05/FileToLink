@@ -157,13 +157,9 @@ async def allowed(user_id: int) -> bool:
     """Cached authorized-user check (H7).  Raises on DB failure."""
     return await flags.get_or_load(
         ("allowed", user_id),
-        lambda: _load_allowed(user_id),
+        # delegate: two copies of the same existence check would drift
+        lambda: db.is_user_authorized(user_id),
     )
-
-
-async def _load_allowed(user_id: int) -> bool:
-    result = await db.authorized_users_col.find_one({"user_id": user_id}, {"_id": 1})
-    return bool(result)
 
 
 async def authorize(user_id: int, authorized_by: int) -> bool:

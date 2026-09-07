@@ -86,53 +86,71 @@ class Database:
         except Exception as e:
             logger.warning(f"Could not record backfill completion marker: {e}")
 
+    async def _get_backfill_cursor(self) -> Any:
+        """Persisted resume position: without it every boot re-walks the
+        already-stamped prefix and the migration never converges on large
+        vaults."""
+        try:
+            doc = await self.migration_flags_col.find_one({"_id": "file_last_seen_backfill_cursor"})
+            return doc.get("last_id") if doc else None
+        except Exception:
+            return None
+
+    async def _save_backfill_cursor(self, last_id: Any) -> None:
+        try:
+            await self.migration_flags_col.update_one(
+                {"_id": "file_last_seen_backfill_cursor"},
+                {"$set": {"last_id": last_id}},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"Could not persist backfill cursor: {e}")
+
     async def _backfill_file_last_seen(self) -> None:
         """One-off migration: stamp ``last_seen_at`` on legacy rows that lack
         it, so the TTL index activated right after gives them a full window.
 
-        ``_id``-paged micro-batches keep each statement inside the 5s
-        ``timeoutMS`` (a single ``update_many`` would COLLSCAN and abort the
-        remaining index ensures). Bounded batches per boot; interrupted runs
-        resume next boot and must never raise.
+        ``_id``-paged micro-batches filtered to unstamped rows keep each
+        statement inside the 5s ``timeoutMS`` (a single ``update_many`` would
+        COLLSCAN and abort the remaining index ensures).  The resume cursor is
+        persisted per batch, so a capped or interrupted run continues where
+        it stopped -- the filter shrinks as rows get stamped, guaranteeing
+        convergence.  Must never raise.
         """
         stamp = datetime.datetime.now(datetime.UTC)
         batch_size = 500
-        max_batches_per_boot = 100  # ~50k rows scanned per boot; resumes next boot
-        last_id: Any = None
+        max_batches_per_boot = 100  # 50k unstamped rows per boot; converges across boots
+        last_id: Any = await self._get_backfill_cursor()
         stamped = 0
         try:
             for _ in range(max_batches_per_boot):
-                page_filter: dict[str, Any] = {}
+                page_filter: dict[str, Any] = {"last_seen_at": {"$exists": False}}
                 if last_id is not None:
                     page_filter["_id"] = {"$gt": last_id}
                 page = (
-                    await self.files_col.find(page_filter, {"last_seen_at": 1})
+                    await self.files_col.find(page_filter, {"_id": 1})
                     .sort("_id", 1)
                     .to_list(batch_size)
                 )
                 if not page:
                     await self._mark_backfill_done()
-                    return
-                last_id = page[-1]["_id"]
-                stale_ids = [doc["_id"] for doc in page if "last_seen_at" not in doc]
-                if stale_ids:
-                    await self.files_col.update_many(
-                        {"_id": {"$in": stale_ids}},
-                        {"$set": {"last_seen_at": stamp}},
-                    )
-                    stamped += len(stale_ids)
-                if len(page) < batch_size:
-                    await self._mark_backfill_done()
                     if stamped:
                         logger.info(f"Backfilled last_seen_at on {stamped} legacy file records.")
                     return
+                last_id = page[-1]["_id"]
+                await self.files_col.update_many(
+                    {"_id": {"$in": [doc["_id"] for doc in page]}},
+                    {"$set": {"last_seen_at": stamp}},
+                )
+                stamped += len(page)
+                await self._save_backfill_cursor(last_id)
             logger.warning(
-                "last_seen_at backfill hit the per-boot scan cap "
-                f"({max_batches_per_boot * batch_size} docs); resuming on next boot."
+                "last_seen_at backfill hit the per-boot batch cap "
+                f"({max_batches_per_boot} batches); continuing from the cursor next boot."
             )
         except Exception as e:
             # The migration must never abort the remaining index ensures.
-            logger.warning(f"last_seen_at backfill interrupted (resumes next boot): {e}")
+            logger.warning(f"last_seen_at backfill interrupted (resumes from cursor): {e}")
 
     async def _create_file_ttl_index(self, expire_after_seconds: int) -> None:
         """Create (or recreate after an operator TTL change) the file TTL
@@ -163,11 +181,19 @@ class Database:
                 await self.files_col.create_index(
                     "last_seen_at", expireAfterSeconds=expire_after_seconds
                 )
-            except ExecutionTimeout:
-                logger.warning(
-                    "File TTL index rebuild exceeded the client timeout budget; "
-                    "re-checked on next boot."
-                )
+            except (ExecutionTimeout, OperationFailure) as e:
+                # a concurrent recreate (or a server still building) must not
+                # abort the remaining unique ensures
+                logger.warning(f"File TTL index rebuild failed; re-checked on next boot: {e}")
+
+    async def _ensure_index(self, col: AsyncCollection, keys: Any, **opts: Any) -> None:
+        """Best-effort: one failed ensure (e.g. a build exceeding the client
+        timeout on a large vault) must not abort the remaining ones -- the
+        server-side build continues and the next boot re-runs it."""
+        try:
+            await col.create_index(keys, **opts)
+        except (ExecutionTimeout, OperationFailure) as e:
+            logger.warning(f"Index ensure on {col.name} skipped; re-checked on next boot: {e}")
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
@@ -191,30 +217,30 @@ class Database:
                 except Exception:
                     pass
 
-            await self.banned_users_col.create_index("user_id", unique=True)
-            await self.banned_channels_col.create_index("channel_id", unique=True)
-            await self.token_col.create_index("token", unique=True)
+            await self._ensure_index(self.banned_users_col, "user_id", unique=True)
+            await self._ensure_index(self.banned_channels_col, "channel_id", unique=True)
+            await self._ensure_index(self.token_col, "token", unique=True)
             # /start + generate() look tokens up by user; without this the
             # per-user scans walk the whole collection (H8-adjacent gap)
-            await self.token_col.create_index(
-                [("user_id", 1), ("activated", 1), ("expires_at", -1)]
+            await self._ensure_index(
+                self.token_col, [("user_id", 1), ("activated", 1), ("expires_at", -1)]
             )
-            await self.authorized_users_col.create_index("user_id", unique=True)
+            await self._ensure_index(self.authorized_users_col, "user_id", unique=True)
             try:
                 await self.col.create_index("id", unique=True)
             except DuplicateKeyError:
                 logger.warning("Duplicate users found, deduplicating...")
                 await self._deduplicate_users()
-                await self.col.create_index("id", unique=True)
-            await self.token_col.create_index("expires_at", expireAfterSeconds=0)
-            await self.token_col.create_index("activated")
-            await self.restart_message_col.create_index("message_id", unique=True)
-            await self.restart_message_col.create_index("timestamp", expireAfterSeconds=3600)
-            await self.files_col.create_index("file_unique_id", unique=True)
-            await self.files_col.create_index("public_hash", unique=True)
-            await self.files_col.create_index("canonical_message_id", unique=True)
-            await self.files_col.create_index("created_at")
-            await self.file_ingest_locks_col.create_index("expires_at", expireAfterSeconds=0)
+                await self._ensure_index(self.col, "id", unique=True)
+            await self._ensure_index(self.token_col, "expires_at", expireAfterSeconds=0)
+            await self._ensure_index(self.token_col, "activated")
+            await self._ensure_index(self.restart_message_col, "message_id", unique=True)
+            await self._ensure_index(self.restart_message_col, "timestamp", expireAfterSeconds=3600)
+            await self._ensure_index(self.files_col, "file_unique_id", unique=True)
+            await self._ensure_index(self.files_col, "public_hash", unique=True)
+            await self._ensure_index(self.files_col, "canonical_message_id", unique=True)
+            await self._ensure_index(self.files_col, "created_at")
+            await self._ensure_index(self.file_ingest_locks_col, "expires_at", expireAfterSeconds=0)
 
             logger.debug("Database indexes ensured.")
             return True
@@ -225,11 +251,7 @@ class Database:
             return False
 
     def new_user(self, user_id: int) -> dict:
-        try:
-            return {"id": user_id, "join_date": datetime.datetime.now(datetime.UTC)}
-        except Exception as e:
-            logger.error(f"Error in new_user for user {user_id}: {e}", exc_info=True)
-            raise
+        return {"id": user_id, "join_date": datetime.datetime.now(datetime.UTC)}
 
     async def add_user(self, user_id: int) -> bool:
         try:
@@ -276,26 +298,15 @@ class Database:
             return 0
 
     async def get_all_users(self):
-        try:
-            return self.col.find({})
-        except Exception as e:
-            logger.error(f"Error in get_all_users: {e}", exc_info=True)
-            return self.col.find({"_id": {"$exists": False}})
+        # find() only builds a cursor server-side; it cannot fail here
+        return self.col.find({})
 
     async def get_authorized_users_cursor(self):
-        try:
-            return self.authorized_users_col.find({})
-        except Exception as e:
-            logger.error(f"Error in get_authorized_users_cursor: {e}", exc_info=True)
-            return self.authorized_users_col.find({"_id": {"$exists": False}})
+        return self.authorized_users_col.find({})
 
     async def get_regular_users_cursor(self):
-        try:
-            auth_ids = await self.authorized_users_col.distinct("user_id")
-            return self.col.find({"id": {"$nin": auth_ids}})
-        except Exception as e:
-            logger.error(f"Error in get_regular_users_cursor: {e}", exc_info=True)
-            return self.col.find({"_id": {"$exists": False}})
+        auth_ids = await self.authorized_users_col.distinct("user_id")
+        return self.col.find({"id": {"$nin": auth_ids}})
 
     async def delete_user(self, user_id: int):
         try:
@@ -329,8 +340,10 @@ class Database:
     async def remove_banned_user(self, user_id: int) -> bool:
         try:
             result = await self.banned_users_col.delete_one({"user_id": user_id})
+            # invalidate unconditionally (a miss is a no-op): a stale cached
+            # ban entry would keep a re-banned user denied until TTL expiry
+            flags.invalidate(("banned_user", user_id))
             if result.deleted_count > 0:
-                flags.invalidate(("banned_user", user_id))
                 logger.debug(f"Removed banned user {user_id}.")
                 return True
             return False
@@ -505,21 +518,21 @@ class Database:
             raise
 
     async def bulk_touch_file_records(
-        self, items: list[tuple[str, bool]], *, raise_on_error: bool = False
+        self, items: list[tuple[str, int, int]], *, raise_on_error: bool = False
     ) -> bool:
         """Batched touch (M14): one BulkWrite for the whole flush cycle.
 
-        ``items`` is a list of ``(public_hash, reused)`` pairs; increments are
-        merged per hash by the caller before reaching this method.
+        ``items`` is a list of ``(public_hash, reuse_delta, seen_delta)``
+        triples; deltas accumulate per hash so N touches flush as N, not 1.
         """
         if not items:
             return True
         now = datetime.datetime.now(datetime.UTC)
         ops: list[UpdateOne] = []
-        for public_hash, reused in items:
-            inc: dict[str, int] = {"seen_count": 1}
-            if reused:
-                inc["reuse_count"] = 1
+        for public_hash, reuse_delta, seen_delta in items:
+            inc: dict[str, int] = {"seen_count": seen_delta}
+            if reuse_delta:
+                inc["reuse_count"] = reuse_delta
             ops.append(
                 UpdateOne(
                     {"public_hash": public_hash},

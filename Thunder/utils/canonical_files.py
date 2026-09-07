@@ -40,7 +40,9 @@ _upload_locks: dict[str, asyncio.Lock] = {}
 _upload_lock_counts: dict[str, int] = {}
 _upload_locks_guard = asyncio.Lock()
 _insert_counter: int = 0
-_pending_touches: dict[str, tuple[dict[str, Any], bool]] = {}
+# value = (latest record, reuse_delta, seen_delta): deltas so N touches of
+# one hash flush as N increments instead of a single merged $inc: 1
+_pending_touches: dict[str, tuple[dict[str, Any], int, int]] = {}
 _flush_task: asyncio.Task | None = None
 
 
@@ -201,7 +203,9 @@ async def _bulk_flush() -> None:
     if not items:
         return
     try:
-        await db.bulk_touch_file_records([(h, reused) for h, (_, reused) in items])
+        await db.bulk_touch_file_records(
+            [(h, reuse_delta, seen_delta) for h, (_, reuse_delta, seen_delta) in items]
+        )
     except Exception as e:
         # merge back so the next flush retries; NOTE: a part-way failed
         # ordered=False bulk re-applies some increments (accepted over-count)
@@ -223,8 +227,8 @@ def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) 
 
     public_hash = record["public_hash"]
     if public_hash in _pending_touches:
-        _, existing_reused = _pending_touches[public_hash]
-        _pending_touches[public_hash] = (record, existing_reused or reused)
+        _, reuse_delta, seen_delta = _pending_touches[public_hash]
+        _pending_touches[public_hash] = (record, reuse_delta + int(reused), seen_delta + 1)
     elif len(_pending_touches) >= _TOUCH_BUFFER_MAX:
         # M14: drop-on-overflow with a counter -- memory stays capped
         _dropped_touches += 1
@@ -234,7 +238,7 @@ def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) 
                 f"dropped {_dropped_touches} increments so far"
             )
     else:
-        _pending_touches[public_hash] = (record, reused)
+        _pending_touches[public_hash] = (record, int(reused), 1)
 
     if _flush_task is None or _flush_task.done():
         _flush_task = asyncio.create_task(_flush_pending_touches())
