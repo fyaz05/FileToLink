@@ -99,7 +99,9 @@ class ByteStreamer:
     def get_file_info_sync(self, message: Message) -> dict[str, Any]:
         media = get_media(message)
         if not media:
-            return {"message_id": message.id, "error": "No media"}
+            # the delivery ladder maps FileNotFound -> 404; an unreadable
+            # "error" marker dict had no reader anywhere
+            raise FileNotFound(f"Message {message.id} has no media")
 
         media_type = type(media).__name__.lower()
         file_name = getattr(media, "file_name", None)

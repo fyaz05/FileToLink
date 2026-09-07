@@ -1,5 +1,6 @@
 # Thunder/server/stream_routes.py
 
+import contextlib
 import re
 import secrets
 import time
@@ -148,6 +149,9 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
     match = RANGE_REGEX.fullmatch(range_header)
     if not match:
+        # 400 (not RFC 9110's "ignore") is deliberate: structurally broken
+        # or multi-range requests are hand-crafted, and an explicit signal
+        # beats silently shipping the whole body
         raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
 
     start_str = match.group("start")
@@ -192,6 +196,68 @@ def _resolve_unique_id(file_info: dict) -> str:
     if not unique_id:
         raise FileNotFound("File unique ID not found in info.")
     return unique_id
+
+
+async def _fetch_file_record(secure_hash: str) -> dict | None:
+    """Canonical-record lookup with brownout mapping: a DB transport
+    failure is NOT absence -- 503 + Retry-After so clients/CDNs retry
+    instead of caching a permanent-looking 404."""
+    try:
+        return await get_file_by_hash(secure_hash)
+    except Exception as e:
+        logger.error(f"Canonical record lookup failed (transport): {e}", exc_info=True)
+        raise web.HTTPServiceUnavailable(
+            text="File index temporarily unavailable; please retry shortly.",
+            headers={**CORS_HEADERS, "Retry-After": "5"},
+        ) from e
+
+
+@contextlib.asynccontextmanager
+async def _route_ladder(label: str):
+    """Shared outer ladder: client errors -> 404, HTTP pass-through, the
+    rest -> error-id 500 (no internals in the body)."""
+    try:
+        yield
+    except (InvalidHash, FileNotFound) as e:
+        logger.debug(f"{label}: {type(e).__name__} - {e}")
+        raise web.HTTPNotFound(text="Resource not found") from e
+    except web.HTTPException as e:
+        logger.warning(f"HTTP exception in {label}: {e}")
+        raise
+    except Exception as e:
+        error_id = secrets.token_hex(6)
+        logger.error(f"{label} error {error_id}: {e}", exc_info=True)
+        raise web.HTTPInternalServerError(
+            text=f"An unexpected server error occurred: {error_id}"
+        ) from e
+
+
+@contextlib.asynccontextmanager
+async def _admission_ladder(client_id: int, label: str):
+    """Shared post-admission ladder: the slot is released on every exit
+    path; Telegram unavailability maps to 503 + Retry-After with a constant
+    body (the exception text carries internal state)."""
+    try:
+        yield
+    except (FileNotFound, InvalidHash):
+        work_loads[client_id] -= 1
+        raise
+    except TelegramUnavailable as e:
+        work_loads[client_id] -= 1
+        logger.warning(f"{label}: Telegram unavailable: {e}")
+        raise web.HTTPServiceUnavailable(
+            text="Telegram is temporarily unavailable; please retry shortly.",
+            headers={**CORS_HEADERS, "Retry-After": "5"},
+        ) from e
+    except web.HTTPException as e:
+        work_loads[client_id] -= 1
+        logger.debug(f"Client HTTP error in {label}: {e}")
+        raise
+    except Exception as e:
+        work_loads[client_id] -= 1
+        error_id = secrets.token_hex(6)
+        logger.error(f"{label} error {error_id}: {e}", exc_info=True)
+        raise web.HTTPInternalServerError(text=f"Server error during streaming: {error_id}") from e
 
 
 async def _serve_media_response(
@@ -352,7 +418,6 @@ async def status_endpoint(request):
             },
             "resources": {
                 "total_workload": total_load,
-                "inflight": total_load,
                 "workload_distribution": workload_distribution,
                 "touch_buffer": touch_buffer_stats(),
             },
@@ -372,9 +437,9 @@ async def media_options(request: web.Request):
 
 @routes.get(r"/watch/f/{secure_hash}/{name:.+}", allow_head=True)
 async def canonical_media_preview(request: web.Request):
-    try:
+    async with _route_ladder("canonical preview"):
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash, raise_on_error=False)
+        file_record = await _fetch_file_record(secure_hash)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
@@ -399,13 +464,6 @@ async def canonical_media_preview(request: web.Request):
         )
         response.enable_compression()
         return response
-    except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Canonical preview error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
-    except Exception as e:
-        error_id = secrets.token_hex(6)
-        logger.error(f"Canonical preview error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(text=f"Server error occurred: {error_id}") from e
 
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
@@ -416,7 +474,7 @@ async def media_preview(request: web.Request):
             text="Legacy links are disabled on this server. "
             "Please re-send the file to the bot to get a fresh link."
         )
-    try:
+    async with _route_ladder("preview"):
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
 
@@ -435,27 +493,19 @@ async def media_preview(request: web.Request):
         response.enable_compression()
         return response
 
-    except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error in preview: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
-    except Exception as e:
-        error_id = secrets.token_hex(6)
-        logger.error(f"Preview error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(text=f"Server error occurred: {error_id}") from e
-
 
 @routes.get(r"/f/{secure_hash}/{name:.+}", allow_head=True)
 async def canonical_media_delivery(request: web.Request):
-    try:
+    async with _route_ladder("canonical stream"):
         secure_hash = validate_public_hash(request.match_info["secure_hash"])
-        file_record = await get_file_by_hash(secure_hash, raise_on_error=False)
+        file_record = await _fetch_file_record(secure_hash)
         if not file_record:
             raise FileNotFound("Canonical file not found")
 
         client_id, streamer = select_optimal_client()
         work_loads[client_id] += 1
 
-        try:
+        async with _admission_ladder(client_id, "canonical stream"):
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
 
@@ -469,7 +519,8 @@ async def canonical_media_delivery(request: web.Request):
                     "Vault message missing; record self-healed, re-upload to regenerate the link"
                 ) from None
             # TelegramUnavailable (FloodWait/timeout/transport) is NOT proof the
-            # vault message is gone -- must not delete the record; falls through to the 503 ladder.
+            # vault message is gone -- must not delete the record; the ladder
+            # maps it to 503.
 
             media = get_media(vault_message)
             if not media:
@@ -509,37 +560,6 @@ async def canonical_media_delivery(request: web.Request):
                 client_id=client_id,
                 media_ref=vault_message,
             )
-        except (FileNotFound, InvalidHash):
-            work_loads[client_id] -= 1
-            raise
-        except TelegramUnavailable as e:
-            work_loads[client_id] -= 1
-            raise web.HTTPServiceUnavailable(
-                text=str(e), headers={**CORS_HEADERS, "Retry-After": "5"}
-            ) from e
-        except web.HTTPException as e:
-            work_loads[client_id] -= 1
-            logger.debug(f"Client HTTP error in canonical stream: {e}")
-            raise
-        except Exception as e:
-            work_loads[client_id] -= 1
-            error_id = secrets.token_hex(6)
-            logger.error(f"Canonical stream error {error_id}: {e}", exc_info=True)
-            raise web.HTTPInternalServerError(
-                text=f"Server error during streaming: {error_id}"
-            ) from e
-    except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Canonical client error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
-    except web.HTTPException as e:
-        logger.warning(f"HTTP exception in canonical stream: {e}")
-        raise
-    except Exception as e:
-        error_id = secrets.token_hex(6)
-        logger.error(f"Canonical server error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}"
-        ) from e
 
 
 @routes.get(r"/{path:.+}", allow_head=True)
@@ -550,7 +570,7 @@ async def media_delivery(request: web.Request):
             text="Legacy links are disabled on this server. "
             "Please re-send the file to the bot to get a fresh link."
         )
-    try:
+    async with _route_ladder("media stream"):
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
 
@@ -558,7 +578,7 @@ async def media_delivery(request: web.Request):
 
         work_loads[client_id] += 1
 
-        try:
+        async with _admission_ladder(client_id, "media stream"):
             file_info = await streamer.get_file_info(message_id)
             unique_id = _resolve_unique_id(file_info)
 
@@ -571,36 +591,3 @@ async def media_delivery(request: web.Request):
                 client_id=client_id,
                 media_ref=message_id,
             )
-
-        except (FileNotFound, InvalidHash):
-            work_loads[client_id] -= 1
-            raise
-        except TelegramUnavailable as e:
-            work_loads[client_id] -= 1
-            raise web.HTTPServiceUnavailable(
-                text=str(e), headers={**CORS_HEADERS, "Retry-After": "5"}
-            ) from e
-        except web.HTTPException as e:
-            work_loads[client_id] -= 1
-            logger.debug(f"Client HTTP error in media stream: {e}")
-            raise
-        except Exception as e:
-            work_loads[client_id] -= 1
-            error_id = secrets.token_hex(6)
-            logger.error(f"Stream error {error_id}: {e}", exc_info=True)
-            raise web.HTTPInternalServerError(
-                text=f"Server error during streaming: {error_id}"
-            ) from e
-
-    except (InvalidHash, FileNotFound) as e:
-        logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
-    except web.HTTPException as e:
-        logger.warning(f"HTTP exception in media stream: {e}")
-        raise
-    except Exception as e:
-        error_id = secrets.token_hex(6)
-        logger.error(f"Server error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}"
-        ) from e

@@ -163,6 +163,26 @@ class TestCanonicalDeliveryErrorLadder:
         return SimpleNamespace(match_info={"secure_hash": "a" * 32})
 
     @pytest.mark.unit
+    async def test_db_outage_maps_to_503_not_404(self, monkeypatch):
+        """Review fix regression: a Mongo read failure is a brownout, not
+        absence -- must never surface as a cacheable 404."""
+        from pymongo.errors import ExecutionTimeout
+
+        import Thunder.server.stream_routes as stream_routes
+
+        async def get_file_by_hash(_h, raise_on_error=True):
+            raise ExecutionTimeout("server timeout")
+
+        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
+        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
+
+        with pytest.raises(web.HTTPServiceUnavailable) as exc:
+            await stream_routes.canonical_media_delivery(self._request())
+        assert exc.value.headers.get("Retry-After") == "5"
+        # no admission happened: the slot count is untouched
+        assert stream_routes.work_loads == {0: 0}
+
+    @pytest.mark.unit
     async def test_transport_error_maps_to_503_and_never_deletes(self, monkeypatch):
         import Thunder.server.stream_routes as stream_routes
         from Thunder.server.exceptions import TelegramUnavailable
