@@ -13,8 +13,9 @@ RUN useradd --create-home --shell /bin/bash thunder
 # direct pins would resolve fresh, unpinned transitives at every image build.
 COPY requirements.lock .
 
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --require-hashes -r requirements.lock
+# no `pip install --upgrade pip`: it would be the sole unhashed install;
+# 3.13-slim ships a pip that fully supports --require-hashes
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY --chown=thunder:thunder . .
 

@@ -20,3 +20,6 @@ SECURITY.md
 Makefile
 config.env
 config.env.local
+AGENTS.md
+uv.lock
+requirements.txt

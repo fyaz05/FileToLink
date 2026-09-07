@@ -3,10 +3,10 @@
 ## Setup
 
 ```bash
-python3.13 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install pytest pytest-asyncio pytest-cov ruff mypy bandit vulture
+# install uv (https://docs.astral.sh/uv/getting-started/installation/), then:
+uv sync --frozen --group dev   # exact locked env: runtime + dev tools
 cp config_sample.env config.env  # fill in your values
+pre-commit install  # optional: same ruff hooks CI runs, before each commit
 ```
 
 ## Workflow
@@ -19,10 +19,14 @@ cp config_sample.env config.env  # fill in your values
    same PR.
 5. No new runtime dependency without a one-line justification; the
    dependency-count CI gate fails beyond 8 direct deps.
+6. Touching `pyproject.toml` or `uv.lock`? Run `make lock` -- the same drift
+   gates CI enforces (uv.lock, requirements.txt, requirements.lock).
 
 ## Commands
 
 - `make format` — ruff autofix + format
-- `make lint` — ruff + mypy (permissive)
+- `make lint` — ruff + mypy (blocking: 0 errors expected)
 - `make test` — unit tier
+- `make integration` — real-Mongo tier (needs Docker)
+- `make lock` — dependency drift gates
 - `make audit` — pip-audit + bandit + vulture
