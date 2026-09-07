@@ -14,11 +14,13 @@ from .stream_routes import routes
 
 # Single pass: sequential rules would let the id-first rule re-match 8-hex
 # pseudonyms from the canonical rule (~39% end in two digits), double-hashing them.
+# The (?=/|$) tail anchor also covers the no-filename legacy shape
+# (/AbCdEf12345), whose bare hash+id is the whole link credential.
 _PSEUDONYM_RE = re.compile(
     r"(?P<canon>(?<=/f/)[0-9a-f]{20,32})"
     r"|(?P<legacy>(?<=/watch/)[a-zA-Z0-9_-]{6}\d+)"
     r"|(?P<activate>(?<=/activate/)[A-Za-z0-9_-]{43})"
-    r"|(?P<idfirst>(?<=/)[a-zA-Z0-9_-]{6}\d+(?=/))"
+    r"|(?P<idfirst>(?<=/)[a-zA-Z0-9_-]{6}\d+(?=/|$))"
 )
 
 # "…" marks legacy segments whose id suffix was consumed by the hash;

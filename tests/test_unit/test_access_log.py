@@ -48,6 +48,23 @@ def test_id_first_segment_suffixed(fake_hash):
 
 
 @pytest.mark.unit
+def test_bare_legacy_segment_suffixed(fake_hash):
+    # review fix regression: the no-filename legacy URL is served by the
+    # catch-all route; its bare hash+id is the whole link credential
+    out = _redact_path("/AbCdEf12345")
+    assert out == f"/{_FAKE_PSEUDONYM}…"
+    assert fake_hash == ["AbCdEf12345"]
+
+
+@pytest.mark.unit
+def test_bare_id_only_segment_suffixed(fake_hash):
+    # id-first family without filename (hash rides in the query string)
+    out = _redact_path("/12345678")
+    assert out == f"/{_FAKE_PSEUDONYM}…"
+    assert fake_hash == ["12345678"]
+
+
+@pytest.mark.unit
 def test_legacy_20_char_canonical_hash(fake_hash):
     out = _redact_path("/f/" + "b" * 20 + "/v")
     assert out == f"/f/{_FAKE_PSEUDONYM}/v"
