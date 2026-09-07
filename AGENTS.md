@@ -30,8 +30,6 @@ pip install --require-hashes -r requirements.lock  # what Docker ships
 ```
 
 `cloudscraper` and `speedtest-cli` were removed (unmaintained / archived).
-For Cloudflare-protected shorteners install the optional extra:
-`pip install .[shortener-cf]` (curl_cffi).
 
 ## Development
 

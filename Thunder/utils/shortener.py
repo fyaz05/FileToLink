@@ -2,9 +2,7 @@
 
 """URL shortener (plan H5b + M5).
 
-aiohttp HTTP layer; ``curl_cffi`` is an optional escape hatch for
-Cloudflare-protected providers (the ``shortener-cf`` extra, never a hard
-dependency).  M5 hardening: LRU cache + per-URL singleflight, https-only
+aiohttp HTTP layer.  M5 hardening: LRU cache + per-URL singleflight, https-only
 endpoints, redirects never followed, and the returned short URL's host must
 match the configured site's host (anti redirect-to-attacker).  API-key
 placement is provider-mandated (Bitly: Bearer header; path/query-key
