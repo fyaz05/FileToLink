@@ -45,7 +45,7 @@ async def test_unknown_gate_id_rejects_fail_closed():
 
 
 @pytest.mark.unit
-async def test_preflight_returns_shortener_status_for_owner():
+async def test_preflight_returns_shortener_status_for_owner(monkeypatch):
     """All gates passing returns the shortener status (NOT None) -- the
     False/None contract: callers must use `is None`."""
 
@@ -55,5 +55,8 @@ async def test_preflight_returns_shortener_status_for_owner():
     class _Msg:
         from_user = _User()
 
+    # pin the knob off: with it env-overridden on, the old `or` fallback
+    # turned the assertion below into a tautology
+    monkeypatch.setattr(Var, "SHORTEN_MEDIA_LINKS", False)
     result = await preflight(object(), _Msg(), gates=GATES_INFO)
-    assert result is not None or Var.SHORTEN_MEDIA_LINKS is True
+    assert result is not None

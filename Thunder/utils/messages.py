@@ -281,7 +281,8 @@ MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
 MSG_DM_BATCH_PREFIX = "📬 <b>Batch Links from {chat_title}</b>\n"
 MSG_PROCESSING_RESULT = (
-    "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
+    "✅ **Process Complete:** {processed}/{total} files processed successfully, "
+    "{skipped} skipped, {failed} failed"
 )
 
 # ====== BROADCAST MESSAGES ======

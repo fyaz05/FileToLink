@@ -26,7 +26,7 @@ from Thunder.utils.messages import (
     MSG_ERROR_CLOSE_NOT_ALLOWED,
     MSG_ERROR_UNEXPECTED,
 )
-from Thunder.utils.safe_call import answer_safe, edit_safe
+from Thunder.utils.safe_call import answer_safe, delete_safe, edit_safe
 from Thunder.vars import Var
 
 
@@ -176,7 +176,7 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
     await answer_safe(callback_query)
     if message:
         try:
-            await message.delete()
+            await delete_safe(message)
         except Exception as e:
             logger.debug(
                 f"Failed to delete callback query message {getattr(message, 'id', '?')}: {e}"
@@ -184,7 +184,7 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
 
         if message.reply_to_message:
             try:
-                await message.reply_to_message.delete()
+                await delete_safe(message.reply_to_message)
             except Exception as e:
                 logger.debug(f"Failed to delete replied message: {e}")
 
@@ -192,6 +192,10 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
 @StreamBot.on_callback_query(filters.regex(r"^cancel_"))
 @guard_callback
 async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
+    # owner-only like its sibling restart action: the cancel button lives on
+    # the owner's /broadcast reply, but the guard is defense-in-depth
+    if not await owner_only(client, callback_query):
+        return
     # callback data is always a str for sent buttons; tolerate the stub union
     raw = callback_query.data or ""
     if isinstance(raw, bytes):

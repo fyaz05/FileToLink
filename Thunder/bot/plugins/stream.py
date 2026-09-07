@@ -719,6 +719,7 @@ async def process_batch(
             MSG_PROCESSING_RESULT.format(
                 processed=processed,
                 total=count,
+                skipped=skipped,
                 failed=failed,
             ),
         )

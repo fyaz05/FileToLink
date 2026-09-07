@@ -1,6 +1,7 @@
 # Thunder/utils/logger.py
 
 import atexit
+import hashlib
 import json
 import logging
 import os
@@ -51,8 +52,6 @@ def redact_secrets(text: str) -> str:
 
 def hash_path_token(token: str) -> str:
     """Stable short pseudonym for a file token in access logs."""
-    import hashlib
-
     return hashlib.sha256(token.encode("utf-8", "ignore")).hexdigest()[:8]
 
 

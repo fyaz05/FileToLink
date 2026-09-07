@@ -1,13 +1,11 @@
 from Thunder.bot.registry import bot_commands, help_command_rows
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import MSG_HELP_COMMANDS_HEADER, MSG_HELP_TIPS
+from Thunder.utils.messages import MSG_HELP_COMMANDS_HEADER, MSG_HELP_INTRO, MSG_HELP_TIPS
 from Thunder.vars import Var
 
 
 def build_help_text(max_files: int) -> str:
     """Assemble /help from its three parts (M1: commands come from the registry)."""
-    from Thunder.utils.messages import MSG_HELP_INTRO
-
     return (
         MSG_HELP_INTRO.format(max_files=max_files)
         + MSG_HELP_COMMANDS_HEADER

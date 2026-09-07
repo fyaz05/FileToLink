@@ -218,7 +218,9 @@ async def _send_one(client: Client, message: Message, user_id: int, stats: dict)
         await tg_call(message.reply_to_message.copy, user_id, retries=2)
         stats["success"] += 1
     except _PERMANENT_ERRORS as e:
-        recipient_type, reason = _PERMANENT_ERROR_REASONS[type(e)]
+        # except matches subclasses; the dict keys are exact types, so an
+        # unmapped subclass would raise KeyError inside the worker
+        recipient_type, reason = _PERMANENT_ERROR_REASONS.get(type(e), ("Recipient", "unreachable"))
 
         logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
         try:

@@ -4,9 +4,8 @@ import os
 
 
 class TokenParser:
-    def __init__(self, config_file: str | None = None):
+    def __init__(self):
         self.tokens: dict[int, str] = {}
-        self.config_file = config_file
 
     def parse_from_env(self) -> dict[int, str]:
         # sort key cannot raise: digit filter yields "" at worst, `or 0` -> int
