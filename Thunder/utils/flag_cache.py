@@ -86,7 +86,7 @@ class FlagCache:
     def clear(self) -> None:
         self._data.clear()
 
-    async def sweep(self) -> int:
+    def sweep(self) -> int:
         now = time.monotonic()
         before = len(self._data)
         self._prune_expired(now)
@@ -100,7 +100,7 @@ class FlagCache:
         while True:
             await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
             try:
-                await self.sweep()
+                self.sweep()
             except asyncio.CancelledError:
                 raise
             except Exception as e:

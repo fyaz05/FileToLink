@@ -107,7 +107,10 @@ class Var:
     _require(BOT_TOKEN, "BOT_TOKEN", "bot token from @BotFather")
 
     NAME: str = os.getenv("NAME", "ThunderF2L")
-    SLEEP_THRESHOLD: int = _get_int("SLEEP_THRESHOLD", "600", min_val=0)
+    # pyrofork auto-sleeps FloodWait <= this threshold inside the RPC; waits
+    # above it surface to tg_call's bounded retry (H8). Keep well below
+    # TG_RPC_TIMEOUT_SECONDS or auto-slept waits blow the per-RPC budget.
+    SLEEP_THRESHOLD: int = _get_int("SLEEP_THRESHOLD", "10", min_val=0)
     WORKERS: int = _get_int("WORKERS", "8", min_val=1, max_val=64)
 
     BIN_CHANNEL: int = _get_int("BIN_CHANNEL", "0")

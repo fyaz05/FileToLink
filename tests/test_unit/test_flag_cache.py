@@ -66,7 +66,7 @@ async def test_sweep_drops_expired():
 
     cache = FlagCache(ttl_seconds=0)  # everything immediately expired
     await cache.get_or_load("k", loader)
-    dropped = await cache.sweep()
+    dropped = cache.sweep()
     assert dropped == 1
     assert not cache._data
 

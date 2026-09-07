@@ -31,7 +31,8 @@ from Thunder.utils.safe_call import edit_safe, send_safe
 from Thunder.utils.tokens import allowed
 from Thunder.vars import Var
 
-# max FloodWait/breaker requeues before a request is dropped and the user notified
+# max FloodWait requeues before a request is dropped and the user notified;
+# breaker/user-limit requeues are bounded by their own wait math instead
 MAX_REQUEST_ATTEMPTS = 5
 # Bounded bookkeeping
 MAX_TRACKED_USERS = 4096
@@ -265,13 +266,13 @@ class RateLimiter:
         if delay > 0:
             request_data["not_before"] = time.time() + delay
         async with self.request_lock:
-            # Ordering contract: FloodWait/breaker requeues go to the FRONT
-            # (their delay has already elapsed); deferred rotations from
-            # _process_one go to the BACK -- they have not waited yet.
+            # Requeues always carry a future not_before (FloodWait/breaker/
+            # user-limit waits); _process_one rotates deferred items to the
+            # back, so queue order is start order by not_before.
             if queue_type == "priority":
-                self.priority_queue.appendleft(request_data)
+                self.priority_queue.append(request_data)
             else:
-                self.request_queue.appendleft(request_data)
+                self.request_queue.append(request_data)
             self.request_event.set()
             # a pure requeue must re-park the pool or workers spin until not_before
             if delay > 0:

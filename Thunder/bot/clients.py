@@ -52,8 +52,6 @@ async def initialize_clients():
 
     async def start_client(client_id, token):
         try:
-            if client_id == len(all_tokens):
-                await asyncio.sleep(2)
             client = Client(
                 api_hash=Var.API_HASH,
                 api_id=Var.API_ID,
@@ -64,7 +62,9 @@ async def initialize_clients():
                 max_concurrent_transmissions=1000,
                 sleep_threshold=Var.SLEEP_THRESHOLD,
             )
-            await tg_call(client.start)
+            # session bootstrap (connect + auth) legitimately outlives the
+            # 30s lightweight-RPC budget
+            await tg_call(client.start, timeout=90.0)
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client

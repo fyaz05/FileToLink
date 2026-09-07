@@ -101,18 +101,18 @@ async def gen_canonical_links(
 
 
 async def notify_own(cli: Client, txt: str):
-    o_ids = [Var.OWNER_ID]  # OWNER_ID is an int by construction
+    targets = [Var.OWNER_ID]
+    if isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
+        targets.append(Var.BIN_CHANNEL)
 
-    async def send_with_flood_wait(chat_id: int):
+    async def _notify(chat_id: int) -> None:
         try:
             await send_safe(cli, chat_id, text=txt)
         except Exception as e:
             logger.warning(f"Could not notify chat {chat_id}: {e}")
 
-    tasks = [send_with_flood_wait(oid) for oid in o_ids]
-    if isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0:
-        tasks.append(send_with_flood_wait(Var.BIN_CHANNEL))
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # _notify never raises, so plain gather suffices
+    await asyncio.gather(*(_notify(t) for t in targets))
 
 
 async def reply_user_err(msg: Message, err_txt: str):

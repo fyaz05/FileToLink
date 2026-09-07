@@ -29,7 +29,7 @@ from Thunder.bot.clients import (
     initialize_clients,
 )
 from Thunder.server import web_server
-from Thunder.utils.canonical_files import drain_background_touch_tasks
+from Thunder.utils.canonical_files import drain_background_touch_tasks, touch_buffer_stats
 from Thunder.utils.commands import set_commands
 from Thunder.utils.database import db
 from Thunder.utils.flag_cache import flags
@@ -129,7 +129,9 @@ async def start_services():
 
     print("   ▶ Starting Telegram Bot initialization...")
     try:
-        await tg_call(StreamBot.start)
+        # session bootstrap (connect + auth) legitimately outlives the
+        # 30s lightweight-RPC budget
+        await tg_call(StreamBot.start, timeout=90.0)
         bot_info = await tg_call(StreamBot.get_me)
         # pyrogram sets Client.username dynamically, so mypy cannot see it; pin it for /status.
         username = bot_info.username
@@ -177,6 +179,9 @@ async def start_services():
     try:
         # H6b: small worker pool instead of a single serial executor
         executor_tasks = start_executors()
+        # register before the web-boot try: a later boot failure must cancel
+        # live workers too, not just the index-ensure task
+        background_tasks.extend(executor_tasks)
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
     except Exception as e:
         logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
@@ -189,8 +194,6 @@ async def start_services():
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
         await site.start()
-
-        background_tasks.extend(executor_tasks)
 
         keepalive_task = asyncio.create_task(ping_server(), name="keepalive_task")
         background_tasks.append(keepalive_task)
@@ -250,8 +253,6 @@ async def _safe_teardown_step(step, name: str, errors: list | None = None):
 
 async def shutdown_services(background_tasks, app_runner) -> None:
     """M13: restart-marker-safe, bounded drain, aggregated errors."""
-    from Thunder.utils.canonical_files import touch_buffer_stats
-
     print("   ▶ Shutting down services...")
     errors: list = []
 
