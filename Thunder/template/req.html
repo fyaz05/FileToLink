@@ -8,11 +8,12 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f7">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#030304">
 
-    <!-- Logo & Favicon -->
+    <!-- M2: per-file player pages must never be indexed -->
+    <meta name="robots" content="noindex, nofollow">
+
     <link rel="icon" type="image/jpeg" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- SEO & Social Sharing (Open Graph) -->
     <meta name="description"
         content="A premium cinema experience for '{{ file_name }}'. Stream in high quality with advanced controls.">
     <meta property="og:type" content="website">
@@ -21,18 +22,26 @@
         content="Stream '{{ file_name }}' in a beautiful, atmospheric environment with professional playback controls.">
     <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- Twitter Cards -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{ file_name }} — Cinema">
     <meta name="twitter:description" content="Stream '{{ file_name }}' in a beautiful, atmospheric environment.">
     <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
+    <!-- L7: preconnect hints for CDN origins -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://cdn.vidstack.io" crossorigin>
+
     <!-- Vidstack Player -->
+    {% if kind == 'video' %}
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
     <script type="module" src="https://cdn.vidstack.io/player"></script>
+    {% elif kind == 'audio' %}
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
+    <link rel="stylesheet" href="https://cdn.vidstack.io/player/audio.css" />
+    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    {% endif %}
 
-    <!-- Typography: Outfit (geometric display) + DM Sans (refined body) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -47,19 +56,40 @@
     <!-- Styles (CDN-hosted) -->
     <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/styles.css">
+
+    <!-- L7: inline fallback keeps the page usable when all CDNs are blocked. -->
+    <style>
+        body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; gap:1.25rem;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+               background:#0b0a09; color:#f3ede4; padding:2rem; text-align:center; }
+        .fallback-title { font-size:1.25rem; font-weight:600; word-break:break-word; max-width:36rem; }
+        .fallback-meta { opacity:.65; font-size:.875rem; }
+        .fallback-actions { display:flex; gap:.75rem; flex-wrap:wrap; justify-content:center; }
+        .fallback-actions a, .fallback-actions button {
+            display:inline-flex; align-items:center; gap:.5rem; padding:.65rem 1.1rem;
+            border-radius:999px; border:1px solid rgba(243,237,228,.25);
+            background:rgba(243,237,228,.08); color:inherit; cursor:pointer;
+            text-decoration:none; font-size:.95rem; }
+        .fallback-actions a.primary { background:#e0862a; border-color:#e0862a; color:#14100b; font-weight:600; }
+        .cinema, .command-bar, .drawer, .atmosphere, .masthead .file-meta { display:none; }
+        body.fallback-ready .cinema, body.fallback-ready .command-bar { display:block; }
+    </style>
 </head>
 
 <body>
-    <!-- Atmospheric Background -->
+    <noscript>
+        <div style="padding:.75rem 1rem;text-align:center;background:#2a1c0d;color:#ffd9a0;">
+            JavaScript is disabled — direct playback is unavailable, but the download link below still works.
+        </div>
+    </noscript>
     <div class="atmosphere" aria-hidden="true">
         <div class="gradient-mesh"></div>
         <div class="noise"></div>
         <div class="vignette"></div>
     </div>
 
-    <!-- Main Viewport -->
     <main class="viewport">
-        <!-- Masthead -->
         <header class="masthead">
             <div class="title-group">
                 <h1 class="title">{{ file_name }}</h1>
@@ -94,7 +124,6 @@
             </button>
         </header>
 
-        <!-- Cinema Screen -->
         <section class="cinema">
             <div class="screen">
                 <div class="player-background-message">
@@ -105,14 +134,32 @@
                     <span class="bg-msg-title">If video not playing</span>
                     <span class="bg-msg-sub">Use External Player</span>
                 </div>
+                {% if kind == 'video' %}
                 <media-player id="player" title="{{ file_name }}" playsinline keyTarget="document">
                     <media-provider></media-provider>
                     <media-video-layout></media-video-layout>
                 </media-player>
+                {% elif kind == 'audio' %}
+                <media-player id="player" title="{{ file_name }}" playsinline keyTarget="document">
+                    <media-provider></media-provider>
+                    <media-audio-layout></media-audio-layout>
+                </media-player>
+                {% elif kind == 'image' %}
+                <div class="image-viewer" style="display:flex;align-items:center;justify-content:center;max-height:70vh;">
+                    <img src="{{ src|safe }}" alt="{{ file_name }}" loading="lazy"
+                        style="max-width:100%;max-height:70vh;border-radius:.75rem;object-fit:contain;">
+                </div>
+                {% else %}
+                <!-- M2: non-media types get a download card, not a broken player -->
+                <div class="unsupported-card" style="display:flex;flex-direction:column;align-items:center;gap:.75rem;padding:2.5rem;border:1px solid rgba(243,237,228,.15);border-radius:1rem;max-width:28rem;">
+                    <span style="font-size:2rem;">📦</span>
+                    <span style="font-weight:600;">Preview not available</span>
+                    <span style="opacity:.7;font-size:.875rem;">{{ mime_type }} — use the download button below.</span>
+                </div>
+                {% endif %}
             </div>
         </section>
 
-        <!-- Command Bar -->
         <nav class="command-bar">
             <div class="command-glass">
                 <a href="{{ src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
@@ -148,10 +195,8 @@
             </div>
         </nav>
 
-        <!-- External Players Drawer -->
         <aside class="drawer" id="playersDrawer">
             <div class="drawer-panel" id="drawerPanel" role="region" aria-labelledby="playersToggle">
-                <!-- Android -->
                 <div class="player-group" id="androidGroup">
                     <div class="group-label">Android</div>
                     <div class="player-grid">
@@ -221,7 +266,6 @@
                     </div>
                 </div>
 
-                <!-- iOS -->
                 <div class="player-group" id="iosGroup">
                     <div class="group-label">iOS / iPadOS</div>
                     <div class="player-grid">
@@ -258,7 +302,6 @@
                     </div>
                 </div>
 
-                <!-- Desktop -->
                 <div class="player-group" id="desktopGroup">
                     <div class="group-label">Desktop</div>
                     <div class="player-grid">
@@ -297,9 +340,7 @@
             </div>
         </aside>
 
-        <!-- Footer Group -->
         <footer class="footer-group">
-            <!-- Keyboard Hints -->
             <div class="keyboard-hints" id="keyboardHints">
                 <div class="hints-row">
                     <div class="hint">
@@ -329,7 +370,6 @@
                 </div>
             </div>
 
-            <!-- Copyright -->
             <div class="copyright-footer">
                 <span>&copy; <span id="copyrightYear"></span> Thunder</span>
                 <span class="footer-separator">•</span>
@@ -345,15 +385,26 @@
         </footer>
     </main>
 
-    <!-- Toast Stack -->
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <!-- Config for external script (template injection happens here) -->
+    {% if kind in ('video', 'audio') %}
     <script>
         window.__CINEMA_CONFIG__ = { src: {{ src | tojson }} };
     </script>
-    <!-- Main Script (CDN-hosted) -->
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/script.js"></script>
+    {% endif %}
+    <!-- L7 fallback: copy-link without the CDN script -->
+    <script>
+        (function () {
+            var btn = document.getElementById('copyBtn');
+            if (btn) btn.addEventListener('click', function () {
+                var src = {{ src | tojson }};
+                if (navigator.clipboard) navigator.clipboard.writeText(src);
+            });
+            document.body.classList.add('fallback-ready');
+        })();
+    </script>
 </body>
 
 </html>

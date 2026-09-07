@@ -1,0 +1,90 @@
+"""H7: TTL-LRU flag cache semantics."""
+
+import pytest
+
+from Thunder.utils.flag_cache import FlagCache
+
+
+@pytest.mark.unit
+async def test_loader_called_once_within_ttl():
+    calls = {"n": 0}
+
+    async def loader():
+        calls["n"] += 1
+        return "value"
+
+    cache = FlagCache(ttl_seconds=60)
+    assert await cache.get_or_load("k", loader) == "value"
+    assert await cache.get_or_load("k", loader) == "value"
+    assert calls["n"] == 1
+
+
+@pytest.mark.unit
+async def test_invalidate_forces_reload():
+    calls = {"n": 0}
+
+    async def loader():
+        calls["n"] += 1
+        return calls["n"]
+
+    cache = FlagCache(ttl_seconds=60)
+    assert await cache.get_or_load("k", loader) == 1
+    cache.invalidate("k")
+    assert await cache.get_or_load("k", loader) == 2
+
+
+@pytest.mark.unit
+async def test_loader_exception_propagates():
+    async def boom():
+        raise RuntimeError("db down")
+
+    cache = FlagCache()
+    with pytest.raises(RuntimeError):
+        await cache.get_or_load("k", boom)
+    # nothing cached on failure
+    assert "k" not in cache._data
+
+
+@pytest.mark.unit
+async def test_lru_bound():
+    cache = FlagCache(ttl_seconds=60, max_items=2)
+
+    async def loader(v):
+        return v
+
+    await cache.get_or_load("a", lambda: loader("a"))
+    await cache.get_or_load("b", lambda: loader("b"))
+    await cache.get_or_load("c", lambda: loader("c"))
+    assert len(cache._data) == 2
+    assert "a" not in cache._data  # oldest evicted
+
+
+@pytest.mark.unit
+async def test_sweep_drops_expired():
+    async def loader():
+        return 1
+
+    cache = FlagCache(ttl_seconds=0)  # everything immediately expired
+    await cache.get_or_load("k", loader)
+    dropped = cache.sweep()
+    assert dropped == 1
+    assert not cache._data
+
+
+@pytest.mark.unit
+async def test_concurrent_loaders_single_flight():
+    """Cold/expired keys must share ONE loader task, not stampede the backend."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    async def loader():
+        calls["n"] += 1
+        await asyncio.sleep(0.02)  # widen the race window
+        return "v"
+
+    cache = FlagCache(ttl_seconds=60)
+    results = await asyncio.gather(*(cache.get_or_load("k", loader) for _ in range(10)))
+    assert results == ["v"] * 10
+    assert calls["n"] == 1
+    assert cache._inflight == {}  # bookkeeping cleaned up

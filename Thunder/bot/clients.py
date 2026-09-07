@@ -1,25 +1,39 @@
 # Thunder/bot/clients.py
 
 import asyncio
+import glob
+import os
 
 from pyrogram import Client
-from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.utils.config_parser import TokenParser
 from Thunder.utils.logger import logger
+from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
+
+
+def _harden_session_files() -> None:
+    """L5: session files contain bearer-equivalent credentials -> 0600.
+
+    Best-effort: pyrogram (re)creates session files lazily, so this runs
+    after startup and tolerates absent files.
+    """
+    for path in glob.glob("*.session"):
+        try:
+            os.chmod(path, 0o600)
+            logger.debug(f"Hardened session file permissions: {path}")
+        except OSError as e:
+            logger.warning(f"Could not chmod {path}: {e}")
+
 
 async def cleanup_clients():
     for client in multi_clients.values():
         try:
-            try:
-                await client.stop()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.stop()
+            await tg_call(client.stop)
         except Exception as e:
             logger.error(f"Error stopping client: {e}", exc_info=True)
+
 
 async def initialize_clients():
     print("╠══════════════════ INITIALIZING CLIENTS ═══════════════════╣")
@@ -38,8 +52,6 @@ async def initialize_clients():
 
     async def start_client(client_id, token):
         try:
-            if client_id == len(all_tokens):
-                await asyncio.sleep(2)
             client = Client(
                 api_hash=Var.API_HASH,
                 api_id=Var.API_ID,
@@ -48,13 +60,11 @@ async def initialize_clients():
                 name=str(client_id),
                 no_updates=True,
                 max_concurrent_transmissions=1000,
-                sleep_threshold=Var.SLEEP_THRESHOLD
+                sleep_threshold=Var.SLEEP_THRESHOLD,
             )
-            try:
-                await client.start()
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.start()
+            # session bootstrap (connect + auth) legitimately outlives the
+            # 30s lightweight-RPC budget
+            await tg_call(client.start, timeout=90.0)
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")
             return client_id, client
@@ -62,20 +72,23 @@ async def initialize_clients():
             logger.error(f"   ✖ Failed to start Client ID {client_id}. Error: {e}", exc_info=True)
             return None
 
-    clients = await asyncio.gather(*[start_client(i, token) for i, token in all_tokens.items() if token])
+    clients = await asyncio.gather(
+        *[start_client(i, token) for i, token in all_tokens.items() if token]
+    )
     clients = [client for client in clients if client]
 
     multi_clients.update(dict(clients))
-    
+
+    _harden_session_files()
+
     if len(multi_clients) > 1:
-        Var.MULTI_CLIENT = True
         print("╠══════════════════════ MULTI-CLIENT ═══════════════════════╣")
         print(f"   ◎ Total Clients: {len(multi_clients)} (Including primary client)")
-        
+
         print("   ▶ Initial workload distribution:")
         for client_id, load in work_loads.items():
             print(f"   • Client {client_id}: {load} tasks")
-            
+
     else:
         print("╠═══════════════════════════════════════════════════════════╣")
         print("   ▶ No additional clients were initialized")

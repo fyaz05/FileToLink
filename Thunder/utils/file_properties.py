@@ -1,44 +1,49 @@
 # Thunder/utils/file_properties.py
 
-import asyncio
 from datetime import datetime as dt
-from typing import Any, Optional
+from typing import Any
 
-from pyrogram.client import Client
-from pyrogram.errors import FloodWait
 from pyrogram.file_id import FileId
 from pyrogram.types import Message
 
-from Thunder.server.exceptions import FileNotFound
-from Thunder.utils.logger import logger
+from Thunder.utils.media_types import canonical_media_type, ext_for
 
 
-def get_media(message: Message) -> Optional[Any]:
-    for attr in ("audio", "document", "photo", "sticker", "animation", "video", "voice", "video_note"):
+def get_media(message: Message) -> Any | None:
+    for attr in (
+        "audio",
+        "document",
+        "photo",
+        "sticker",
+        "animation",
+        "video",
+        "voice",
+        "video_note",
+    ):
         media = getattr(message, attr, None)
         if media:
             return media
     return None
 
 
-def get_uniqid(message: Message) -> Optional[str]:
+def get_uniqid(message: Message) -> str | None:
     media = get_media(message)
-    return getattr(media, 'file_unique_id', None)
+    return getattr(media, "file_unique_id", None)
 
 
 def get_hash(media_msg: Message) -> str:
     uniq_id = get_uniqid(media_msg)
-    return uniq_id[:6] if uniq_id else ''
+    return uniq_id[:6] if uniq_id else ""
 
 
 def get_fsize(message: Message) -> int:
     media = get_media(message)
-    return getattr(media, 'file_size', 0) if media else 0
+    return getattr(media, "file_size", 0) if media else 0
 
 
-def parse_fid(message: Message) -> Optional[FileId]:
+def parse_fid(message: Message) -> FileId | None:
     media = get_media(message)
-    if media and hasattr(media, 'file_id'):
+    if media and hasattr(media, "file_id"):
         try:
             return FileId.decode(media.file_id)
         except Exception:
@@ -48,52 +53,18 @@ def parse_fid(message: Message) -> Optional[FileId]:
 
 def get_fname(msg: Message) -> str:
     media = get_media(msg)
-    fname = getattr(media, 'file_name', None) if media else None
+    fname = getattr(media, "file_name", None) if media else None
 
     if not fname:
         ext = "bin"
         if media:
-            media_types = {
-                "photo": "jpg",
-                "audio": "mp3",
-                "voice": "ogg",
-                "video": "mp4",
-                "animation": "mp4",
-                "video_note": "mp4",
-                "sticker": "webp"
-            }
-
-            # Check which attribute type the message has
-            for attr, extension in media_types.items():
+            # single media-type map (H4c): attribute -> canonical key -> ext
+            for attr in ("photo", "audio", "voice", "video", "animation", "video_note", "sticker"):
                 if getattr(msg, attr, None) is not None:
-                    ext = extension
+                    ext = ext_for(canonical_media_type(attr=attr))
                     break
 
         timestamp = dt.now().strftime("%Y%m%d%H%M%S")
         fname = f"Thunder File To Link_{timestamp}.{ext}"
 
     return fname
-
-
-async def get_fids(client: Client, chat_id: int, message_id: int) -> FileId:
-    try:
-        try:
-            msg = await client.get_messages(chat_id, message_id)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            msg = await client.get_messages(chat_id, message_id)
-
-        if not msg or getattr(msg, 'empty', False):
-            raise FileNotFound("Message not found")
-
-        media = get_media(msg)
-        if media:
-            if not hasattr(media, 'file_id') or not hasattr(media, 'file_unique_id'):
-                raise FileNotFound("Media metadata incomplete")
-            return FileId.decode(media.file_id)
-
-        raise FileNotFound("No media in message")
-
-    except Exception as e:
-        logger.error(f"Error in get_fids: {e}", exc_info=True)
-        raise FileNotFound(str(e))

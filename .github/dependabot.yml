@@ -1,0 +1,16 @@
+# Dependabot cannot regenerate uv.lock: after each pip PR, run `uv lock` and
+# push the updated lockfile to the PR branch, or CI's `uv lock --check` fails.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly

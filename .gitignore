@@ -4,7 +4,15 @@
 .venv/
 .Python
 config.env
+config.env.local
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
 log.text
+log.txt
+Thunder/logs/
 .vscode/
 **/__pycache__/
 *.session

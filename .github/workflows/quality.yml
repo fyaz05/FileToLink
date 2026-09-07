@@ -1,0 +1,137 @@
+name: Quality Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+
+      # pinned: lock/export output format and gate semantics must not drift
+      # between commits (dependabot bumps this like any other dependency)
+      - name: Install uv
+        run: python -m pip install "uv==0.12.5"
+
+      # Install the hash-pinned lockfile (runtime + dev) so CI tests and audits
+      # the exact dependency graph that ships, not a fresh pip resolution.
+      - name: Install dependencies (locked, hash-pinned)
+        run: uv sync --frozen --group dev
+
+      - name: Lockfile is current with pyproject (uv.lock must never drift)
+        run: uv lock --check
+
+      - name: requirements.txt is in sync with pyproject (two sources of truth must agree)
+        run: |
+          uv run python - <<'PY'
+          import sys, tomllib
+          deps = {d.strip() for d in tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]}
+          listed = {l.strip() for l in open("requirements.txt") if l.strip() and not l.startswith("#")}
+          if deps != listed:
+              print("pyproject:", sorted(deps))
+              print("requirements.txt:", sorted(listed))
+              sys.exit("requirements.txt drifted from pyproject [project.dependencies]")
+          PY
+
+      - name: requirements.lock is in sync with uv.lock (Docker consumes this)
+        run: |
+          uv export --frozen --no-dev --hashes -o /tmp/requirements.lock.check
+          # uv embeds the export command in the header; compare content only
+          diff -u <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/requirements.lock.check)
+
+      - name: Ruff (lint + format check)
+        run: |
+          uv run ruff check Thunder/ update.py tests/
+          uv run ruff format --check Thunder/ update.py tests/
+
+      - name: Mypy (blocking)
+        run: uv run mypy Thunder update.py --ignore-missing-imports
+
+      - name: Unit tests
+        run: uv run pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35
+
+      # Audit the locked env: `-r requirements.txt` (direct pins only) never covered transitives.
+      - name: pip-audit (locked environment incl. transitives)
+        run: uv run pip-audit
+
+      - name: Bandit (medium+ severity)
+        run: uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
+
+      - name: Vulture (dead-code gate)
+        run: uv run vulture Thunder update.py --min-confidence 80
+
+      - name: Dependency count gate (leanness is permanent)
+        run: |
+          COUNT=$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt)
+          echo "Direct runtime deps: $COUNT"
+          if [ "$COUNT" -gt 8 ]; then
+            echo "::error::Direct dependency count increased beyond the agreed 8; justify in the PR or remove."
+            exit 1
+          fi
+
+  docker:
+    # smoke-build on PRs (no push, no secrets needed); publish only from
+    # main pushes so a feature-branch push can never overwrite
+    # fyaz05/thunder:latest.  Without the PR build, Dockerfile regressions
+    # merged green and only broke the post-merge publish.
+    if: github.repository == 'fyaz05/FileToLink' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          username: fyaz05
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            fyaz05/thunder:latest
+            fyaz05/thunder:${{ github.sha }}
+
+  integration:
+    # token CAS / ingest-claim atomicity is only provable against a real
+    # MongoDB, and this tier never ran in CI before
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install "uv==0.12.5"
+
+      - name: Install dependencies (locked, incl. testcontainers)
+        run: uv sync --frozen --group dev
+
+      - name: Integration tests (real MongoDB via testcontainers)
+        run: uv run pytest -m integration
+        env:
+          TEST_INTEGRATION: "1"

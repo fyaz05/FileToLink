@@ -1,10 +1,10 @@
-aiohttp
-cloudscraper
-Jinja2
-pyrofork
-pymongo
-psutil
-python-dotenv
-speedtest-cli
-tgcrypto
-uvloop==0.21.0
+# Human-readable export of pyproject [project.dependencies] (H1); CI keeps this
+# set-equal to pyproject. Docker consumes requirements.lock (hash-pinned uv.lock export).
+aiohttp==3.14.3
+pyrofork==2.3.69
+tgcrypto-pyrofork==1.2.8
+pymongo==4.18.0
+Jinja2==3.1.6
+python-dotenv==1.2.3
+psutil==7.2.2
+uvloop==0.22.1
