@@ -12,3 +12,4 @@ public issue for security reports.
   trusted deployments (owner-only regardless).
 - Session files are chmod 0600 after startup; keep them out of backups.
 - `/log` uploads are regex-redacted (bot tokens, Mongo URIs) before upload.
+- HTTP access logs carry 8-hex path pseudonyms, never tokens or hashes.

@@ -29,4 +29,4 @@ pre-commit install  # optional: same ruff hooks CI runs, before each commit
 - `make test` — unit tier
 - `make integration` — real-Mongo tier (needs Docker)
 - `make lock` — dependency drift gates
-- `make audit` — pip-audit + bandit + vulture
+- `make audit` — pip-audit + bandit + vulture + dependency-count

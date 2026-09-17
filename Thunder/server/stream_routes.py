@@ -454,6 +454,7 @@ async def canonical_media_preview(request: web.Request):
             file_name,
             src,
             mime_type=file_record.get("mime_type"),
+            size_bytes=file_record.get("file_size") or None,
         )
 
         response = web.Response(

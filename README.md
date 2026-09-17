@@ -93,7 +93,7 @@ User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct 
 - 🔐 **Token Authentication** - Secure user access with a time-limited token system.
 - 🛡️ **Admin Controls** - Full suite of commands for user and bot management.
 - 👤 **User Authentication** - Require users to join a specific channel before they can use the bot.
-- ✅ **Channel/Group Support** - Fully functional in private chats, groups, and channels.
+- ✅ **Channel/Group Support** - Fully functional in private chats, groups, and channels (channels require `CHANNEL=True` plus the bot as channel admin; channel posts are ignored under `PRIVATE_MODE` or for banned channels).
 
 #### Customization
 
@@ -128,7 +128,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 
 ### Optional Configuration
 
-Essential knobs below; everything else with safe defaults documented once in config_sample.env (single source — do not duplicate values here).
+Essential knobs are in the table above; everything else with safe defaults is documented once in config_sample.env (single source — do not duplicate values here).
 
 ## Usage and Commands
 
@@ -147,7 +147,7 @@ Essential knobs below; everything else with safe defaults documented once in con
 | Command | Description |
 | :--- | :--- |
 | `/start` | Start the bot and get a welcome message. Also used for token activation. |
-| `/link` | Generates a link. For batches, **reply to the first file** of a group and specify the count. **Example:** `/link 5` will process that file and the next four. |
+| `/link` | Generates a link. In groups the bot must be an admin. For batches, **reply to the first file** of a group and specify the count. **Example:** `/link 5` will process that file and the next four. |
 | `/dc` | Get the data center (DC) of a user or file. Use `/dc id`, or reply to a file or user. |
 | `/ping` | Check if the bot is online and measure response time. |
 | `/about` | Get information about the bot. |
@@ -469,7 +469,7 @@ Your reverse proxy is now securely streaming files behind Cloudflare!
 **Q: Why isn't my bot responding after setup?**
 A: This is usually a configuration issue. Please check the following:
 
-1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) are filled in correctly.
+1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `OWNER_ID`, `DATABASE_URL`) are filled in correctly.
 2. **Use `config.env` (plus optional `config.env.local` overrides)**: Do not edit `vars.py` or `config_sample.env`. The bot reads your settings from `config.env` and, if present, `config.env.local` (local layer wins).
 3. **Check Logs**: Review the console logs on your server or hosting platform (Koyeb, Render, Heroku) for any startup errors.
 
