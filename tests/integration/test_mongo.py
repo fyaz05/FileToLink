@@ -8,9 +8,9 @@ import pytest
 pytestmark = pytest.mark.integration
 
 docker_unavailable = True
-mongo_uri = None
 
 try:  # pragma: no cover - environment-dependent
+    # source: testcontainers>=4.15 moved the MongoDB container here (see pyproject dev group)
     from testcontainers.community.mongodb import MongoDbContainer as MongoContainer
 
     docker_unavailable = False
@@ -114,6 +114,7 @@ async def test_ensure_indexes_ttl_lifecycle(  # pragma: no cover
     await ttl_db.close()
 
 
+# slow: TTL-monitor ~60s (polls up to 90s for Mongo's ~60s TTL pass)
 async def test_file_ttl_actually_expires_rows(  # pragma: no cover
     mongo_container, monkeypatch
 ):

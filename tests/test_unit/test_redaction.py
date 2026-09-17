@@ -32,3 +32,21 @@ def test_hash_path_token_is_stable_and_short():
     b = hash_path_token("1234567890:ABCdef-_GHIjklMNOpqrsTUVwxyz1234567")
     c = hash_path_token("different")
     assert a == b and a != c and len(a) == 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text,leaked",
+    [
+        # API_HASH_PATTERN: api_hash[:=] + 32 hex (contextual so file hashes still log)
+        ("config api_hash = '0123456789abcdef0123456789abcdef' done", "0123456789abcdef"),
+        # SESSION_STRING_PATTERN: session_string[:=] + 40+ base64url chars
+        ("login session_string='AbC123_-xYzAbC123_-xYzAbC123_-xYzAbC123_-xYz' ok", "AbC123_-xYz"),
+        # ACTIVATION_TOKEN_PATTERN: ?start= + 43 urlsafe chars
+        ("open https://t.me/MyBot?start=" + "a" * 43 + " now", "a" * 43),
+    ],
+)
+def test_secret_patterns_redacted(text, leaked):
+    out = redact_secrets(text)
+    assert leaked not in out
+    assert "***REDACTED***" in out

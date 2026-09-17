@@ -23,6 +23,7 @@ logging.logProcesses = False
 
 BOT_TOKEN_PATTERN = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35,}")
 MONGO_URI_PATTERN = re.compile(r"mongodb(\+srv)?://[^:]+:[^@]+@")
+# intentionally broad -- scrubber-only, do not reuse for user-facing text.
 SESSION_TOKEN_PATTERN = re.compile(r"(?i)(authorization:\s*)(Bearer\s+)?[A-Za-z0-9._\-]{20,}")
 # API_HASH assignments (32-hex value; contextual so file hashes still log)
 API_HASH_PATTERN = re.compile(r"(?i)(api_hash['\"]?\s*[:=]\s*['\"]?)([0-9a-f]{32})")

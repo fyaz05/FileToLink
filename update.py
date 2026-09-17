@@ -1,21 +1,7 @@
-"""Boot-time best-effort self-update (plan H9).
+"""Boot-time best-effort self-update.
 
-Replaces the historical ``shell=True`` command chain that interpolated
-``UPSTREAM_REPO``/``UPSTREAM_BRANCH`` env vars into a shell string executed
-at every container boot (live injection vector), and that ran
-``rm -rf .git``, ``git reset --hard`` and mutated **global** git config --
-a failed update could leave a half-wiped tree that no longer boots.
-
-New behaviour:
-
-* argv-list subprocess, ``shell=False``; the remote URL from the
-  environment is passed as an argv element, never through a shell;
-* non-destructive: no ``rm -rf .git``, no ``reset --hard``, no global
-  config mutation -- ``pull --ff-only`` keeps local history intact;
-* strictly best-effort: any failure logs and leaves the existing tree
-  running the old code;
-* no-ops cleanly when ``git`` is missing or the tree is not a git repo
-  (some PaaS images).
+Non-destructive ``pull --ff-only`` via argv-list subprocess; any failure
+logs and keeps running the old code.
 """
 
 import os
@@ -27,21 +13,27 @@ from dotenv import load_dotenv
 
 from Thunder.utils.logger import logger
 
-load_dotenv("config.env", override=True)
+# Replaces the historical ``shell=True`` chain interpolating
+# UPSTREAM_REPO/UPSTREAM_BRANCH into a shell string at every boot (live
+# injection vector) that ran ``rm -rf .git`` / ``reset --hard`` and mutated
+# global git config -- a failed update could leave a half-wiped tree.
+# Now: argv-list (no shell), no destructive git ops, no global config
+# mutation; no-ops cleanly when git is missing or this is not a git repo.
+
+# Real environment wins over the file (same precedence as Thunder/vars.py).
+load_dotenv("config.env", override=False)
 
 UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "")
 UPSTREAM_BRANCH = os.getenv("UPSTREAM_BRANCH", "main")
 
 # config.env lives beside the app and must survive the pull
-_CONFIG_BACKUP = "../config.env.tmp"
+_CONFIG_BACKUP = "config.env.bak"
 
 
 def _recover_config_backup() -> None:
     """A crash between _backup_config and _restore_config would otherwise
     leave the app permanently without config.env (next boot hard-fails).
     Restore any orphaned backup before doing anything else."""
-    if not os.path.exists(_CONFIG_BACKUP) and not os.path.exists("config.env"):
-        return
     if os.path.exists(_CONFIG_BACKUP) and not os.path.exists("config.env"):
         try:
             os.replace(_CONFIG_BACKUP, "config.env")
@@ -90,16 +82,17 @@ def main() -> None:
         return
 
     # defense-in-depth: the argv/dash guards do not stop the git-remote-ext family
-    # (ext::sh -c ...) -- allowlist ordinary transport schemes only.
+    # (ext::sh -c ...) -- allowlist ordinary transport schemes only. ssh:// is
+    # excluded on purpose: the image ships no keys, so it would fail noisily
+    # on every boot; use https with a token URL instead.
     if "://" in UPSTREAM_REPO and UPSTREAM_REPO.split("://", 1)[0] not in {
         "https",
         "http",
         "git",
-        "ssh",
     }:
-        logger.error("UPSTREAM_REPO uses a unsupported scheme; skipping self-update.")
+        logger.error("UPSTREAM_REPO uses an unsupported scheme; skipping self-update.")
         return
-    if UPSTREAM_REPO.startswith(("ext::", "ssh://;")):
+    if UPSTREAM_REPO.startswith("ext::"):
         logger.error("UPSTREAM_REPO uses a forbidden scheme; skipping self-update.")
         return
 
@@ -107,8 +100,7 @@ def main() -> None:
     try:
         # git >= 2.27 warns without the refspec; be explicit.
         result = subprocess.run(
-            ["git", "-C", os.getcwd(), "pull", "--ff-only", UPSTREAM_REPO, UPSTREAM_BRANCH],
-            shell=False,
+            ["git", "pull", "--ff-only", UPSTREAM_REPO, UPSTREAM_BRANCH],
             capture_output=True,
             text=True,
             timeout=120,

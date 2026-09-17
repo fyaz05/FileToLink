@@ -14,11 +14,7 @@ from Thunder.vars import Var
 
 
 def _harden_session_files() -> None:
-    """L5: session files contain bearer-equivalent credentials -> 0600.
-
-    Best-effort: pyrogram (re)creates session files lazily, so this runs
-    after startup and tolerates absent files.
-    """
+    """Session files hold credentials; chmod 0600 best-effort."""
     for path in glob.glob("*.session"):
         try:
             os.chmod(path, 0o600)
@@ -62,8 +58,7 @@ async def initialize_clients():
                 max_concurrent_transmissions=1000,
                 sleep_threshold=Var.SLEEP_THRESHOLD,
             )
-            # session bootstrap (connect + auth) legitimately outlives the
-            # 30s lightweight-RPC budget
+            # session bootstrap may exceed the 30s RPC budget.
             await tg_call(client.start, timeout=90.0)
             work_loads[client_id] = 0
             print(f"   ◎ Client ID {client_id} started")

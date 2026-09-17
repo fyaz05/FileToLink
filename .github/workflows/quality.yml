@@ -39,7 +39,7 @@ jobs:
 
       - name: requirements.txt is in sync with pyproject (two sources of truth must agree)
         run: |
-          uv run python - <<'PY'
+          uv run --locked python - <<'PY'
           import sys, tomllib
           deps = {d.strip() for d in tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]}
           listed = {l.strip() for l in open("requirements.txt") if l.strip() and not l.startswith("#")}
@@ -70,7 +70,7 @@ jobs:
       - name: pip-audit (locked environment incl. transitives)
         run: uv run pip-audit
 
-      - name: Bandit (medium+ severity)
+      - name: Bandit (high-only severity)
         run: uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
 
       - name: Vulture (dead-code gate)
@@ -116,6 +116,7 @@ jobs:
   integration:
     # token CAS / ingest-claim atomicity is only provable against a real
     # MongoDB, and this tier never ran in CI before
+    needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

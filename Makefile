@@ -9,6 +9,7 @@ format:
 
 lint:
 	uv run ruff check Thunder/ update.py tests/
+	uv run ruff format --check Thunder/ update.py tests/
 	uv run mypy Thunder update.py --ignore-missing-imports
 
 test:
@@ -23,6 +24,7 @@ coverage:
 
 audit:
 	uv run pip-audit
+	# -ll = high severity only
 	uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
 	uv run vulture Thunder update.py --min-confidence 80
 	@count=$$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt); \
@@ -35,14 +37,14 @@ audit:
 # same drift gates CI enforces; run after touching pyproject/uv.lock
 lock:
 	uv lock --check
-	uv run python -c "import sys, tomllib; deps={d.strip() for d in tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']}; listed={l.strip() for l in open('requirements.txt') if l.strip() and not l.startswith('#')}; sys.exit('requirements.txt drifted from pyproject [project.dependencies]') if deps != listed else None"
+	uv run --locked python -c "import sys, tomllib; deps={d.strip() for d in tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']}; listed={l.strip() for l in open('requirements.txt') if l.strip() and not l.startswith('#')}; sys.exit('requirements.txt drifted from pyproject [project.dependencies]') if deps != listed else None"
 	uv export --frozen --no-dev --hashes -o /tmp/requirements.lock.check
 	grep -v '^#' requirements.lock > /tmp/requirements.lock.committed
 	grep -v '^#' /tmp/requirements.lock.check > /tmp/requirements.lock.exported
 	diff -u /tmp/requirements.lock.committed /tmp/requirements.lock.exported
 
 run:
-	uv run python3 -m Thunder
+	uv run python -m Thunder
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache htmlcov build dist

@@ -101,8 +101,13 @@ class BitlyPlugin(ShortenerPlugin):
             if resp.status == 200:
                 data = await resp.json()
                 short = data.get("link")
-                # same anti-substitution guard as every other HTTP plugin (M5)
-                if short and short != url and self._validate_short_url(short, domain):
+                # Bitly answers on its own hosts (bit.ly / bitly.com), never on
+                # the configured site: validate against the provider hosts (M5)
+                if (
+                    short
+                    and short != url
+                    and any(self._validate_short_url(short, d) for d in ("bit.ly", "bitly.com"))
+                ):
                     return short
         return url
 
@@ -156,7 +161,7 @@ class GenericShortenerPlugin(ShortenerPlugin):
     ) -> str:
         async with session.get(
             f"https://{domain}/api",
-            params={"api": api_key, "url": url},
+            params={"url": url},
             headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
             allow_redirects=False,
         ) as resp:
@@ -213,7 +218,7 @@ class ShortenerSystem:
                 plugin_class = self._get_plugin_class(site)
                 self.plugin = plugin_class()
                 self.ready = True
-                logger.info(f"Shortener ready (plugin={type(plugin_class).__name__}, site={site})")
+                logger.info(f"Shortener ready (plugin={plugin_class.__name__}, site={site})")
                 return True
             except Exception as e:
                 logger.error(f"Failed to initialize ShortenerSystem: {e}", exc_info=True)

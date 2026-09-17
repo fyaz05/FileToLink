@@ -26,8 +26,17 @@ def test_humanbytes(size, expected):
 
 @pytest.mark.unit
 def test_humanbytes_decimal_places():
+    # quirk: round() keeps the float repr, so decimal_places=0 still renders "2.0"
     assert humanbytes(1536, decimal_places=0) == "2.0 KB"
     assert humanbytes(1536, decimal_places=3) == "1.5 KB"
+
+
+@pytest.mark.unit
+def test_humanbytes_none_is_zero_bytes():
+    # characterization: None is falsy, so the `if not size` guard maps it to
+    # "0 B" (not "N/A" -- only truthy garbage reaches the except branch)
+    assert humanbytes(None) == "0 B"
+    assert humanbytes("garbage") == "N/A"
 
 
 @pytest.mark.unit

@@ -18,9 +18,7 @@ from Thunder.utils.logger import logger
 def _load_env_layers() -> None:
     """Load ``config.env`` then ``config.env.local`` with real precedence.
 
-    Precedence: real environment > config.env.local > config.env (existing
-    os.environ entries still win).  ``load_dotenv(override=False)`` silently
-    inverted the documented "local layer wins".
+    Precedence: real environment > config.env.local > config.env.
 
     ``THUNDER_SKIP_CONFIG_FILES=1`` disables both files so test tiers stay
     hermetic against a developer's own config.env.
@@ -46,22 +44,25 @@ def str_to_bool(val: str) -> bool:
     return str(val).strip().lower() in ("true", "1", "t", "y", "yes")
 
 
+_config_errors: list[str] = []
+_config_warnings: list[str] = []
+
+
 def str_to_int_set(val: str) -> set[int]:
     if not val:
         return set()
     result: set[int] = set()
+    bad: list[str] = []
     for x in val.split():
         try:
             result.add(int(x))
         except (TypeError, ValueError):
-            # collect-all-errors (M6): junk tokens are surfaced, not skipped
-            _config_errors.append(f"{val!r} contains a non-integer entry: {x!r}")
+            # collect-all-errors (M6): junk tokens surface as one error, not N
+            bad.append(x)
             continue
+    if bad:
+        _config_errors.append(f"BANNED_CHANNELS={val!r} has non-integer entries: {bad!r}")
     return result
-
-
-_config_errors: list[str] = []
-_config_warnings: list[str] = []
 
 
 def _get_int(
@@ -78,6 +79,17 @@ def _get_int(
     if max_val is not None and value > max_val:
         _config_errors.append(f"{name}={value} must be <= {max_val}")
     return value
+
+
+def _get_optional_int(name: str) -> int | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        _config_errors.append(f"{name}={raw!r} must be an integer")
+        return None
 
 
 def _get_float(name: str, default: str, *, min_val: float | None = None) -> float:
@@ -102,7 +114,6 @@ class Var:
     API_ID: int = _get_int("API_ID", "0", min_val=1)
     API_HASH: str = os.getenv("API_HASH", "")
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-    _require(API_ID, "API_ID", "numeric app id from my.telegram.org")
     _require(API_HASH, "API_HASH", "app hash from my.telegram.org")
     _require(BOT_TOKEN, "BOT_TOKEN", "bot token from @BotFather")
 
@@ -123,7 +134,6 @@ class Var:
 
     # H7: missing OWNER_ID is fatal -- every owner check would match nobody.
     OWNER_ID: int = _get_int("OWNER_ID", "0", min_val=1)
-    _require(OWNER_ID, "OWNER_ID", "your Telegram user id (get from @userinfobot)")
 
     FQDN: str = os.getenv("FQDN", "") or BIND_ADDRESS
     if os.getenv("FQDN", "") == "":
@@ -146,13 +156,7 @@ class Var:
     CHANNEL: bool = str_to_bool(os.getenv("CHANNEL", "False"))
     BANNED_CHANNELS: set[int] = str_to_int_set(os.getenv("BANNED_CHANNELS", ""))
 
-    FORCE_CHANNEL_ID: int | None = None
-    force_channel_env = os.getenv("FORCE_CHANNEL_ID", "").strip()
-    if force_channel_env:
-        try:
-            FORCE_CHANNEL_ID = int(force_channel_env)
-        except ValueError:
-            _config_errors.append(f"FORCE_CHANNEL_ID={force_channel_env!r} must be an integer")
+    FORCE_CHANNEL_ID: int | None = _get_optional_int("FORCE_CHANNEL_ID")
 
     TOKEN_ENABLED: bool = str_to_bool(os.getenv("TOKEN_ENABLED", "False"))
     TOKEN_TTL_HOURS: int = _get_int("TOKEN_TTL_HOURS", "24", min_val=1)
@@ -234,4 +238,4 @@ if _config_warnings:
         logger.warning(f"  ⚠ {warn}")
 
 mode_note = "PRIVATE" if Var.PRIVATE_MODE else "public"
-logger.info(f"Gate mode: {mode_note}; legacy links: {'on' if Var.ENABLE_LEGACY_LINKS else 'off'}")
+logger.debug(f"Gate mode: {mode_note}; legacy links: {'on' if Var.ENABLE_LEGACY_LINKS else 'off'}")

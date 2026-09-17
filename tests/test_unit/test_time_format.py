@@ -26,3 +26,8 @@ def test_get_readable_time(seconds, expected):
 def test_non_int_input_is_handled():
     # float truncates; garbage returns "N/A" via the guard
     assert get_readable_time(90.9) == "1m 30s"
+
+
+@pytest.mark.unit
+def test_none_returns_na():
+    assert get_readable_time(None) == "N/A"

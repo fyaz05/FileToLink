@@ -73,3 +73,38 @@ async def test_cas_loss_to_expiry_is_invalid(monkeypatch):
     monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=col))
     status, _hours = await consume("t", 7)
     assert status == "invalid"
+
+
+@pytest.mark.unit
+async def test_token_for_other_user_is_wrong_user(monkeypatch):
+    doc = {
+        "token": "t",
+        "user_id": 7,
+        "activated": False,
+        "expires_at": datetime.now(UTC) + timedelta(hours=1),
+    }
+    monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=_FakeTokenCol(doc)))
+    status, hours = await consume("t", 999)
+    assert (status, hours) == ("wrong_user", 0.0)
+
+
+@pytest.mark.unit
+async def test_ok_path_activates_and_invalidates_flags(monkeypatch):
+    class _FakeOkCol(_FakeTokenCol):
+        async def find_one_and_update(self, *_args, **_kwargs):
+            return {"activated": True}
+
+    doc = {
+        "token": "t",
+        "user_id": 7,
+        "activated": False,
+        "expires_at": datetime.now(UTC) + timedelta(hours=1),
+    }
+    invalidated: list = []
+    monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=_FakeOkCol(doc)))
+    monkeypatch.setattr(tokens_module.Var, "TOKEN_TTL_HOURS", 7)
+    monkeypatch.setattr(tokens_module.flags, "invalidate", lambda *keys: invalidated.append(keys))
+    status, hours = await consume("t", 7)
+    assert status == "ok"
+    assert hours == 7.0  # round(ttl_hours, 1)
+    assert (("allowed", 7), ("token_ok", 7)) in invalidated

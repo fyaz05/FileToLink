@@ -10,8 +10,10 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-log.text
 log.txt
+config.env.tmp
+config.env.bak
+*.tmp
 Thunder/logs/
 .vscode/
 **/__pycache__/

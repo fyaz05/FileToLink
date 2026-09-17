@@ -80,7 +80,7 @@ Thunder/
 |---|---|---|
 | `/start` | user | Start the bot and get a welcome message |
 | `/help` | user | Show help and usage instructions |
-| `/link` | group | Generate a direct link for a file or batch |
+| `/link` | group | (Group) Generate a direct link for a file or batch |
 | `/dc` | user | Retrieve the data center (DC) information of a user or file |
 | `/ping` | user | Check the bot's status and response time |
 | `/about` | user | Get information about the bot |
@@ -133,7 +133,7 @@ from Thunder.vars import Var                      # All env config
 
 ## Access gates (M12 preflight chain — documented ordering)
 
-`banned → private-mode → token-activation → force-sub → shortener-status`
+`banned → private-mode → token (+ force-sub where applicable; shortener-status is routing hint, not gate)`
 
 - Owner bypasses everything; authorized users bypass all but the ban check.
 - `/start` runs only `banned + private-mode` so the activation flow stays reachable.

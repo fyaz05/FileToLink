@@ -172,6 +172,8 @@ class RateLimiter:
         try:
             return await allowed(user_id)
         except Exception as e:
+            # live: allowed() raises on DB failure (raise_on_error=True default),
+            # so an outage lands here and is treated as unauthorized (fail-closed)
             logger.error(f"Database error checking authorized user {user_id}: {e}")
             return False
 
@@ -384,7 +386,8 @@ class RateLimiter:
                 file_times.append(processing_time)
 
         except FloodWait as e:
-            # H6b: requeue with an attempt counter instead of stalling a worker with a sleep.
+            # allowed: pool path -- tg_call already retried inside the queued
+            # handler, so requeue with an attempt counter instead of stalling a worker.
             attempts = request_data.get("attempts", 0) + 1
             request_data["attempts"] = attempts
             if attempts > MAX_REQUEST_ATTEMPTS:
@@ -649,6 +652,8 @@ async def _send_notification(
             logger.debug("Skipping notification for channel message (no from_user)")
             return None
     except (FloodWait, RPCError) as e:
+        # allowed: catch-and-log after send_safe/tg_call already retried --
+        # a notification failure must never fail the queued request itself.
         who: int | str = message.from_user.id if message.from_user else "channel"
         logger.warning(f"Error sending notification to user {who}: {e}")
     except Exception as e:

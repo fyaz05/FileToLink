@@ -85,12 +85,11 @@ from Thunder.vars import Var
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
 # H10: /log tail cap
-_LOG_TAIL_BYTES = 45 * 1024 * 1024
+_LOG_TAIL_BYTES = 5 * 1024 * 1024
 
 
 def _invalidate_gates() -> None:
-    """H7: admin mutators flush the flag cache so changes apply within one
-    message instead of one TTL."""
+    """H7: flush flag cache so admin changes apply immediately."""
     flags.clear()
 
 
@@ -123,7 +122,7 @@ async def broadcast_handler(client: Client, message: Message):
         elif arg == "regular":
             mode = "regular"
         else:
-            safe_arg = arg.replace("`", "'")
+            safe_arg = html.escape(arg)
             await reply(
                 message,
                 text=f"❌ **Invalid argument:** `{safe_arg}`\n\n{MSG_BROADCAST_USAGE}",
@@ -187,7 +186,7 @@ async def show_stats(client: Client, message: Message):
 
         disk = await asyncio.to_thread(psutil.disk_usage, ".")
         total_disk, used_disk, free_disk = disk.total, disk.used, disk.free
-        # H8: sync psutil stays off the event loop
+        # H8: psutil off the event loop.
         disk_percent = disk.percent
 
         limiter_line = (
@@ -229,8 +228,7 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
-    # M13 teardown ordering: execv skips every finally block, so drain the
-    # touch buffer here or the restart loses pending view-count increments
+    # M13: drain touch buffer here; execv skips finally blocks.
     from Thunder.utils.canonical_files import drain_background_touch_tasks
 
     await drain_background_touch_tasks()
@@ -247,9 +245,7 @@ async def send_logs(client: Client, message: Message):
         return
 
     try:
-        # H10: never upload raw logs -- capped tail through the shared redaction
-        # regexes so bot tokens / Mongo URIs cannot leak.
-        # H8: file IO + regex over megabytes off the event loop.
+        # H10: capped redacted tail; IO off the event loop.
         def _read_redacted_tail() -> str:
             with open(LOG_FILE, "rb") as f:
                 f.seek(0, os.SEEK_END)
@@ -261,7 +257,7 @@ async def send_logs(client: Client, message: Message):
 
         doc = BytesIO(payload.encode("utf-8"))
         doc.name = "bot_redacted.txt"
-        await message.reply_document(doc, caption=MSG_LOG_FILE_CAPTION)
+        await tg_call(message.reply_document, doc, caption=MSG_LOG_FILE_CAPTION, retries=1)
     except Exception as e:
         logger.error(f"Error sending log file: {e}", exc_info=True)
         await reply(message, text=MSG_ERROR_GENERIC)
@@ -323,14 +319,18 @@ async def list_authorized_command(client: Client, message: Message):
     if not users:
         return await reply(message, text=MSG_NO_AUTH_USERS)
 
-    # M7: user-controlled display names get html.escape()d; one batched
-    # get_users RPC avoids N+1 FloodWaits.
+    # M7: escape display names; batched get_users avoids N+1 FloodWaits.
     id_to_user: dict[int, Any] = {}
     try:
-        tg_users = await tg_call(client.get_users, [u["user_id"] for u in users], retries=1)
-        if isinstance(tg_users, User):
-            tg_users = [tg_users]
-        id_to_user = {u.id: u for u in (tg_users or []) if u}
+        all_ids = [u["user_id"] for u in users]
+        tg_users_all: list = []
+        for i in range(0, len(all_ids), 200):
+            chunk = all_ids[i : i + 200]
+            tg_users = await tg_call(client.get_users, chunk, retries=1)
+            if isinstance(tg_users, User):
+                tg_users = [tg_users]
+            tg_users_all.extend(tg_users or [])
+        id_to_user = {u.id: u for u in tg_users_all if u}
     except Exception:
         logger.error("Failed to batch-fetch tg_users for /listauth", exc_info=True)
 
@@ -369,8 +369,8 @@ async def ban_command(client: Client, message: Message):
 
     try:
         target_id = int(message.command[1])
-        # M7: user-controlled reason; ban messages are HTML
-        reason = html.escape(" ".join(message.command[2:])) or MSG_ADMIN_NO_BAN_REASON
+        # M7: store raw reason; escape at HTML render.
+        reason = " ".join(message.command[2:]) or MSG_ADMIN_NO_BAN_REASON
         banned_by_id = message.from_user.id if message.from_user else None
 
         if target_id == Var.OWNER_ID:
@@ -381,7 +381,7 @@ async def ban_command(client: Client, message: Message):
             _invalidate_gates()
             text = MSG_CHANNEL_BANNED.format(channel_id=target_id)
             if reason != MSG_ADMIN_NO_BAN_REASON:
-                text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=reason)
+                text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=html.escape(reason))
             await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:
                 await tg_call(client.leave_chat, target_id, retries=1)
@@ -392,7 +392,7 @@ async def ban_command(client: Client, message: Message):
             _invalidate_gates()
             text = MSG_ADMIN_USER_BANNED.format(user_id=target_id)
             if reason != MSG_ADMIN_NO_BAN_REASON:
-                text += MSG_BAN_REASON_SUFFIX.format(reason=reason)
+                text += MSG_BAN_REASON_SUFFIX.format(reason=html.escape(reason))
             await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:
                 await send_safe(client, target_id, text=MSG_USER_BANNED_NOTIFICATION)
@@ -441,7 +441,7 @@ async def unban_command(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
-    # L10: env kill-switch -- /shell is opt-in.
+    # L10: /shell is opt-in.
     if not Var.ENABLE_SHELL:
         return await reply(message, text=MSG_SHELL_DISABLED, parse_mode=ParseMode.HTML)
 
@@ -449,7 +449,7 @@ async def run_shell_command(client: Client, message: Message):
         return await reply(message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
 
     command = " ".join(message.command[1:])
-    # L10: command log -- who ran what, when.
+    # L10: log who ran what.
     logger.info(
         f"/shell invoked by {message.from_user.id if message.from_user else 'unknown'}: {command}"
     )
@@ -493,8 +493,11 @@ async def run_shell_command(client: Client, message: Message):
         if len(output) > 4096:
             file = BytesIO(output.encode())
             file.name = "shell_output.txt"
-            await message.reply_document(
-                file, caption=MSG_SHELL_OUTPUT_CAPTION.format(command=html.escape(command))
+            await tg_call(
+                message.reply_document,
+                file,
+                caption=MSG_SHELL_OUTPUT_CAPTION.format(command=html.escape(command)),
+                retries=1,
             )
         else:
             await reply(message, text=output, parse_mode=ParseMode.HTML)

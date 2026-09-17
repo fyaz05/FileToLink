@@ -82,9 +82,11 @@ class FlagCache:
     def invalidate(self, *keys: Hashable) -> None:
         for key in keys:
             self._data.pop(key, None)
+            self._inflight.pop(key, None)
 
     def clear(self) -> None:
         self._data.clear()
+        self._inflight.clear()
 
     def sweep(self) -> int:
         now = time.monotonic()

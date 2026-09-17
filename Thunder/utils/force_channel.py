@@ -21,19 +21,21 @@ from Thunder.vars import Var
 _force_link = None
 _force_title = None
 _force_resolved = False
+_resolved_at = 0.0
+_RESOLVED_TTL_SECONDS = 300.0
 _negative_until = 0.0
 _NEGATIVE_TTL_SECONDS = 60.0
 
 
 async def get_force_info(bot: Client):
-    global _force_link, _force_title, _force_resolved, _negative_until
+    global _force_link, _force_title, _force_resolved, _resolved_at, _negative_until
 
     if not Var.FORCE_CHANNEL_ID:
         return None, None
 
-    # resolved-once: a numeric channel's invite link/title does not change
-    # between messages
-    if _force_resolved:
+    # positive cache with a TTL: invite links/titles can rotate, so a
+    # resolved-once entry would serve stale join buttons forever
+    if _force_resolved and time.monotonic() - _resolved_at <= _RESOLVED_TTL_SECONDS:
         return _force_link, _force_title
     if time.monotonic() < _negative_until:
         return None, None
@@ -49,6 +51,7 @@ async def get_force_info(bot: Client):
             _force_title = chat.title or "Channel"
         # cache even the no-link outcome, or it re-resolves per message
         _force_resolved = True
+        _resolved_at = time.monotonic()
         return _force_link, _force_title
     except Exception as e:
         # transient RPC failure: short negative cache so the gate path does
@@ -63,7 +66,11 @@ async def force_channel_check(client: Client, message: Message):
         return True
 
     if message.from_user is None:
-        return True
+        # fail-closed: channel posts / anonymous admins have no verifiable
+        # user id, so membership cannot be checked -- deny like the token
+        # gate's MSG_ERROR_ANONYMOUS_SENDER path (callers deny on False)
+        logger.debug("Denied unattributable sender (force-sub, no from_user).")
+        return False
 
     try:
         member = await tg_call(

@@ -11,7 +11,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, 
 from Thunder.bot import StreamBot
 from Thunder.utils.bot_utils import gen_dc_txt, get_user, log_newusr, reply_user_err
 from Thunder.utils.commands import build_help_text
-from Thunder.utils.decorators import GATES_INFO, GATES_START, preflight
+from Thunder.utils.decorators import GATES_START, preflight
 from Thunder.utils.file_properties import get_fname, get_fsize, parse_fid
 from Thunder.utils.force_channel import get_force_info
 from Thunder.utils.human_readable import humanbytes
@@ -51,14 +51,9 @@ from Thunder.utils.safe_call import edit_safe, reply_safe
 from Thunder.utils.tokens import consume
 from Thunder.vars import Var
 
-# M7: surfaces interpolating user-controlled values are HTML; every
-# interpolation is html.escape()d.
-
 
 @StreamBot.on_message(filters.command("start") & filters.private)
 async def start_command(bot: Client, msg: Message):
-    # M12: banned + private-mode gates only, so token-gated users can
-    # still reach the activation flow.
     if await preflight(bot, msg, gates=GATES_START) is None:
         return
     user = msg.from_user
@@ -68,10 +63,7 @@ async def start_command(bot: Client, msg: Message):
     if len(msg.command) == 2:
         payload = msg.command[1]
 
-        if payload == "start":
-            pass
-        else:
-            # M8: atomic activation -- exactly one concurrent /start wins.
+        if payload != "start" and user is not None and Var.TOKEN_ENABLED:
             status, hours = await consume(payload, user.id)
             if status == "wrong_user":
                 return await reply_safe(
@@ -79,15 +71,21 @@ async def start_command(bot: Client, msg: Message):
                     text=MSG_TOKEN_FAILED.format(
                         reason="This activation link is not for your account."
                     ),
+                    parse_mode=ParseMode.HTML,
                 )
             if status == "already":
                 return await reply_safe(
                     msg,
                     text=MSG_TOKEN_FAILED.format(reason="Token has already been activated."),
+                    parse_mode=ParseMode.HTML,
                 )
             if status == "ok":
-                return await reply_safe(msg, text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours))
-            return await reply_safe(msg, text=MSG_TOKEN_INVALID)
+                return await reply_safe(
+                    msg,
+                    text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours),
+                    parse_mode=ParseMode.HTML,
+                )
+            return await reply_safe(msg, text=MSG_TOKEN_INVALID, parse_mode=ParseMode.HTML)
 
     txt = MSG_WELCOME.format(
         user_name=html.escape(user.first_name or "Unknown") if user else "Unknown"
@@ -112,20 +110,14 @@ async def start_command(bot: Client, msg: Message):
             [InlineKeyboardButton(MSG_BUTTON_JOIN_CHANNEL.format(channel_title=title), url=link)]
         )
 
-    await _send_html(msg, txt, btns)
-
-
-async def _send_html(msg: Message, txt: str, btns):
-    from pyrogram import enums
-
     await reply_safe(
-        msg, text=txt, parse_mode=enums.ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns)
+        msg, text=txt, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns)
     )
 
 
 @StreamBot.on_message(filters.command("help") & filters.private)
 async def help_command(bot: Client, msg: Message):
-    if await preflight(bot, msg, gates=GATES_INFO) is None:
+    if await preflight(bot, msg, gates=GATES_START) is None:
         return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
@@ -140,12 +132,14 @@ async def help_command(bot: Client, msg: Message):
         )
 
     btns.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    await _send_html(msg, txt, btns)
+    await reply_safe(
+        msg, text=txt, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns)
+    )
 
 
 @StreamBot.on_message(filters.command("about") & filters.private)
 async def about_command(bot: Client, msg: Message):
-    if await preflight(bot, msg, gates=GATES_INFO) is None:
+    if await preflight(bot, msg, gates=GATES_START) is None:
         return
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
@@ -158,7 +152,9 @@ async def about_command(bot: Client, msg: Message):
         ],
     ]
 
-    await _send_html(msg, MSG_ABOUT, btns)
+    await reply_safe(
+        msg, text=MSG_ABOUT, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns)
+    )
 
 
 async def send_user_dc(msg: Message, user: User):
@@ -171,8 +167,6 @@ async def send_user_dc(msg: Message, user: User):
     await reply_safe(
         msg,
         text=txt,
-        # M7: pin HTML parse mode -- pyrofork's markdown pre-pass must not
-        # reinterpret user data
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
     )
@@ -203,7 +197,6 @@ async def send_file_dc(msg: Message, file_msg: Message):
             dc_id = fid.dc_id
 
         txt = MSG_DC_FILE_INFO.format(
-            # file_name is attacker-controlled; template is HTML (M7)
             file_name=html.escape(fname, quote=False),
             file_size=fsize,
             file_type=type_display,
@@ -214,7 +207,7 @@ async def send_file_dc(msg: Message, file_msg: Message):
         await reply_safe(
             msg,
             text=txt,
-            parse_mode=ParseMode.HTML,  # template is HTML (M7); skip md pre-pass
+            parse_mode=ParseMode.HTML,
             reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
         )
 
@@ -225,8 +218,6 @@ async def send_file_dc(msg: Message, file_msg: Message):
 
 @StreamBot.on_message(filters.command("dc"))
 async def dc_command(bot: Client, msg: Message):
-    # Gate chain: banned -> private-mode (GATES_START), then force-sub; token gate
-    # intentionally skipped -- /dc is informational, must stay reachable for token users.
     if await preflight(bot, msg, gates=GATES_START) is None:
         return
     from Thunder.utils.decorators import force_sub_gate

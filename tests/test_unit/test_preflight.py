@@ -7,7 +7,9 @@ from Thunder.utils.decorators import (
     GATES_STANDARD,
     GATES_START,
     PREFLIGHT_GATES,
+    check_private_mode,
     preflight,
+    require_token,
 )
 from Thunder.vars import Var
 
@@ -59,4 +61,19 @@ async def test_preflight_returns_shortener_status_for_owner(monkeypatch):
     # turned the assertion below into a tautology
     monkeypatch.setattr(Var, "SHORTEN_MEDIA_LINKS", False)
     result = await preflight(object(), _Msg(), gates=GATES_INFO)
-    assert result is not None
+    assert result is False
+
+
+@pytest.mark.unit
+async def test_anonymous_sender_denied_by_private_mode_and_token_gates(monkeypatch):
+    """Messages with no attributable sender (channel posts, anonymous admins)
+    are DENIED fail-closed -- never bypass."""
+
+    class _Msg:
+        from_user = None
+
+    monkeypatch.setattr(Var, "PRIVATE_MODE", True)
+    assert await check_private_mode(object(), _Msg()) is False
+
+    monkeypatch.setattr(Var, "TOKEN_ENABLED", True)
+    assert await require_token(object(), _Msg()) is False

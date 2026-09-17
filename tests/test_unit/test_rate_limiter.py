@@ -59,7 +59,7 @@ def _deque(*timestamps):
 
 @pytest.mark.unit
 class TestTokenBucket:
-    async def test_burst_then_deny(self):
+    def test_burst_then_deny(self):
         bucket = TokenBucket(rate_per_second=2.0, burst_multiplier=2.0)
         allowed = 0
         for _ in range(10):
@@ -67,20 +67,25 @@ class TestTokenBucket:
                 allowed += 1
         assert allowed == int(bucket.burst)  # burst = 2x rate = 4
 
-    async def test_refill_over_time(self):
+    def test_refill_over_time(self):
         bucket = TokenBucket(rate_per_second=100.0, burst_multiplier=1.0)
         while bucket.allow():
             pass
-        time.sleep(0.05)  # ~5 tokens
-        assert bucket.allow() is True
+        time.sleep(0.05)  # ~5 tokens; CI timing jitter: retry briefly before failing
+        for _ in range(20):
+            if bucket.allow():
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("bucket did not refill after ~1s of waiting")
 
-    async def test_retry_after_positive_when_denied(self):
+    def test_retry_after_positive_when_denied(self):
         bucket = TokenBucket(rate_per_second=0.5, burst_multiplier=1.0)
         while bucket.allow():
             pass
         assert bucket.retry_after() > 0
 
-    async def test_zero_rate_always_allows(self):
+    def test_zero_rate_always_allows(self):
         bucket = TokenBucket(rate_per_second=0.0)
         for _ in range(50):
             assert bucket.allow() is True

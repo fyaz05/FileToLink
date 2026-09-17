@@ -1,12 +1,6 @@
 # Thunder/bot/registry.py
 
-"""Single command registry (plan M1).
-
-One table drives all three surfaces: the Telegram command menu (owner-only
-commands hidden, descriptions auto-truncated to Telegram's 256-char limit),
-the /help command section, and the command table in AGENTS.md (a unit test
-fails if AGENTS.md drifts from this registry).
-"""
+"""Single command registry: drives menu, /help, and AGENTS.md (tested)."""
 
 from typing import NamedTuple
 
@@ -34,7 +28,7 @@ COMMANDS: list[Command] = [
     Command("broadcast", "Send a message to all users", owner_only=True),
     Command("ban", "Ban a user", owner_only=True),
     Command("unban", "Unban a user", owner_only=True),
-    Command("log", "Send bot logs", owner_only=True),
+    Command("log", "Send redacted bot logs", owner_only=True),
     Command("restart", "Update and restart the bot", owner_only=True),
     Command("shell", "Execute a shell command (requires ENABLE_SHELL)", owner_only=True),
     Command("authorize", "Grant permanent access to a user", owner_only=True),

@@ -1,15 +1,15 @@
 # Thunder/utils/render_template.py
 
 import time
-import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from Thunder.utils.bot_utils import quote_media_name
-from Thunder.utils.file_properties import get_fname, get_uniqid
+from Thunder.utils.file_properties import get_fname, get_media, get_uniqid
 from Thunder.utils.logger import logger
+from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
@@ -73,25 +73,25 @@ async def render_media_page(
 
 
 # L1: TTL+LRU cache so repeat legacy /watch views don't re-fetch the vault message.
-_legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str]]" = OrderedDict()
+_legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str, str | None]]" = OrderedDict()
 _LEGACY_CACHE_TTL_SECONDS = 600
 _LEGACY_CACHE_MAX_ITEMS = 1024
 
 
-def _legacy_cache_get(key) -> str | None:
+def _legacy_cache_get(key) -> tuple[str, str | None] | None:
     cached = _legacy_cache.get(key)
     if not cached:
         return None
-    ts, file_name = cached
+    ts, file_name, mime_type = cached
     if time.monotonic() - ts > _LEGACY_CACHE_TTL_SECONDS:
         _legacy_cache.pop(key, None)
         return None
     _legacy_cache.move_to_end(key)
-    return file_name
+    return file_name, mime_type
 
 
-def _legacy_cache_put(key, file_name: str) -> None:
-    _legacy_cache[key] = (time.monotonic(), file_name)
+def _legacy_cache_put(key, file_name: str, mime_type: str | None = None) -> None:
+    _legacy_cache[key] = (time.monotonic(), file_name, mime_type)
     _legacy_cache.move_to_end(key)
     while len(_legacy_cache) > _LEGACY_CACHE_MAX_ITEMS:
         _legacy_cache.popitem(last=False)
@@ -101,10 +101,10 @@ async def render_page(message_id: int, secure_hash: str) -> str:
     key = (int(message_id), str(secure_hash))
     cached = _legacy_cache_get(key)
     if cached is not None:
-        file_name = cached
+        file_name, mime_type = cached
         quoted_filename = quote_media_name(file_name)
-        src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
-        return await render_media_page(file_name, src)
+        src = f"{Var.URL.rstrip('/')}/{secure_hash}{message_id}/{quoted_filename}"
+        return await render_media_page(file_name, src, mime_type=mime_type)
 
     try:
         from Thunder.bot import StreamBot  # M12 layering break: lazy import
@@ -131,11 +131,16 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         if not file_unique_id or file_unique_id[:6] != secure_hash:
             raise InvalidHash("File unique ID or secure hash mismatch during rendering.")
 
-        _legacy_cache_put(key, file_name)
+        media = get_media(message)
+        mime_type = getattr(media, "mime_type", None) or None
+        if not mime_type and media is not None:
+            mime_type = ext_and_mime_for_class(type(media).__name__.lower())[1]
+
+        _legacy_cache_put(key, file_name, mime_type)
 
         quoted_filename = quote_media_name(file_name)
-        src = urllib.parse.urljoin(Var.URL, f"{secure_hash}{message_id}/{quoted_filename}")
-        return await render_media_page(file_name, src)
+        src = f"{Var.URL.rstrip('/')}/{secure_hash}{message_id}/{quoted_filename}"
+        return await render_media_page(file_name, src, mime_type=mime_type)
     except Exception as e:
         # the capability hash is a credential: never log it (bot.txt is uploaded via /log)
         logger.error(

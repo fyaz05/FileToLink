@@ -1,5 +1,6 @@
 """M6: config validation surfaces all problems; booleans/sets parse."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -38,10 +39,13 @@ def test_str_to_int_set():
     assert str_to_int_set("") == set()
     assert str_to_int_set("-100111 -100222") == {-100111, -100222}
     before = len(vars_mod._config_errors)
-    assert str_to_int_set("1 junk 2") == {1, 2}
-    # junk is surfaced (M6 collect-all-errors), never silently skipped
-    assert len(vars_mod._config_errors) == before + 1
-    assert "junk" in vars_mod._config_errors[-1]
+    try:
+        assert str_to_int_set("1 junk 2") == {1, 2}
+        # junk is surfaced (M6 collect-all-errors), never silently skipped
+        assert len(vars_mod._config_errors) == before + 1
+        assert "junk" in vars_mod._config_errors[-1]
+    finally:
+        del vars_mod._config_errors[before:]
 
 
 @pytest.mark.unit
@@ -64,8 +68,10 @@ def test_owner_id_required_boot_fails():
     """H7: missing OWNER_ID must refuse to boot (nobody had owner access)."""
     env = {
         k: v
-        for k, v in __import__("os").environ.items()
-        if not k.startswith(("API_", "BOT_TOKEN", "BIN_", "OWNER_", "DATABASE_"))
+        for k, v in os.environ.items()
+        if not k.startswith(
+            ("API_", "BOT_TOKEN", "BIN_", "OWNER_", "DATABASE_", "PRIVATE_", "TOKEN_", "SHORTEN_")
+        )
     }
     env.update(
         {
@@ -95,8 +101,20 @@ def test_all_problems_reported_together():
     """M6: three bad vars -> all three named before exit (not first-fail)."""
     env = {
         k: v
-        for k, v in __import__("os").environ.items()
-        if not k.startswith(("API_", "BOT_TOKEN", "BIN_", "OWNER_", "DATABASE_", "MAX_BATCH"))
+        for k, v in os.environ.items()
+        if not k.startswith(
+            (
+                "API_",
+                "BOT_TOKEN",
+                "BIN_",
+                "OWNER_",
+                "DATABASE_",
+                "MAX_BATCH",
+                "PRIVATE_",
+                "TOKEN_",
+                "SHORTEN_",
+            )
+        )
     }
     env.update(
         {

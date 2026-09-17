@@ -35,28 +35,38 @@ async def test_invalidate_forces_reload():
 
 @pytest.mark.unit
 async def test_loader_exception_propagates():
+    calls = {"n": 0}
+
     async def boom():
+        calls["n"] += 1
         raise RuntimeError("db down")
 
     cache = FlagCache()
     with pytest.raises(RuntimeError):
         await cache.get_or_load("k", boom)
-    # nothing cached on failure
-    assert "k" not in cache._data
+    # nothing cached on failure: a retry must call the loader again
+    with pytest.raises(RuntimeError):
+        await cache.get_or_load("k", boom)
+    assert calls["n"] == 2
 
 
 @pytest.mark.unit
 async def test_lru_bound():
-    cache = FlagCache(ttl_seconds=60, max_items=2)
+    calls: dict[str, int] = {}
 
     async def loader(v):
+        calls[v] = calls.get(v, 0) + 1
         return v
 
+    cache = FlagCache(ttl_seconds=60, max_items=2)
     await cache.get_or_load("a", lambda: loader("a"))
     await cache.get_or_load("b", lambda: loader("b"))
     await cache.get_or_load("c", lambda: loader("c"))
-    assert len(cache._data) == 2
-    assert "a" not in cache._data  # oldest evicted
+    # oldest evicted: reloading "a" re-invokes the loader, "c" stays cached
+    await cache.get_or_load("a", lambda: loader("a"))
+    assert calls["a"] == 2
+    await cache.get_or_load("c", lambda: loader("c"))
+    assert calls["c"] == 1
 
 
 @pytest.mark.unit
@@ -68,7 +78,7 @@ async def test_sweep_drops_expired():
     await cache.get_or_load("k", loader)
     dropped = cache.sweep()
     assert dropped == 1
-    assert not cache._data
+    assert cache.sweep() == 0  # public-API check: nothing left to drop
 
 
 @pytest.mark.unit
@@ -87,4 +97,6 @@ async def test_concurrent_loaders_single_flight():
     results = await asyncio.gather(*(cache.get_or_load("k", loader) for _ in range(10)))
     assert results == ["v"] * 10
     assert calls["n"] == 1
+    # load-bearing private read: no public API exposes single-flight bookkeeping;
+    # a leaked task here would stampede the backend on the next cold key
     assert cache._inflight == {}  # bookkeeping cleaned up

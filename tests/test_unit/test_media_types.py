@@ -38,6 +38,12 @@ def test_attr_resolution():
 
 
 @pytest.mark.unit
-def test_direct_helpers():
-    assert ext_for("photo") == "jpg"
-    assert ext_for("nope") == "bin"
+@pytest.mark.parametrize(
+    "media_type,ext",
+    [
+        ("photo", "jpg"),
+        ("nope", "bin"),
+    ],
+)
+def test_ext_for(media_type, ext):
+    assert ext_for(media_type) == ext

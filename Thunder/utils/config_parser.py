@@ -4,9 +4,6 @@ import os
 
 
 class TokenParser:
-    def __init__(self):
-        self.tokens: dict[int, str] = {}
-
     def parse_from_env(self) -> dict[int, str]:
         # sort key cannot raise: digit filter yields "" at worst, `or 0` -> int
         multi_tokens = {
@@ -23,6 +20,4 @@ class TokenParser:
             key=lambda item: int("".join(filter(str.isdigit, item[0])) or 0),
         )
 
-        self.tokens = {index + 1: token for index, (_, token) in enumerate(sorted_tokens)}
-
-        return self.tokens
+        return {index + 1: token for index, (_, token) in enumerate(sorted_tokens)}

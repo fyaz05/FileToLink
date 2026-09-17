@@ -12,7 +12,7 @@ pre-commit install  # optional: same ruff hooks CI runs, before each commit
 ## Workflow
 
 1. Branch from `main` (`feat/...`, `fix/...`, `refactor/...`).
-2. `make lint test` must pass locally; `quality.yml` enforces the same gates.
+2. `make format lint test` must pass locally; `quality.yml` enforces the same gates.
 3. One concern per PR; behavior-preserving refactors carry characterization
    tests committed beforehand.
 4. New env vars: safe default + annotated entry in `config_sample.env` in the

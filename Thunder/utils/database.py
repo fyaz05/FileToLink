@@ -117,7 +117,6 @@ class Database:
         it stopped -- the filter shrinks as rows get stamped, guaranteeing
         convergence.  Must never raise.
         """
-        stamp = datetime.datetime.now(datetime.UTC)
         batch_size = 500
         max_batches_per_boot = 100  # 50k unstamped rows per boot; converges across boots
         last_id: Any = await self._get_backfill_cursor()
@@ -138,6 +137,9 @@ class Database:
                         logger.info(f"Backfilled last_seen_at on {stamped} legacy file records.")
                     return
                 last_id = page[-1]["_id"]
+                # per-batch stamp: a frozen boot-time value would backdate rows
+                # stamped by later batches (and skew their TTL window start)
+                stamp = datetime.datetime.now(datetime.UTC)
                 await self.files_col.update_many(
                     {"_id": {"$in": [doc["_id"] for doc in page]}},
                     {"$set": {"last_seen_at": stamp}},
@@ -192,8 +194,10 @@ class Database:
         server-side build continues and the next boot re-runs it."""
         try:
             await col.create_index(keys, **opts)
-        except (ExecutionTimeout, OperationFailure) as e:
+        except ExecutionTimeout as e:
             logger.warning(f"Index ensure on {col.name} skipped; re-checked on next boot: {e}")
+        except OperationFailure as e:
+            logger.error(f"Index ensure on {col.name} failed; re-checked on next boot: {e}")
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
@@ -469,11 +473,16 @@ class Database:
         except Exception as e:
             logger.error(f"Error deleting restart message {message_id}: {e}", exc_info=True)
 
-    async def is_user_authorized(self, user_id: int) -> bool:
+    async def is_user_authorized(self, user_id: int, *, raise_on_error: bool = False) -> bool:
+        """Authorized-user existence check.  With ``raise_on_error=True`` a Mongo
+        failure raises so fail-closed callers can deny instead of silently
+        treating the outage as "not authorized" (mirrors ``is_user_banned``)."""
         try:
             user = await self.authorized_users_col.find_one({"user_id": user_id}, {"_id": 1})
             return bool(user)
         except Exception as e:
+            if raise_on_error:
+                raise
             logger.error(f"Error in is_user_authorized for user {user_id}: {e}", exc_info=True)
             return False
 

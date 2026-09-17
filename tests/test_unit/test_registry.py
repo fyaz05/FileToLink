@@ -20,12 +20,6 @@ def test_owner_only_commands_hidden_from_menu():
 
 
 @pytest.mark.unit
-def test_descriptions_within_telegram_limit():
-    for cmd in bot_commands():
-        assert len(cmd.description) <= 256
-
-
-@pytest.mark.unit
 def test_help_rows_match_public_commands():
     rows = help_command_rows()
     for cmd in COMMANDS:

@@ -153,12 +153,13 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
         raise
 
 
-async def allowed(user_id: int) -> bool:
-    """Cached authorized-user check (H7).  Raises on DB failure."""
+async def allowed(user_id: int, *, raise_on_error: bool = True) -> bool:
+    """Cached authorized-user check (H7).  With ``raise_on_error=True`` (default)
+    a DB failure raises so fail-closed callers deny; with False it returns False."""
     return await flags.get_or_load(
         ("allowed", user_id),
         # delegate: two copies of the same existence check would drift
-        lambda: db.is_user_authorized(user_id),
+        lambda: db.is_user_authorized(user_id, raise_on_error=raise_on_error),
     )
 
 

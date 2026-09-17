@@ -75,6 +75,8 @@ def schedule_index_ensure() -> asyncio.Task:
                 print("   ✓ Database indexes ensured.")
             else:
                 print("   ▶ Database indexes could not be ensured during startup.")
+        except asyncio.CancelledError:
+            return
         except Exception as e:
             logger.error(f"Background database index ensure failed: {e}", exc_info=True)
 
@@ -162,6 +164,8 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
+        await _safe_teardown_step(db.close, "database (boot failure)")
         # M13: a failed boot must exit non-zero or container restart policies never fire.
         raise SystemExit(1) from e
 
@@ -171,20 +175,29 @@ async def start_services():
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
+        await _safe_teardown_step(db.close, "database (boot failure)")
         raise SystemExit(1) from e
 
     await import_plugins()
 
     print("   ▶ Starting Request Executor initialization...")
     try:
-        # H6b: small worker pool instead of a single serial executor
+        # H6b: worker pool; registered early so a later boot failure cancels live workers too
         executor_tasks = start_executors()
-        # register before the web-boot try: a later boot failure must cancel
-        # live workers too, not just the index-ensure task
         background_tasks.extend(executor_tasks)
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
     except Exception as e:
         logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
+        for t in background_tasks:
+            t.cancel()
+        if background_tasks:
+            await asyncio.wait_for(
+                asyncio.gather(*background_tasks, return_exceptions=True), timeout=30
+            )
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
+        await _safe_teardown_step(db.close, "database (boot failure)")
         raise SystemExit(1) from e
 
     print("   ▶ Starting Web Server initialization...")
@@ -215,11 +228,14 @@ async def start_services():
         for t in background_tasks:
             t.cancel()
         if background_tasks:
-            await asyncio.gather(*background_tasks, return_exceptions=True)
-        # ordering: the touch buffer must flush BEFORE db.close, or _bulk_flush
-        # runs against a closed client and silently discards pending increments
+            # bounded: boot failure must not hang forever on stuck workers
+            await asyncio.wait_for(
+                asyncio.gather(*background_tasks, return_exceptions=True), timeout=30
+            )
+        # touch buffer must flush BEFORE db.close, or _bulk_flush discards increments
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
+        await _safe_teardown_step(close_shortener, "shortener")
         await _safe_teardown_step(cleanup_clients, "clients")
         await _safe_teardown_step(db.close, "database")
         raise SystemExit(1) from e
@@ -261,7 +277,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         if not task.done():
             task.cancel()
 
-    # one bounded wait for the WHOLE batch (per-task waits could stack ~80s before teardown)
+    # one bounded wait for the whole batch (per-task waits would stack)
     if background_tasks:
         done, pending = await asyncio.wait(background_tasks, timeout=10)
         for t in done:
@@ -274,7 +290,15 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         for t in pending:
             logger.warning(f"Background task {t.get_name()} did not stop within 10s")
 
-    # 2. bounded drain: wait (<= 30 s) for in-flight streams to finish
+    # 2. stop accepting new HTTP before draining in-flight streams
+    if app_runner is not None:
+        try:
+            await asyncio.wait_for(app_runner.cleanup(), timeout=30)
+        except Exception as e:
+            errors.append(("web server", e))
+            logger.error(f"Error during web server cleanup: {e}")
+
+    # 3. bounded drain: wait (<= 30 s) for in-flight streams to finish
     loop = asyncio.get_running_loop()
     drain_deadline = loop.time() + 30
     while sum(work_loads.values()) > 0 and loop.time() < drain_deadline:
@@ -283,18 +307,11 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     if remaining:
         logger.warning(f"Drain deadline hit with {remaining} stream(s) still active.")
 
-    # 3. ordered teardown
+    # 4. ordered teardown
     await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", errors)
     await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", errors)
     await _safe_teardown_step(close_shortener, "shortener", errors)
     await _safe_teardown_step(cleanup_clients, "clients", errors)
-
-    if app_runner is not None:
-        try:
-            await asyncio.wait_for(app_runner.cleanup(), timeout=30)
-        except Exception as e:
-            errors.append(("web server", e))
-            logger.error(f"Error during web server cleanup: {e}")
 
     await _safe_teardown_step(db.close, "database", errors)
     if not errors:
@@ -338,8 +355,7 @@ async def schedule_limiter_sweep():
 
 
 if __name__ == "__main__":
-    # L5: session files carry bearer-equivalent auth keys -- the restrictive umask
-    # covers the window before _harden_session_files runs.
+    # L5: restrictive umask covers session keys before _harden_session_files runs; logs/ predates umask, ambient perms (content redacted)
     os.umask(0o077)
     try:
         asyncio.run(start_services())

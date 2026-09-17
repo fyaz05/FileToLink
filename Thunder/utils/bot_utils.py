@@ -223,5 +223,4 @@ __all__ = [
     "get_user",
     "is_admin",
     "reply",
-    "MSG_BUTTON_GET_HELP",
 ]

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from urllib.parse import quote, quote_plus, unquote
 
 from aiohttp import web
+from pymongo.errors import PyMongoError
 from pyrogram.types import Message
 
 from Thunder import StartTime, __version__
@@ -56,6 +57,13 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 
+_RETRY_5 = {**CORS_HEADERS, "Retry-After": "5"}
+
+
+def _unavailable(text: str) -> web.HTTPServiceUnavailable:
+    return web.HTTPServiceUnavailable(text=text, headers=_RETRY_5)
+
+
 streamers: dict[int, "ByteStreamer"] = {}
 
 
@@ -102,9 +110,9 @@ def validate_public_hash(public_hash: str) -> str:
 
 def select_optimal_client() -> tuple[int, ByteStreamer]:
     if not work_loads:
-        raise web.HTTPInternalServerError(
+        raise web.HTTPServiceUnavailable(
             text=("No available clients to handle the request. Please try again later."),
-            headers=CORS_HEADERS,
+            headers={**CORS_HEADERS, "Retry-After": "2"},
         )
 
     available_clients = [
@@ -173,7 +181,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         start = max(file_size - suffix_len, 0)
         end = file_size - 1
 
-    if start < 0 or start >= file_size or start > end:
+    if start >= file_size or start > end:
         # L6: 416 discipline with Content-Range
         raise web.HTTPRequestRangeNotSatisfiable(headers={"Content-Range": f"bytes */{file_size}"})
 
@@ -204,12 +212,9 @@ async def _fetch_file_record(secure_hash: str) -> dict | None:
     instead of caching a permanent-looking 404."""
     try:
         return await get_file_by_hash(secure_hash)
-    except Exception as e:
+    except (PyMongoError, TimeoutError) as e:
         logger.error(f"Canonical record lookup failed (transport): {e}", exc_info=True)
-        raise web.HTTPServiceUnavailable(
-            text="File index temporarily unavailable; please retry shortly.",
-            headers={**CORS_HEADERS, "Retry-After": "5"},
-        ) from e
+        raise _unavailable("File index temporarily unavailable; please retry shortly.") from e
 
 
 @contextlib.asynccontextmanager
@@ -220,7 +225,10 @@ async def _route_ladder(label: str):
         yield
     except (InvalidHash, FileNotFound) as e:
         logger.debug(f"{label}: {type(e).__name__} - {e}")
-        raise web.HTTPNotFound(text="Resource not found") from e
+        raise web.HTTPNotFound(
+            text="Resource not found",
+            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
+        ) from e
     except web.HTTPException as e:
         logger.warning(f"HTTP exception in {label}: {e}")
         raise
@@ -228,7 +236,8 @@ async def _route_ladder(label: str):
         error_id = secrets.token_hex(6)
         logger.error(f"{label} error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}"
+            text=f"An unexpected server error occurred: {error_id}",
+            headers=CORS_HEADERS,
         ) from e
 
 
@@ -245,10 +254,7 @@ async def _admission_ladder(client_id: int, label: str):
     except TelegramUnavailable as e:
         work_loads[client_id] -= 1
         logger.warning(f"{label}: Telegram unavailable: {e}")
-        raise web.HTTPServiceUnavailable(
-            text="Telegram is temporarily unavailable; please retry shortly.",
-            headers={**CORS_HEADERS, "Retry-After": "5"},
-        ) from e
+        raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except web.HTTPException as e:
         work_loads[client_id] -= 1
         logger.debug(f"Client HTTP error in {label}: {e}")
@@ -289,9 +295,7 @@ async def _serve_media_response(
         "Content-Disposition": build_content_disposition(disposition, filename),
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=31536000",
-        "Connection": "keep-alive",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Range, Content-Type, *",
         "Access-Control-Expose-Headers": ("Content-Length, Content-Range, Content-Disposition"),
         "X-Content-Type-Options": "nosniff",
     }
@@ -387,12 +391,13 @@ async def activate_endpoint(request: web.Request):
     """M8: web entry for activation -- shorteners can produce real URLs."""
     token = request.match_info.get("token", "").strip()
     username = getattr(StreamBot, "username", None)
-    if not token:
-        raise web.HTTPBadRequest(text="Missing activation token")
-    if not _is_activation_token(token):
+    if not token or not _is_activation_token(token):
         raise web.HTTPBadRequest(text="Malformed activation token")
     if not username:
-        raise web.HTTPServiceUnavailable(text="Bot is still starting; try again shortly.")
+        raise web.HTTPServiceUnavailable(
+            text="Bot is still starting; try again shortly.",
+            headers={**CORS_HEADERS, "Retry-After": "5"},
+        )
     raise web.HTTPFound(_telegram_activate_url(username, token))
 
 
@@ -456,7 +461,6 @@ async def canonical_media_preview(request: web.Request):
             content_type="text/html",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type, *",
                 "X-Content-Type-Options": "nosniff",
                 # M2: player pages are per-file dynamic; keep them unindexed
                 "X-Robots-Tag": "noindex, nofollow",
@@ -472,7 +476,8 @@ async def media_preview(request: web.Request):
     if not Var.ENABLE_LEGACY_LINKS:
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
-            "Please re-send the file to the bot to get a fresh link."
+            "Please re-send the file to the bot to get a fresh link.",
+            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
         )
     async with _route_ladder("preview"):
         path = request.match_info["path"]
@@ -485,7 +490,6 @@ async def media_preview(request: web.Request):
             content_type="text/html",
             headers={
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type, *",
                 "X-Content-Type-Options": "nosniff",
                 "X-Robots-Tag": "noindex, nofollow",
             },
@@ -568,7 +572,8 @@ async def media_delivery(request: web.Request):
     if not Var.ENABLE_LEGACY_LINKS:
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
-            "Please re-send the file to the bot to get a fresh link."
+            "Please re-send the file to the bot to get a fresh link.",
+            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
         )
     async with _route_ladder("media stream"):
         path = request.match_info["path"]

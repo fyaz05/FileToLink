@@ -62,7 +62,6 @@ BATCH_SIZE = 10
 LINK_CHUNK_SIZE = 20
 BATCH_UPDATE_INTERVAL = 5
 MESSAGE_DELAY = 0.5
-# M4b: overall batch deadline = 30 + 2n seconds
 _BATCH_DEADLINE_BASE = 30
 
 
@@ -97,10 +96,9 @@ def get_link_buttons(links):
 
 
 async def validate_request_common(client: Client, message: Message) -> bool | None:
-    """M12: one preflight chain for every stream entry point.
+    """One preflight chain for every stream entry point.
 
-    Order (documented contract, see AGENTS.md):
-    banned -> private-mode -> token-activation -> force-sub -> shortener-status
+    Runtime order: banned → private → token → shortener-status (routing) → force-sub.
     """
     shortener_val = await preflight(client, message)
     if shortener_val is None:
@@ -121,8 +119,6 @@ async def send_channel_links(
     reply_to_message_id: int | None = None,
 ):
     text = MSG_NEW_FILE_REQUEST.format(
-        # source_info (display name / chat title) is user-controlled and renders
-        # as HTML under pyrofork's DEFAULT parse mode (M7)
         source_info=html.escape(source_info),
         id_=source_id,
         online_link=links["online_link"],
@@ -135,7 +131,7 @@ async def send_channel_links(
                 text,
                 disable_web_page_preview=True,
                 quote=True,
-                parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
+                parse_mode=enums.ParseMode.HTML,
             )
         else:
             await send_safe(
@@ -144,30 +140,10 @@ async def send_channel_links(
                 text=text,
                 disable_web_page_preview=True,
                 reply_to_message_id=reply_to_message_id,
-                parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
+                parse_mode=enums.ParseMode.HTML,
             )
     except Exception as e:
         logger.error(f"Error sending channel links: {e}", exc_info=True)
-
-
-async def safe_edit_message(message: Message, text: str, **kwargs):
-    try:
-        return await edit_safe(message, text, **kwargs)
-    except MessageNotModified:
-        pass
-    except MessageDeleteForbidden:
-        logger.debug(f"Failed to edit message {message.id} due to permissions.")
-    except Exception as e:
-        logger.error(f"Error editing message {message.id}: {e}", exc_info=True)
-
-
-async def safe_delete_message(message: Message):
-    try:
-        await delete_safe(message)
-    except MessageDeleteForbidden:
-        logger.debug(f"Failed to delete message {message.id} due to permissions.")
-    except Exception as e:
-        logger.error(f"Error deleting message {message.id}: {e}", exc_info=True)
 
 
 async def send_dm_links(bot: Client, user_id: int, links: dict[str, Any], chat_title: str):
@@ -201,8 +177,6 @@ async def send_link(msg: Message, links: dict[str, Any]):
 
 @StreamBot.on_message(filters.command("link") & ~filters.private)
 async def link_handler(bot: Client, msg: Message, **kwargs):
-    # A channel-posted /link has no from_user: key the limiter on the
-    # sender chat instead of dropping the request.
     if kwargs.get("rl_user_id") is None and msg.sender_chat and msg.sender_chat.id:
         kwargs["rl_user_id"] = msg.sender_chat.id
 
@@ -211,8 +185,6 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
         if shortener_val is None:
             return
         if message.from_user and not await db.is_user_exist(message.from_user.id):
-            # client.me is populated after client.start(); the stub union
-            # is unavoidable here.
             invite_link = f"https://t.me/{client.me.username}?start=start"  # type: ignore[union-attr]
             try:
                 await reply_safe(
@@ -243,8 +215,6 @@ async def link_handler(bot: Client, msg: Message, **kwargs):
 
         notification_msg = handler_kwargs.get("notification_msg")
 
-        # filters.command matches captions too, where .text is None --
-        # parse the caption or a captioned /link dies silently
         parts = (message.text or message.caption or "").split()
         num_files = 1
         if len(parts) > 1:
@@ -335,8 +305,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
     async def _actual_channel_receive_handler(client: Client, message: Message, **handler_kwargs):
         if not Var.CHANNEL:
             return
-        # M12: PRIVATE_MODE promises "owner + authorized users only" -- channels
-        # have no from_user for the gates, so fail closed: no public links.
+        # Fail closed: channels have no from_user for gates.
         if Var.PRIVATE_MODE:
             logger.debug(f"Ignoring channel post from {message.chat.id} (PRIVATE_MODE).")
             return
@@ -345,9 +314,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
         is_banned_statically = (
             hasattr(Var, "BANNED_CHANNELS") and message.chat.id in Var.BANNED_CHANNELS
         )
-        # Flag-cached (one DB hit per channel per TTL).  Fail-open is DELIBERATE:
-        # a hit triggers leave_chat (irreversible) -- a Mongo outage must not
-        # mass-leave served channels (H7 fail-closed applies to user-ban gates).
+        # Fail-open is deliberate: leave_chat is irreversible.
         is_banned_dynamically = (
             await flags.get_or_load(
                 ("banned_channel", message.chat.id),
@@ -370,12 +337,14 @@ async def channel_receive_handler(bot: Client, msg: Message):
             return
 
         try:
-            shortener_val = await _shortener_status_for(client, message)
+            from Thunder.utils.decorators import get_shortener_status
+
+            shortener_val = await get_shortener_status(client, message)
             canonical_record, stored_msg, reused_existing = await get_or_create_canonical_file(
                 message, fwd_media, client
             )
             if reused_existing and stored_msg:
-                await safe_delete_message(stored_msg)
+                await delete_safe(stored_msg)
                 stored_msg = None
             if canonical_record:
                 links = await gen_canonical_links(
@@ -396,8 +365,6 @@ async def channel_receive_handler(bot: Client, msg: Message):
                 links = await gen_links(stored_msg, shortener=shortener_val)
                 reply_to_message_id = stored_msg.id
             source_info = message.chat.title or "Unknown Channel"
-            # stored_msg is intentionally None after reusing a canonical BIN copy:
-            # send_channel_links then threads the log to the canonical message via reply_to_message_id.
 
             if notification_msg:
                 try:
@@ -410,7 +377,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
                             stream_link=links["stream_link"],
                         ),
                         disable_web_page_preview=True,
-                        parse_mode=enums.ParseMode.HTML,  # M7 template is HTML
+                        parse_mode=enums.ParseMode.HTML,
                     )
                 except Exception as e:
                     logger.error(
@@ -468,13 +435,6 @@ async def channel_receive_handler(bot: Client, msg: Message):
     )
 
 
-async def _shortener_status_for(client: Client, message: Message) -> bool:
-    """Channel messages skip the user gates but still honor shortener config."""
-    from Thunder.utils.decorators import get_shortener_status
-
-    return await get_shortener_status(client, message)
-
-
 async def process_single(
     bot: Client,
     msg: Message,
@@ -489,7 +449,7 @@ async def process_single(
             file_msg, fwd_media, bot
         )
         if reused_existing and stored_msg:
-            await safe_delete_message(stored_msg)
+            await delete_safe(stored_msg)
             stored_msg = None
         if canonical_record:
             links = await gen_canonical_links(
@@ -508,14 +468,17 @@ async def process_single(
             links = await gen_links(stored_msg, shortener=shortener_val)
             canonical_reply_id = stored_msg.id
         if notification_msg:
-            result = await safe_edit_message(
-                notification_msg,
-                format_link_message(links),
-                parse_mode=enums.ParseMode.HTML,
-                disable_web_page_preview=True,
-                reply_markup=get_link_buttons(links),
-            )
-            if not result:
+            try:
+                await edit_safe(
+                    notification_msg,
+                    format_link_message(links),
+                    parse_mode=enums.ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_markup=get_link_buttons(links),
+                )
+            except (MessageNotModified, MessageDeleteForbidden, MessageIdInvalid):
+                pass
+            except Exception:
                 await send_link(msg, links)
         elif not original_request_msg:
             await send_link(msg, links)
@@ -545,12 +508,12 @@ async def process_single(
                 reply_to_message_id=canonical_reply_id,
             )
         if status_msg:
-            await safe_delete_message(status_msg)
+            await delete_safe(status_msg)
         return links
     except Exception as e:
         logger.error(f"Error processing single file for message {file_msg.id}: {e}", exc_info=True)
         if status_msg:
-            await safe_edit_message(status_msg, MSG_ERROR_PROCESSING_MEDIA)
+            await edit_safe(status_msg, MSG_ERROR_PROCESSING_MEDIA)
 
         await notify_own(
             bot, MSG_CRITICAL_ERROR.format(error=str(e), error_id=secrets.token_hex(6))
@@ -567,16 +530,9 @@ async def process_batch(
     shortener_val: bool,
     notification_msg: Message | None = None,
 ):
-    """M4b: worker-pooled batch with order preservation.
+    """Worker-pooled batch, order-preserving.
 
-    * messages are pre-fetched in chunks of ``BATCH_SIZE`` (same API usage
-      as before); processing then runs on ``BATCH_WORKERS`` workers;
-    * results are collected into an index-keyed dict so link order is
-      preserved regardless of completion order;
-    * non-media messages count as **skipped** (ThunderGo semantics), not
-      failed;
-    * the whole batch runs under a ``30 + 2n`` second deadline;
-    * progress edits are throttled to every 5 completions.
+    Stops STARTING new items after deadline (30+2n); in-flight unbounded.
     """
     total_started = time.monotonic()
     deadline = total_started + _BATCH_DEADLINE_BASE + 2 * count
@@ -603,13 +559,16 @@ async def process_batch(
             else:
                 messages = list(fetched_msgs)
         except Exception as e:
-            # a failed chunk counts as FAILED, not skipped -- skipping would
-            # hide whole-chunk outages from the summary
             logger.error(f"Error getting messages in batch: {e}", exc_info=True)
             fetch_failed.update(chunk_ids)
             messages = []
-        for mid, m in zip(chunk_ids, messages, strict=False):
-            fetched[mid] = m if (m is not None and getattr(m, "media", None)) else None
+        for i, mid in enumerate(chunk_ids):
+            m = messages[i] if i < len(messages) else None
+            if i >= len(messages):
+                fetch_failed.add(mid)
+                fetched[mid] = None
+            else:
+                fetched[mid] = m if (m is not None and getattr(m, "media", None)) else None
 
     queue: asyncio.Queue[int | None] = asyncio.Queue()
     for mid in ids:
@@ -618,6 +577,7 @@ async def process_batch(
         queue.put_nowait(None)
 
     async def progress_edit():
+        # done (incl. skipped).
         try:
             await edit_safe(
                 status_msg,
@@ -639,8 +599,9 @@ async def process_batch(
             if mid is None:
                 return
             if time.monotonic() > deadline:
+                # deadline-expired counts as failed, not skipped.
                 results[mid] = None
-                skipped += 1
+                counters["failed"] += 1
                 counters["done"] += 1
                 continue
             m = fetched.get(mid)
@@ -661,8 +622,6 @@ async def process_batch(
             if counters["done"] % BATCH_UPDATE_INTERVAL == 0 and counters["done"] < count:
                 await progress_edit()
 
-    # initial status (guarded: a deleted/undeletable status message must
-    # not abort the batch before it starts)
     try:
         await edit_safe(
             status_msg,
@@ -728,4 +687,4 @@ async def process_batch(
     except Exception as e:
         logger.debug(f"Could not finalize batch status: {e}")
     if notification_msg:
-        await safe_delete_message(notification_msg)
+        await delete_safe(notification_msg)

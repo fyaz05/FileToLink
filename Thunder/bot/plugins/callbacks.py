@@ -31,12 +31,7 @@ from Thunder.vars import Var
 
 
 def guard_callback(fn):
-    """M11: panic isolation + standardized owner error-ID notification.
-
-    Any unhandled exception is logged with a correlate-able error ID, the
-    owner is notified, and the query is answered so stale buttons never
-    leave a perpetual spinner.
-    """
+    """Panic isolation for callbacks; answers query so no stale spinner."""
 
     @functools.wraps(fn)
     async def wrapper(client: Client, callback_query: CallbackQuery):
@@ -69,7 +64,6 @@ async def get_force_channel_button(client: Client):
     if not Var.FORCE_CHANNEL_ID:
         return None
     try:
-        # get_force_info resolves once and caches -- no fresh get_chat RPC per render
         link, title = await get_force_info(client)
         if link:
             return [
@@ -92,7 +86,6 @@ async def help_callback(client: Client, callback_query: CallbackQuery):
     if force_button:
         buttons.append(force_button)
     buttons.append([InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")])
-    # M1: /help command and the help panel share one implementation
     help_text = build_help_text(Var.MAX_BATCH_FILES)
     try:
         await edit_safe(
@@ -153,21 +146,17 @@ async def restart_broadcast_callback(client: Client, callback_query: CallbackQue
 @StreamBot.on_callback_query(filters.regex(r"^close_panel$"))
 @guard_callback
 async def close_panel_callback(client: Client, callback_query: CallbackQuery):
-    # M11: only the owner or whoever triggered the panel may close it.
     closer_id = callback_query.from_user.id if callback_query.from_user else None
     message = callback_query.message
 
     is_allowed = False
-    if closer_id is not None and message is not None:
-        if closer_id == Var.OWNER_ID:
-            is_allowed = True
-        else:
-            # Panels are bot-sent, so message.from_user is the bot -- the requester
-            # is the reply target's sender, or the chat peer in private chats.
-            if message.reply_to_message and message.reply_to_message.from_user:
-                is_allowed = closer_id == message.reply_to_message.from_user.id
-            if not is_allowed and message.chat and message.chat.type == enums.ChatType.PRIVATE:
-                is_allowed = closer_id == message.chat.id
+    if closer_id == Var.OWNER_ID:
+        is_allowed = True
+    elif closer_id is not None and message is not None:
+        if message.reply_to_message and message.reply_to_message.from_user:
+            is_allowed = closer_id == message.reply_to_message.from_user.id
+        if not is_allowed and message.chat and message.chat.type == enums.ChatType.PRIVATE:
+            is_allowed = closer_id == message.chat.id
 
     if not is_allowed:
         await answer_safe(callback_query, MSG_ERROR_CLOSE_NOT_ALLOWED, show_alert=True)
@@ -182,27 +171,17 @@ async def close_panel_callback(client: Client, callback_query: CallbackQuery):
                 f"Failed to delete callback query message {getattr(message, 'id', '?')}: {e}"
             )
 
-        if message.reply_to_message:
-            try:
-                await delete_safe(message.reply_to_message)
-            except Exception as e:
-                logger.debug(f"Failed to delete replied message: {e}")
-
 
 @StreamBot.on_callback_query(filters.regex(r"^cancel_"))
 @guard_callback
 async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
-    # owner-only like its sibling restart action: the cancel button lives on
-    # the owner's /broadcast reply, but the guard is defense-in-depth
     if not await owner_only(client, callback_query):
         return
-    # callback data is always a str for sent buttons; tolerate the stub union
     raw = callback_query.data or ""
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8", errors="replace")
     broadcast_id = raw.split("_", 1)[1]
-    if broadcast_id in broadcast_ids:
-        broadcast_ids[broadcast_id]["cancelled"] = True
+    entry = broadcast_ids.get(broadcast_id)
+    if entry is not None:
+        entry["cancelled"] = True
         try:
             await edit_safe(
                 callback_query.message, MSG_BROADCAST_CANCEL.format(broadcast_id=broadcast_id)
@@ -218,6 +197,5 @@ async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
 @StreamBot.on_callback_query()
 @guard_callback
 async def fallback_callback(client: Client, callback_query: CallbackQuery):
-    """M11: catch-all -- unknown/stale buttons are answered within a second
-    instead of leaving a perpetual spinner."""
+    """Catch-all for unknown/stale buttons."""
     await answer_safe(callback_query, MSG_ERROR_CALLBACK_UNSUPPORTED, show_alert=True)

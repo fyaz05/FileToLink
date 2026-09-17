@@ -142,7 +142,10 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                 logger.error(f"Broadcast cursor error: {e}", exc_info=True)
             finally:
                 for _ in range(worker_count):
-                    await queue.put(None)  # poison pills
+                    try:
+                        queue.put_nowait(None)  # poison pills
+                    except asyncio.QueueFull:
+                        pass
 
         async def worker():
             while True:
@@ -157,6 +160,9 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                         logger.warning(f"Skipping user with no ID: {user}")
                         continue
                     await _send_one(client, message, user_id, stats)
+                    # idempotent modulo _PROGRESS_EVERY: concurrent workers may
+                    # skip or duplicate a progress edit; the final completion
+                    # message is the source of truth
                     if stats["success"] and stats["success"] % _PROGRESS_EVERY == 0:
                         await _edit_progress(status_msg, stats)
                 finally:
@@ -218,8 +224,6 @@ async def _send_one(client: Client, message: Message, user_id: int, stats: dict)
         await tg_call(message.reply_to_message.copy, user_id, retries=2)
         stats["success"] += 1
     except _PERMANENT_ERRORS as e:
-        # except matches subclasses; the dict keys are exact types, so an
-        # unmapped subclass would raise KeyError inside the worker
         recipient_type, reason = _PERMANENT_ERROR_REASONS.get(type(e), ("Recipient", "unreachable"))
 
         logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
@@ -234,6 +238,7 @@ async def _send_one(client: Client, message: Message, user_id: int, stats: dict)
             logger.error(f"Prune lookup failed for {user_id}: {db_err}", exc_info=True)
             stats["failed"] += 1
     except FloodWait as e:
+        # allowed: classify-only, no sleep (tg_call already retried)
         logger.warning(f"FloodWait persisted for user {user_id}, last wait: {e.value}s")
         stats["failed"] += 1
     except Exception as e:

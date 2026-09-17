@@ -13,15 +13,17 @@ from Thunder.utils.shortener import (
 
 
 @pytest.mark.unit
-def test_registry_lookup_bitly():
+@pytest.mark.parametrize(
+    "domain,expected",
+    [
+        ("bitly.com", BitlyPlugin),
+        ("shrinkme.dev", GenericShortenerPlugin),  # generic fallback
+        ("bitly.com.evil.com", GenericShortenerPlugin),  # lookalike rejected
+    ],
+)
+def test_registry_lookup(domain, expected):
     system = ShortenerSystem()
-    assert system._get_plugin_class("bitly.com") is BitlyPlugin
-
-
-@pytest.mark.unit
-def test_registry_lookup_generic_fallback():
-    system = ShortenerSystem()
-    assert system._get_plugin_class("shrinkme.dev") is GenericShortenerPlugin
+    assert system._get_plugin_class(domain) is expected
 
 
 @pytest.mark.unit
@@ -96,9 +98,3 @@ async def test_cache_hit_is_returned_without_http():
 )
 def test_plugin_host_matching(domain, plugin, expected):
     assert plugin.matches(domain) is expected
-
-
-@pytest.mark.unit
-def test_registry_lookup_rejects_lookalike_host():
-    system = ShortenerSystem()
-    assert system._get_plugin_class("bitly.com.evil.com") is GenericShortenerPlugin

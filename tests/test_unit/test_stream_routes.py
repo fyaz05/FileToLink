@@ -6,6 +6,7 @@ import pytest
 from aiohttp import web
 from aiohttp.web import HTTPBadRequest, HTTPRequestRangeNotSatisfiable
 
+from Thunder.server.exceptions import InvalidHash
 from Thunder.server.stream_routes import (
     _is_activation_token,
     _telegram_activate_url,
@@ -27,6 +28,7 @@ class TestParseMediaRequest:
     def test_hash_first_with_trailing_slash_path(self):
         mid, h = parse_media_request("AbCdEf12345", {})
         assert mid == 12345
+        assert h == "AbCdEf"
 
     @pytest.mark.unit
     def test_id_first_with_query_hash(self):
@@ -36,8 +38,6 @@ class TestParseMediaRequest:
 
     @pytest.mark.unit
     def test_invalid_hash_raises(self):
-        from Thunder.server.exceptions import InvalidHash
-
         with pytest.raises(InvalidHash):
             parse_media_request("12345/name.mp4", {"hash": "short"})
         with pytest.raises(InvalidHash):
@@ -45,8 +45,6 @@ class TestParseMediaRequest:
 
     @pytest.mark.unit
     def test_bad_message_id_raises(self):
-        from Thunder.server.exceptions import InvalidHash
-
         with pytest.raises(InvalidHash):
             parse_media_request("AbCdEf_+*/x", {})
 
@@ -62,8 +60,6 @@ class TestValidatePublicHash:
 
     @pytest.mark.unit
     def test_rejects_other_lengths_and_normalizes_case(self):
-        from Thunder.server.exceptions import InvalidHash
-
         with pytest.raises(InvalidHash):
             validate_public_hash("c" * 21)
         with pytest.raises(InvalidHash):
@@ -271,3 +267,86 @@ class TestCanonicalDeliveryErrorLadder:
         with pytest.raises(web.HTTPNotFound):
             await stream_routes.canonical_media_delivery(self._request())
         assert len(deleted) == 1
+
+
+class TestLegacyDisabledGone:
+    """L1: with ENABLE_LEGACY_LINKS=False the legacy families must 410."""
+
+    @staticmethod
+    def _request(path="AbCdEf12345/name.mp4"):
+        return SimpleNamespace(match_info={"path": path})
+
+    @pytest.mark.unit
+    async def test_preview_gone(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.vars import Var
+
+        monkeypatch.setattr(Var, "ENABLE_LEGACY_LINKS", False)
+        with pytest.raises(web.HTTPGone):
+            await stream_routes.media_preview(self._request())
+
+    @pytest.mark.unit
+    async def test_delivery_gone(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.vars import Var
+
+        monkeypatch.setattr(Var, "ENABLE_LEGACY_LINKS", False)
+        with pytest.raises(web.HTTPGone):
+            await stream_routes.media_delivery(self._request())
+
+
+class TestAdmissionControl:
+    """M9: saturated clients refuse with 503 + Retry-After instead of stacking."""
+
+    @pytest.mark.unit
+    def test_full_pool_maps_to_503_with_retry_after(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+
+        monkeypatch.setattr(
+            stream_routes, "work_loads", {0: stream_routes.MAX_CONCURRENT_PER_CLIENT}
+        )
+        with pytest.raises(web.HTTPServiceUnavailable) as exc:
+            stream_routes.select_optimal_client()
+        assert exc.value.headers.get("Retry-After") == str(
+            stream_routes.OVERLOAD_RETRY_AFTER_SECONDS
+        )
+
+
+class TestConstantErrorBodies:
+    """503 bodies are constant strings: the exception text carries internal
+    state (FloodWait values, chat ids) and must never reach the client."""
+
+    @staticmethod
+    def _request():
+        return SimpleNamespace(match_info={"secure_hash": "a" * 32})
+
+    @pytest.mark.unit
+    async def test_503_body_hides_exception_text(self, monkeypatch):
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.server.exceptions import TelegramUnavailable
+
+        secret = "FloodWait-SECRET-xyz-987"
+
+        async def get_message(_ref):
+            raise TelegramUnavailable(secret)
+
+        async def get_file_by_hash(_h, raise_on_error=False):
+            return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
+
+        async def forget_stale_record(record):
+            return None
+
+        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
+        monkeypatch.setattr(
+            stream_routes,
+            "select_optimal_client",
+            lambda: (0, SimpleNamespace(get_message=get_message)),
+        )
+        monkeypatch.setattr(stream_routes, "forget_stale_record", forget_stale_record)
+        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
+
+        with pytest.raises(web.HTTPServiceUnavailable) as exc:
+            await stream_routes.canonical_media_delivery(self._request())
+        assert secret not in exc.value.text
+        assert exc.value.text == "Telegram is temporarily unavailable; please retry shortly."
+        assert exc.value.headers.get("Retry-After") == "5"

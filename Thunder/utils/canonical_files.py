@@ -7,12 +7,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from pymongo.errors import DuplicateKeyError
-from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
 from Thunder.utils.database import db
 from Thunder.utils.file_properties import get_fname, get_media, get_uniqid
-from Thunder.utils.logger import logger
+from Thunder.utils.logger import hash_path_token, logger
 from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
@@ -170,7 +169,9 @@ async def forget_stale_record(record: dict[str, Any]) -> bool:
         return False
     _forget(record)
     deleted = await db.delete_file_record(public_hash)
-    logger.warning(f"Self-healed stale file record {public_hash} (deleted={deleted})")
+    logger.warning(
+        f"Self-healed stale file record {hash_path_token(public_hash)} (deleted={deleted})"
+    )
     return deleted
 
 
@@ -211,7 +212,11 @@ async def _bulk_flush() -> None:
         # ordered=False bulk re-applies some increments (accepted over-count)
         logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
         for h, payload in items:
-            _pending_touches.setdefault(h, payload)
+            old = _pending_touches.get(h)
+            if old is None:
+                _pending_touches[h] = payload
+            else:
+                _pending_touches[h] = (payload[0], old[1] + payload[1], old[2] + payload[2])
 
 
 def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) -> None:
@@ -471,8 +476,6 @@ async def get_or_create_canonical_file(
                                 f"Failed to delete stored message {stored_message.id} in BIN_CHANNEL: {e}",
                                 exc_info=True,
                             )
-                    raise
-                except FloodWait:
                     raise
                 except Exception as e:
                     logger.error(

@@ -7,6 +7,11 @@ Documented ordering (see AGENTS.md):
 
     banned -> private-mode -> token-activation -> force-sub -> shortener-status
 
+* ``preflight`` runs only ``banned -> private-mode -> token`` and returns
+  the shortener status (which is a value, not a gate);
+* force-sub is NOT in ``PREFLIGHT_GATES``: it must be called explicitly
+  after ``preflight`` via :func:`force_sub_gate` (see
+  ``validate_request_common`` in ``bot/plugins/stream.py``);
 * owner bypasses everything; authorized users bypass everything but the
   ban check;
 * /start runs only ``banned + private-mode`` so the activation flow stays
@@ -261,6 +266,8 @@ PREFLIGHT_GATES = {
 #: their own sequence and a new command cannot forget a gate
 GATES_STANDARD: tuple = ("banned", "private_mode", "token")
 GATES_START: tuple = ("banned", "private_mode")
+# info cmds skip private/token intentionally (see common.py): /dc and /ping
+# must stay reachable for token-pending users; force-sub still applies
 GATES_INFO: tuple = ("banned",)
 
 

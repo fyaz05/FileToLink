@@ -17,7 +17,7 @@ from .stream_routes import routes
 # The (?=/|$) tail anchor also covers the no-filename legacy shape
 # (/AbCdEf12345), whose bare hash+id is the whole link credential.
 _PSEUDONYM_RE = re.compile(
-    r"(?P<canon>(?<=/f/)[0-9a-f]{20,32})"
+    r"(?P<canon>(?<=/f/)(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{20}))"
     r"|(?P<legacy>(?<=/watch/)[a-zA-Z0-9_-]{6}\d+)"
     r"|(?P<activate>(?<=/activate/)[A-Za-z0-9_-]{43})"
     r"|(?P<idfirst>(?<=/)[a-zA-Z0-9_-]{6}\d+(?=/|$))"

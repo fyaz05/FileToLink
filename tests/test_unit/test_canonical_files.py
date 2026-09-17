@@ -73,8 +73,6 @@ def test_merge_falls_back_to_refreshed_sources():
 def test_merge_preserves_legacy_public_hash():
     """Self-heal replacement must keep the existing public_hash: rewriting a
     legacy 20-char hash to 32-hex would permanently break published links."""
-    from Thunder.utils.canonical_files import _merge_replacement_record
-
     existing = {
         "public_hash": "a" * 20,
         "created_at": "t0",
