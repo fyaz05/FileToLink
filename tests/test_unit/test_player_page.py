@@ -85,6 +85,20 @@ async def test_meta_tags():
     assert "metaSize" not in nosize
 
 
+async def test_embed_tags():
+    """Rich-embed tags per kind; never on image/download pages."""
+    video = await _render()
+    assert 'property="og:video"' in video
+    assert 'property="og:audio"' not in video
+    audio = await _render("a.mp3", "audio/mpeg", 1024)
+    assert 'property="og:audio"' in audio
+    assert 'property="og:video"' not in audio
+    image = await _render("p.png", "image/png", 1024)
+    assert "og:video" not in image and "og:audio" not in image
+    other = await _render("z.zip", "application/zip", 1024)
+    assert "og:video" not in other and "og:audio" not in other
+
+
 async def test_no_go_template_remnants():
     out = await _render()
     for remnant in ("{{.", "{{if ", "{{end}}", "printf", "ThunderGo/logo"):

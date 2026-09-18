@@ -27,6 +27,14 @@
     <meta name="twitter:description" content="Stream '{{ file_name }}' in a beautiful, atmospheric environment.">
     <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
+    {% if kind == 'video' %}
+    <meta property="og:video" content="{{ src|safe }}">
+    <meta property="og:video:type" content="{{ mime_type }}">
+    {% elif kind == 'audio' %}
+    <meta property="og:audio" content="{{ src|safe }}">
+    <meta property="og:audio:type" content="{{ mime_type }}">
+    {% endif %}
+
     <!-- L7: preconnect hints for CDN origins -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://cdn.vidstack.io" crossorigin>
