@@ -16,6 +16,21 @@ def _invalidate_user_flags(user_id: int) -> None:
     flags.invalidate(("allowed", user_id), ("token_ok", user_id))
 
 
+def _as_aware_utc(value: Any) -> datetime | None:
+    """Normalize a DB-loaded expiry to aware UTC.
+
+    Legacy rows may carry naive datetimes (pre-tz_aware driver decodes of
+    UTC instants) or non-datetime junk. Naive → assume UTC (BSON stores UTC
+    millis); anything else → None so the caller fails closed instead of
+    raising TypeError mid-activation (no operator data migration needed).
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
+    return None
+
+
 async def check(user_id: int) -> bool:
     """Token/authorization gate (H7: cached, fail-closed)."""
     try:
@@ -114,9 +129,15 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
             return "wrong_user", 0.0
         if doc.get("activated"):
             return "already", 0.0
-        if doc.get("expires_at") and doc["expires_at"] <= now:
-            # a stale deep-link must not activate a token that expired before the CAS
-            return "invalid", 0.0
+        if doc.get("expires_at"):
+            expires_at_loaded = _as_aware_utc(doc["expires_at"])
+            if expires_at_loaded is None:
+                # corrupt expiry shape: fail closed, never activate, never 500
+                logger.warning(f"Ignoring token with non-datetime expires_at for user {user_id}.")
+                return "invalid", 0.0
+            if expires_at_loaded <= now:
+                # a stale deep-link must not activate a token that expired before the CAS
+                return "invalid", 0.0
 
         expires_at = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
         activated_doc = await db.token_col.find_one_and_update(

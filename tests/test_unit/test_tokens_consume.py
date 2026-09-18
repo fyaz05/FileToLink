@@ -76,6 +76,49 @@ async def test_cas_loss_to_expiry_is_invalid(monkeypatch):
 
 
 @pytest.mark.unit
+async def test_naive_future_expiry_treated_as_utc(monkeypatch):
+    """Legacy naive datetimes are UTC instants: future stays activatable."""
+
+    class _FakeOkCol(_FakeTokenCol):
+        async def find_one_and_update(self, *_args, **_kwargs):
+            return {"activated": True}
+
+    doc = {
+        "token": "t",
+        "user_id": 7,
+        "activated": False,
+        "expires_at": datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1),
+    }
+    monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=_FakeOkCol(doc)))
+    monkeypatch.setattr(tokens_module.Var, "TOKEN_TTL_HOURS", 7)
+    monkeypatch.setattr(tokens_module.flags, "invalidate", lambda *keys: None)
+    status, _hours = await consume("t", 7)
+    assert status == "ok"
+
+
+@pytest.mark.unit
+async def test_naive_past_expiry_is_invalid(monkeypatch):
+    doc = {
+        "token": "t",
+        "user_id": 7,
+        "activated": False,
+        "expires_at": datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
+    }
+    monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=_FakeTokenCol(doc)))
+    status, hours = await consume("t", 7)
+    assert (status, hours) == ("invalid", 0.0)
+
+
+@pytest.mark.unit
+async def test_non_datetime_expiry_is_invalid_not_500(monkeypatch):
+    """Corrupt expires_at shapes fail closed instead of raising TypeError."""
+    doc = {"token": "t", "user_id": 7, "activated": False, "expires_at": "tomorrow-ish"}
+    monkeypatch.setattr(tokens_module, "db", SimpleNamespace(token_col=_FakeTokenCol(doc)))
+    status, hours = await consume("t", 7)
+    assert (status, hours) == ("invalid", 0.0)
+
+
+@pytest.mark.unit
 async def test_token_for_other_user_is_wrong_user(monkeypatch):
     doc = {
         "token": "t",
