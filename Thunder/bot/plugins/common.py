@@ -161,8 +161,8 @@ async def about_command(bot: Client, msg: Message):
 
 @StreamBot.on_message(filters.command("link") & filters.private)
 async def link_private_hint(bot: Client, msg: Message):
-    # /link is a group-only command (stream.py); in private chat there is
-    # nothing to link — point at the direct-send flow instead of silence.
+    # /link is group-only (stream.py); hint at the direct-send flow
+    # instead of answering private /link with silence.
     await reply_safe(msg, text=MSG_LINK_PRIVATE_HINT, parse_mode=ParseMode.MARKDOWN)
 
 

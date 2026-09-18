@@ -75,8 +75,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
 
     broadcast_id = os.urandom(3).hex()
     stats = {"total": 0, "success": 0, "failed": 0, "deleted": 0, "cancelled": False}
-    # unreachable non-authorized ids; DB deletes happen after the summary,
-    # never serially inside workers
+    # unreachable ids; deletes happen after the summary, never in workers
     prune_ids: list[int] = []
     broadcast_ids[broadcast_id] = stats
 
@@ -218,8 +217,8 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                 logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 
             if prune_ids:
-                # summary is already out; prune unreachable rows in the
-                # background so N sequential deletes never stall workers
+                # summary is out; prune in the background so sequential
+                # deletes never stall workers
                 prune_task = asyncio.create_task(_prune_collected(prune_ids))
                 _BROADCAST_TASKS.add(prune_task)
                 prune_task.add_done_callback(_BROADCAST_TASKS.discard)

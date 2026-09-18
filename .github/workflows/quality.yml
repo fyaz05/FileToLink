@@ -109,8 +109,7 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
-          # attestations only materialize on registry push; skipped silently
-          # on PR smoke builds
+          # attestations materialize only on registry push (skipped on PR smoke)
           provenance: true
           sbom: true
           tags: |
