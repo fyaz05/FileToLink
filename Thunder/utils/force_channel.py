@@ -65,6 +65,10 @@ async def force_channel_check(client: Client, message: Message):
     if not Var.FORCE_CHANNEL_ID:
         return True
 
+    if message.from_user is not None and message.from_user.id == Var.OWNER_ID:
+        # owner bypasses everything, including force-sub
+        return True
+
     if message.from_user is None:
         # fail-closed: channel posts / anonymous admins have no verifiable
         # user id, so membership cannot be checked -- deny like the token

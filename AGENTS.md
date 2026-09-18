@@ -104,7 +104,7 @@ from Thunder.vars import Var                      # all env config
 
 ## Access gates (M12 order: banned → private-mode → token; force-sub where applicable; shortener-status is routing, not a gate)
 
-- Owner bypasses preflight gates but not force-sub; authorized users bypass private-mode + token, but not ban or force-sub.
+- Owner bypasses everything, including force-sub; authorized users bypass private-mode + token, but not ban or force-sub.
 - `/start` runs only `banned + private-mode` (activation stays reachable).
 - `PRIVATE_MODE=True` restricts the whole bot to owner + authorized users.
 - No-sender messages (channel posts, anonymous admins) are DENIED wherever a gate is active — fail-closed, never bypass.
