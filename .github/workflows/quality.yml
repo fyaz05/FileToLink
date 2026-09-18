@@ -109,9 +109,10 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
-          # attestations materialize only on registry push (skipped on PR smoke)
-          provenance: true
-          sbom: true
+          # NOTE: provenance/sbom attestations stay off: the default docker
+          # driver rejects them even on no-push smoke builds, and gating them
+          # behind push would only surface a publish breakage post-merge.
+          # Revisit with a containerd-backed builder if attestations are wanted.
           tags: |
             fyaz05/thunder:latest
             fyaz05/thunder:${{ github.sha }}
