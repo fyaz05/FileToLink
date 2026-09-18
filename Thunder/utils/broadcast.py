@@ -199,6 +199,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
         if completed_normally:
             completion_msg = MSG_BROADCAST_COMPLETE.format(
                 elapsed_time=get_readable_time(int(time.time() - start_time)),
+                mode=mode,
                 total_users=stats["total"],
                 successes=stats["success"],
                 failures=stats["failed"],

@@ -25,6 +25,7 @@ from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import LOG_FILE, logger, redact_secrets
 from Thunder.utils.messages import (
     MSG_ADMIN_AUTH_LIST_HEADER,
+    MSG_ADMIN_AUTH_OWNER_FOOTER,
     MSG_ADMIN_NO_BAN_REASON,
     MSG_ADMIN_USER_BANNED,
     MSG_ADMIN_USER_UNBANNED,
@@ -37,6 +38,7 @@ from Thunder.utils.messages import (
     MSG_BROADCAST_USAGE,
     MSG_BUTTON_CLOSE,
     MSG_CANNOT_BAN_OWNER,
+    MSG_CANNOT_BAN_SELF,
     MSG_CHANNEL_BANNED,
     MSG_CHANNEL_BANNED_REASON_SUFFIX,
     MSG_CHANNEL_NOT_BANNED,
@@ -49,7 +51,7 @@ from Thunder.utils.messages import (
     MSG_ERROR_GENERIC,
     MSG_INVALID_BROADCAST_CMD,
     MSG_INVALID_USER_ID,
-    MSG_LOG_FILE_CAPTION,
+    MSG_LOG_FILE_CAPTION_SIZED,
     MSG_LOG_FILE_EMPTY,
     MSG_LOG_FILE_MISSING,
     MSG_NO_AUTH_USERS,
@@ -148,8 +150,10 @@ async def show_status(client: Client, message: Message):
             )
 
         total_workload = sum(work_loads.values())
+        bot_username = getattr(getattr(client, "me", None), "username", None) or "?"
         status_text_str = MSG_SYSTEM_STATUS.format(
             uptime=uptime_str,
+            bot_username=bot_username,
             active_bots=len(multi_clients),
             total_workload=total_workload,
             workload_items=workload_items,
@@ -257,7 +261,11 @@ async def send_logs(client: Client, message: Message):
 
         doc = BytesIO(payload.encode("utf-8"))
         doc.name = "bot_redacted.txt"
-        await tg_call(message.reply_document, doc, caption=MSG_LOG_FILE_CAPTION, retries=1)
+        caption = MSG_LOG_FILE_CAPTION_SIZED.format(
+            tailed=humanbytes(len(doc.getvalue())),
+            total=humanbytes(os.path.getsize(LOG_FILE)),
+        )
+        await tg_call(message.reply_document, doc, caption=caption, retries=1)
     except Exception as e:
         logger.error(f"Error sending log file: {e}", exc_info=True)
         await reply(message, text=MSG_ERROR_GENERIC)
@@ -352,6 +360,8 @@ async def list_authorized_command(client: Client, message: Message):
             auth_time=user["authorized_at"],
         )
 
+    text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)
+
     await reply(
         message,
         text=text,
@@ -375,6 +385,9 @@ async def ban_command(client: Client, message: Message):
 
         if target_id == Var.OWNER_ID:
             return await reply(message, text=MSG_CANNOT_BAN_OWNER)
+
+        if message.from_user and target_id == message.from_user.id:
+            return await reply(message, text=MSG_CANNOT_BAN_SELF)
 
         if target_id < 0:
             await db.add_banned_channel(channel_id=target_id, reason=reason, banned_by=banned_by_id)

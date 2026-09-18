@@ -33,7 +33,7 @@ from Thunder.utils.messages import (
     MSG_CRITICAL_ERROR,
     MSG_DM_BATCH_PREFIX,
     MSG_DM_SINGLE_PREFIX,
-    MSG_ERROR_DM_FAILED,
+    MSG_ERROR_DM_BATCH_FAILED,
     MSG_ERROR_INVALID_NUMBER,
     MSG_ERROR_NO_FILE,
     MSG_ERROR_NOT_ADMIN,
@@ -641,8 +641,11 @@ async def process_batch(
     processed = sum(1 for r in results.values() if r)
 
     links_list = [rec["online_link"] for mid in ids if (rec := results.get(mid))]
-    for i in range(0, len(links_list), LINK_CHUNK_SIZE):
-        chunk = links_list[i : i + LINK_CHUNK_SIZE]
+    chunks = [
+        links_list[i : i + LINK_CHUNK_SIZE] for i in range(0, len(links_list), LINK_CHUNK_SIZE)
+    ]
+    dm_failed_chunks = 0
+    for idx, chunk in enumerate(chunks):
         chunk_text = (
             MSG_BATCH_LINKS_READY.format(count=len(chunk))
             + f"\n\n<code>{chr(10).join(chunk)}</code>"
@@ -668,9 +671,17 @@ async def process_batch(
                 )
             except Exception as e:
                 logger.error(f"Error sending DM in batch: {e}", exc_info=True)
-                await reply_user_err(msg, MSG_ERROR_DM_FAILED)
-        if i + LINK_CHUNK_SIZE < len(links_list):
+                dm_failed_chunks += 1
+        if idx + 1 < len(chunks):
             await asyncio.sleep(MESSAGE_DELAY)
+
+    if dm_failed_chunks:
+        await reply_user_err(
+            msg,
+            MSG_ERROR_DM_BATCH_FAILED.format(
+                failed_chunks=dm_failed_chunks, total_chunks=len(chunks)
+            ),
+        )
 
     try:
         await edit_safe(

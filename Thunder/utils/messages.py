@@ -11,11 +11,19 @@ MSG_ERROR_USER_INFO = "❗ **User Not Found:** Couldn't find user. Please check 
 # ------ User Input & Validation Errors ------
 MSG_INVALID_USER_ID = "❌ **Invalid User ID:** Please provide a numeric user ID."
 MSG_ERROR_START_BOT = "⚠️ You need to start the bot in private first to use this command.\n👉 [Click here]({invite_link}) to start a private chat."
+MSG_LINK_PRIVATE_HINT = (
+    "ℹ️ **/link is for Groups**\n\n"
+    "In private chat, just send me a file directly — no command needed."
+)
 MSG_ERROR_REPLY_FILE = "⚠️ Please use the /link command in reply to a file."
 MSG_ERROR_NO_FILE = "⚠️ The message you're replying to does not contain any file."
 MSG_ERROR_INVALID_NUMBER = "⚠️ **Invalid number specified.**"
 MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and {max_files}.**"
-MSG_ERROR_DM_FAILED = "⚠️ I couldn't send you a Direct Message. Please start the bot first."
+MSG_ERROR_DM_BATCH_FAILED = (
+    "⚠️ **Partial DM Delivery**\n\n"
+    "> 📭 I couldn't deliver {failed_chunks} of {total_chunks} batch chunk(s) to you in private chat.\n"
+    "> This usually means you haven't started a private chat with me, or you've blocked me."
+)
 
 # H7/M12: fail-closed + private-mode surfaces
 MSG_ERROR_TEMP = (
@@ -76,6 +84,7 @@ MSG_DECORATOR_BANNED = (
     "You are currently banned and cannot use this bot.\nReason: {reason}\nBanned on: {ban_time}"
 )
 MSG_BAN_USAGE = "⚠️ **Usage:** /ban [user_id] [reason]"
+MSG_CANNOT_BAN_SELF = "❌ **You cannot ban yourself.**"
 MSG_CANNOT_BAN_OWNER = "❌ **Cannot ban an owner.**"
 MSG_ADMIN_USER_BANNED = "✅ <b>User {user_id} has been banned.</b>"
 MSG_BAN_REASON_SUFFIX = "\n📝 <b>Reason:</b> {reason}"
@@ -111,6 +120,9 @@ MSG_AUTH_USER_INFO = """{i}. 👤: {display_name}
    • Authorized by: <code>{authorized_by}</code>
    • Date: <code>{auth_time}</code>\n\n"""
 MSG_ADMIN_AUTH_LIST_HEADER = "🔐 <b>Authorized Users List</b>\n\n"
+MSG_ADMIN_AUTH_OWNER_FOOTER = (
+    "\n👑 <b>Owner:</b> <code>{owner_id}</code> <i>(implicit, all access)</i>"
+)
 
 # ------ Shell Commands (guarded by ENABLE_SHELL, L10) ------
 MSG_SHELL_USAGE = "<b>Usage:</b>\n/shell <command>\n\n<b>Example:</b>\n/shell ls -l"
@@ -130,7 +142,7 @@ MSG_SHELL_NO_OUTPUT = "✅ <b>Command Executed:</b> No output."
 MSG_WORKLOAD_ITEM = "   {bot_name}: {load}\n"
 MSG_ADMIN_RESTART_DONE = "✅ **Restart Successful!**"
 MSG_RESTARTING = "♻️ **Updating and Restarting Bot...**\n\n> ⏳ Please wait a moment."
-MSG_LOG_FILE_CAPTION = "📄 **System Logs**"
+MSG_LOG_FILE_CAPTION_SIZED = "📄 **System Logs** (last {tailed} of {total})"
 
 MSG_LOG_FILE_EMPTY = "ℹ️ **Log File Empty:** No data found in the log file."
 MSG_LOG_FILE_MISSING = "⚠️ **Log File Missing:** Could not find the log file."
@@ -158,7 +170,8 @@ MSG_WELCOME = (
     "I generate direct download and streaming links for your files.\n\n"
     "<b>How to use:</b>\n"
     "1. Send any file to me for private links.\n"
-    "2. In groups, reply to a file with /link.\n\n"
+    "2. In groups, reply to a file with /link (up to {max_files} at once: <code>/link 5</code>).\n"
+    "3. Stream links support seeking in any browser.\n\n"
     "» Use /help for all commands and detailed information.\n\n"
     "🚀 Send a file to begin!"
 )
@@ -291,6 +304,7 @@ MSG_BROADCAST_START = "📣 **Starting Broadcast...**\n\n> ⏳ Please wait for c
 MSG_BROADCAST_COMPLETE = (
     "📢 **Broadcast Completed Successfully!** 📢\n\n"
     "⏱️ **Duration:** `{elapsed_time}`\n"
+    "📊 **Mode:** `{mode}`\n"
     "👥 **Total Users:** `{total_users}`\n"
     "✅ **Successful Deliveries:** `{successes}`\n"
     "❌ **Failed Deliveries:** `{failures}`\n"
@@ -370,6 +384,7 @@ MSG_FILE_TYPE_UNKNOWN = "❓ Unknown File Type"
 MSG_SYSTEM_STATUS = (
     "✅ **System Status:** Operational\n\n"
     "> 🕒 **Uptime:** `{uptime}`\n"
+    "> 🤖 **Bot:** `@{bot_username}`\n"
     "> 🤖 **Bot Instances:** `{active_bots}`\n"
     "> 📊 **Total Workload:** `{total_workload}`\n\n"
     "📜 **Workload Distribution:**\n\n"

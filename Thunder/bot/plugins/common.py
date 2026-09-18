@@ -40,6 +40,7 @@ from Thunder.utils.messages import (
     MSG_FILE_TYPE_VIDEO,
     MSG_FILE_TYPE_VIDEO_NOTE,
     MSG_FILE_TYPE_VOICE,
+    MSG_LINK_PRIVATE_HINT,
     MSG_PING_RESPONSE,
     MSG_PING_START,
     MSG_TOKEN_ACTIVATED,
@@ -88,7 +89,8 @@ async def start_command(bot: Client, msg: Message):
             return await reply_safe(msg, text=MSG_TOKEN_INVALID, parse_mode=ParseMode.HTML)
 
     txt = MSG_WELCOME.format(
-        user_name=html.escape(user.first_name or "Unknown") if user else "Unknown"
+        user_name=html.escape(user.first_name or "Unknown") if user else "Unknown",
+        max_files=Var.MAX_BATCH_FILES,
     )
     link, title = await get_force_info(bot)
     if link:
@@ -155,6 +157,13 @@ async def about_command(bot: Client, msg: Message):
     await reply_safe(
         msg, text=MSG_ABOUT, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(btns)
     )
+
+
+@StreamBot.on_message(filters.command("link") & filters.private)
+async def link_private_hint(bot: Client, msg: Message):
+    # /link is a group-only command (stream.py); in private chat there is
+    # nothing to link — point at the direct-send flow instead of silence.
+    await reply_safe(msg, text=MSG_LINK_PRIVATE_HINT, parse_mode=ParseMode.MARKDOWN)
 
 
 async def send_user_dc(msg: Message, user: User):
