@@ -6,7 +6,13 @@ import time
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.errors import MessageNotModified
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
+from pyrogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardButtonBuy,
+    InlineKeyboardMarkup,
+    Message,
+    User,
+)
 
 from Thunder.bot import StreamBot
 from Thunder.utils.bot_utils import gen_dc_txt, get_user, log_newusr, reply_user_err
@@ -96,7 +102,7 @@ async def start_command(bot: Client, msg: Message):
     if link:
         txt += "\n\n" + MSG_COMMUNITY_CHANNEL.format(channel_title=html.escape(title or "Channel"))
 
-    btns = [
+    btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
         [
             InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
             InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command"),
@@ -125,7 +131,9 @@ async def help_command(bot: Client, msg: Message):
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
 
     txt = build_help_text(Var.MAX_BATCH_FILES)
-    btns = [[InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command")]]
+    btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
+        [InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command")]
+    ]
 
     link, title = await get_force_info(bot)
     if link:
@@ -146,7 +154,7 @@ async def about_command(bot: Client, msg: Message):
     if msg.from_user:
         await log_newusr(bot, msg.from_user.id, msg.from_user.first_name)
 
-    btns = [
+    btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
         [InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command")],
         [
             InlineKeyboardButton(MSG_BUTTON_GITHUB, url="https://github.com/fyaz05/FileToLink/"),

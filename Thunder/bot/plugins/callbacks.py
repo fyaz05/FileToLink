@@ -178,6 +178,9 @@ async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
     if not await owner_only(client, callback_query):
         return
     raw = callback_query.data or ""
+    if isinstance(raw, bytes):
+        # stub-typed str|bytes|None; decode defensively, never crash the panel
+        raw = raw.decode("utf-8", errors="replace")
     broadcast_id = raw.split("_", 1)[1]
     entry = broadcast_ids.get(broadcast_id)
     if entry is not None:
