@@ -162,7 +162,7 @@
                 <!-- M2: non-media types get a download card, not a broken player -->
                 <div class="non-media">
                     <p>This file type ({{ mime_type }}) can't be played in the browser.</p>
-                    <a class="cmd-btn primary" href="{{ src|safe }}" download="{{ file_name }}">Download</a>
+                    <a class="cmd-btn primary" href="{{ download_src|safe }}" download="{{ file_name }}">Download</a>
                 </div>
                 {% endif %}
                 <div id="unsupportedFormatMessage" class="unsupported-format-message" hidden>
@@ -174,7 +174,7 @@
 
         <nav class="command-bar">
             <div class="command-glass">
-                <a href="{{ src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
+                <a href="{{ download_src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
                     <svg viewBox="0 0 24 24">
                         <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                     </svg>

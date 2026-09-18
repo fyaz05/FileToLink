@@ -57,7 +57,10 @@ CORS_HEADERS = {
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 
-_RETRY_5 = {**CORS_HEADERS, "Retry-After": "5"}
+# Every error response carries CORS (readable browser errors) + no-store
+# (a cached failure must never outlive the underlying problem).
+_ERROR_HEADERS = {**CORS_HEADERS, "Cache-Control": "no-store"}
+_RETRY_5 = {**_ERROR_HEADERS, "Retry-After": "5"}
 
 
 def _unavailable(text: str) -> web.HTTPServiceUnavailable:
@@ -112,7 +115,7 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
     if not work_loads:
         raise web.HTTPServiceUnavailable(
             text=("No available clients to handle the request. Please try again later."),
-            headers={**CORS_HEADERS, "Retry-After": "2"},
+            headers={**_ERROR_HEADERS, "Retry-After": "2"},
         )
 
     available_clients = [
@@ -130,7 +133,7 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
                 f"({load_range} active streams). Please retry shortly."
             ),
             headers={
-                **CORS_HEADERS,
+                **_ERROR_HEADERS,
                 "Retry-After": str(OVERLOAD_RETRY_AFTER_SECONDS),
             },
         )
@@ -159,8 +162,9 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if not match:
         # 400 (not RFC 9110's "ignore") is deliberate: structurally broken
         # or multi-range requests are hand-crafted, and an explicit signal
-        # beats silently shipping the whole body
-        raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
+        # beats silently shipping the whole body. Constant body: the header
+        # value is attacker-controlled and must not be reflected.
+        raise web.HTTPBadRequest(text="Invalid range header", headers=_ERROR_HEADERS)
 
     start_str = match.group("start")
     end_str = match.group("end")
@@ -172,18 +176,20 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         end = min(end, file_size - 1)
     else:
         if not end_str:
-            raise web.HTTPBadRequest(text=f"Invalid range header: {range_header}")
+            raise web.HTTPBadRequest(text="Invalid range header", headers=_ERROR_HEADERS)
         suffix_len = int(end_str)
         if suffix_len <= 0:
             raise web.HTTPRequestRangeNotSatisfiable(
-                headers={"Content-Range": f"bytes */{file_size}"}
+                headers={**_ERROR_HEADERS, "Content-Range": f"bytes */{file_size}"}
             )
         start = max(file_size - suffix_len, 0)
         end = file_size - 1
 
     if start >= file_size or start > end:
         # L6: 416 discipline with Content-Range
-        raise web.HTTPRequestRangeNotSatisfiable(headers={"Content-Range": f"bytes */{file_size}"})
+        raise web.HTTPRequestRangeNotSatisfiable(
+            headers={**_ERROR_HEADERS, "Content-Range": f"bytes */{file_size}"}
+        )
 
     return start, end
 
@@ -227,7 +233,7 @@ async def _route_ladder(label: str):
         logger.debug(f"{label}: {type(e).__name__} - {e}")
         raise web.HTTPNotFound(
             text="Resource not found",
-            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
+            headers=_ERROR_HEADERS,
         ) from e
     except web.HTTPException as e:
         logger.warning(f"HTTP exception in {label}: {e}")
@@ -237,7 +243,7 @@ async def _route_ladder(label: str):
         logger.error(f"{label} error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
             text=f"An unexpected server error occurred: {error_id}",
-            headers=CORS_HEADERS,
+            headers=_ERROR_HEADERS,
         ) from e
 
 
@@ -263,7 +269,9 @@ async def _admission_ladder(client_id: int, label: str):
         work_loads[client_id] -= 1
         error_id = secrets.token_hex(6)
         logger.error(f"{label} error {error_id}: {e}", exc_info=True)
-        raise web.HTTPInternalServerError(text=f"Server error during streaming: {error_id}") from e
+        raise web.HTTPInternalServerError(
+            text=f"Server error during streaming: {error_id}", headers=_ERROR_HEADERS
+        ) from e
 
 
 async def _serve_media_response(
@@ -392,11 +400,11 @@ async def activate_endpoint(request: web.Request):
     token = request.match_info.get("token", "").strip()
     username = getattr(StreamBot, "username", None)
     if not token or not _is_activation_token(token):
-        raise web.HTTPBadRequest(text="Malformed activation token")
+        raise web.HTTPBadRequest(text="Malformed activation token", headers=_ERROR_HEADERS)
     if not username:
         raise web.HTTPServiceUnavailable(
             text="Bot is still starting; try again shortly.",
-            headers={**CORS_HEADERS, "Retry-After": "5"},
+            headers=_RETRY_5,
         )
     raise web.HTTPFound(_telegram_activate_url(username, token))
 

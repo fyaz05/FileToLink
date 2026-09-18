@@ -75,6 +75,9 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
 
     broadcast_id = os.urandom(3).hex()
     stats = {"total": 0, "success": 0, "failed": 0, "deleted": 0, "cancelled": False}
+    # unreachable non-authorized ids; DB deletes happen after the summary,
+    # never serially inside workers
+    prune_ids: list[int] = []
     broadcast_ids[broadcast_id] = stats
 
     try:
@@ -159,7 +162,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                     if not user_id:
                         logger.warning(f"Skipping user with no ID: {user}")
                         continue
-                    await _send_one(client, message, user_id, stats)
+                    await _send_one(client, message, user_id, stats, prune_ids)
                     # idempotent modulo _PROGRESS_EVERY: concurrent workers may
                     # skip or duplicate a progress edit; the final completion
                     # message is the source of truth
@@ -214,37 +217,68 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             except Exception as e:
                 logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 
+            if prune_ids:
+                # summary is already out; prune unreachable rows in the
+                # background so N sequential deletes never stall workers
+                prune_task = asyncio.create_task(_prune_collected(prune_ids))
+                _BROADCAST_TASKS.add(prune_task)
+                prune_task.add_done_callback(_BROADCAST_TASKS.discard)
+
     task = asyncio.create_task(do_broadcast())
     # hold a strong ref so CPython cannot GC the task mid-run
     _BROADCAST_TASKS.add(task)
     task.add_done_callback(_BROADCAST_TASKS.discard)
 
 
-async def _send_one(client: Client, message: Message, user_id: int, stats: dict) -> None:
-    try:
-        await tg_call(message.reply_to_message.copy, user_id, retries=2)
-        stats["success"] += 1
-    except _PERMANENT_ERRORS as e:
-        recipient_type, reason = _PERMANENT_ERROR_REASONS.get(type(e), ("Recipient", "unreachable"))
-
-        logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
+async def _prune_collected(user_ids: list[int]) -> None:
+    """Best-effort background prune of unreachable recipients."""
+    for user_id in user_ids:
         try:
-            is_authorized = await db.is_user_authorized(user_id)
-            if not is_authorized:
-                await db.delete_user(user_id)
-                stats["deleted"] += 1
-            else:
+            await db.delete_user(user_id)
+        except Exception as e:
+            logger.error(f"Background prune failed for {user_id}: {e}", exc_info=True)
+
+
+async def _send_one(
+    client: Client, message: Message, user_id: int, stats: dict, prune_ids: list[int]
+) -> None:
+    # transient errors get 3 attempts with attempt-squared backoff (1s, 4s);
+    # permanent and FloodWait outcomes return immediately (tg_call already
+    # retried FloodWaits with bounded sleeps)
+    for attempt in range(1, 4):
+        try:
+            await tg_call(message.reply_to_message.copy, user_id, retries=1)
+            stats["success"] += 1
+            return
+        except _PERMANENT_ERRORS as e:
+            recipient_type, reason = _PERMANENT_ERROR_REASONS.get(
+                type(e), ("Recipient", "unreachable")
+            )
+
+            logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
+            try:
+                is_authorized = await db.is_user_authorized(user_id)
+                if not is_authorized:
+                    prune_ids.append(user_id)
+                    stats["deleted"] += 1
+                else:
+                    stats["failed"] += 1
+            except Exception as db_err:
+                logger.error(f"Prune lookup failed for {user_id}: {db_err}", exc_info=True)
                 stats["failed"] += 1
-        except Exception as db_err:
-            logger.error(f"Prune lookup failed for {user_id}: {db_err}", exc_info=True)
+            return
+        except FloodWait as e:
+            # allowed: classify-only, no sleep (tg_call already retried)
+            logger.warning(f"FloodWait persisted for user {user_id}, last wait: {e.value}s")
             stats["failed"] += 1
-    except FloodWait as e:
-        # allowed: classify-only, no sleep (tg_call already retried)
-        logger.warning(f"FloodWait persisted for user {user_id}, last wait: {e.value}s")
-        stats["failed"] += 1
-    except Exception as e:
-        logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
-        stats["failed"] += 1
+            return
+        except Exception as e:
+            if attempt < 3:
+                await asyncio.sleep(attempt * attempt)
+                continue
+            logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
+            stats["failed"] += 1
+            return
 
 
 async def _edit_progress(status_msg: Message, stats: dict) -> None:

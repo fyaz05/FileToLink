@@ -68,6 +68,7 @@ async def render_media_page(
         "heading": f"View {file_name}",
         "file_name": file_name,
         "src": f"{src}?disposition=inline",
+        "download_src": f"{src}?disposition=attachment",
         "kind": _page_kind(mime_type, file_name),
         "mime_type": mime_type or "application/octet-stream",
         "size_formatted": humanbytes(size_bytes) if size_bytes else None,
