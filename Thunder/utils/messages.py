@@ -93,7 +93,7 @@ MSG_USER_BANNED_NOTIFICATION = "🚫 **You have been banned from using this bot.
 MSG_UNBAN_USAGE = "⚠️ **Usage:** /unban <user_id>"
 MSG_ADMIN_USER_UNBANNED = "✅ <b>User {user_id} has been unbanned.</b>"
 MSG_USER_UNBANNED_NOTIFICATION = "🎉 **You have been unbanned from using this bot.**"
-MSG_USER_NOT_IN_BAN_LIST = "ℹ️ **User {user_id} was not found in the ban list."
+MSG_USER_NOT_IN_BAN_LIST = "ℹ️ **User {user_id} was not found in the ban list.**"
 MSG_CHANNEL_BANNED = "✅ <b>Channel {channel_id} has been banned.</b>"
 MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 <b>Reason:</b> {reason}"
 MSG_CHANNEL_UNBANNED = "✅ **Channel {channel_id} has been unbanned.**"
@@ -289,7 +289,7 @@ MSG_NEW_FILE_REQUEST = (
 )
 
 # ------ Batch Processing (M4b: skipped counts non-media files) ------
-MSG_PROCESSING_BATCH = "♻️ **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
+MSG_PROCESSING_BATCH = "♻️ **Processing {file_count} files**"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
 MSG_DM_BATCH_PREFIX = "📬 <b>Batch Links from {chat_title}</b>\n"

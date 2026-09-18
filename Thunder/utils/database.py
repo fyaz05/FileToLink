@@ -9,7 +9,7 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError, ExecutionTimeout, OperationFailure
 
 from Thunder.utils.flag_cache import flags
-from Thunder.utils.logger import logger
+from Thunder.utils.logger import hash_path_token, logger
 from Thunder.vars import Var
 
 # H8: every Mongo op gets a server-side budget so a brownout cannot pin
@@ -439,9 +439,7 @@ class Database:
                 },
                 upsert=True,
             )
-            logger.debug(
-                f"Saved main token {token_value} for user {user_id} with activated status {activated}."
-            )
+            logger.debug(f"Saved main token for user {user_id} with activated status {activated}.")
         except Exception as e:
             logger.error(f"Error saving main token for user {user_id}: {e}", exc_info=True)
             raise
@@ -499,7 +497,10 @@ class Database:
         try:
             return await self.files_col.find_one({"public_hash": public_hash})
         except Exception as e:
-            logger.error(f"Error getting file by hash {public_hash}: {e}", exc_info=True)
+            # no capability material in logs: public_hash identifies the link
+            logger.error(
+                f"Error getting file by hash {hash_path_token(public_hash)}: {e}", exc_info=True
+            )
             if raise_on_error:
                 raise
             return None
@@ -509,7 +510,8 @@ class Database:
             await self.files_col.insert_one(file_record)
         except Exception as e:
             logger.error(
-                f"Error creating canonical file record for {file_record.get('file_unique_id')}: {e}",
+                f"Error creating canonical file record for "
+                f"{hash_path_token(str(file_record.get('file_unique_id')))}: {e}",
                 exc_info=True,
             )
             raise
@@ -521,7 +523,8 @@ class Database:
             )
         except Exception as e:
             logger.error(
-                f"Error replacing canonical file record for {file_record.get('file_unique_id')}: {e}",
+                f"Error replacing canonical file record for "
+                f"{hash_path_token(str(file_record.get('file_unique_id')))}: {e}",
                 exc_info=True,
             )
             raise
@@ -563,7 +566,10 @@ class Database:
             result = await self.files_col.delete_one({"public_hash": public_hash})
             return result.deleted_count > 0
         except Exception as e:
-            logger.error(f"Error deleting stale file record {public_hash}: {e}", exc_info=True)
+            logger.error(
+                f"Error deleting stale file record {hash_path_token(public_hash)}: {e}",
+                exc_info=True,
+            )
             return False
 
     async def update_file_id(
@@ -576,7 +582,9 @@ class Database:
             )
             return True
         except Exception as e:
-            logger.error(f"Error updating file_id for {public_hash}: {e}", exc_info=True)
+            logger.error(
+                f"Error updating file_id for {hash_path_token(public_hash)}: {e}", exc_info=True
+            )
             if raise_on_error:
                 raise
             return False

@@ -33,8 +33,22 @@ _CONFIG_BACKUP = "config.env.bak"
 def _recover_config_backup() -> None:
     """A crash between _backup_config and _restore_config would otherwise
     leave the app permanently without config.env (next boot hard-fails).
-    Restore any orphaned backup before doing anything else."""
-    if os.path.exists(_CONFIG_BACKUP) and not os.path.exists("config.env"):
+    Restore any orphaned backup before doing anything else.
+
+    A config.env that git tracks was just shipped by the upstream pull, not
+    written by the operator (P3-11): the operator's backup wins there too.
+    An untracked config.env is the operator's own (re-created after the
+    crash) and is left alone; the stale backup stays in place for safety.
+    """
+    if not os.path.exists(_CONFIG_BACKUP):
+        return
+    restore = not os.path.exists("config.env")
+    if not restore and os.path.isdir(".git") and shutil.which("git") is not None:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "config.env"], capture_output=True
+        )
+        restore = tracked.returncode == 0
+    if restore:
         try:
             os.replace(_CONFIG_BACKUP, "config.env")
             logger.info("Recovered config.env from orphaned backup.")

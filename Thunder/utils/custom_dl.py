@@ -18,6 +18,10 @@ from Thunder.vars import Var
 # M9/H4b: caps the total FloodWait pinning of one stream handler before a 503.
 _MAX_STREAM_FLOODWAIT_SECONDS = 60.0
 
+# Shared media chunk size (1 MiB): also used by the HTTP streaming routes to
+# align the byte-skip math with stream_file's chunk offsets.
+CHUNK_SIZE = 1024 * 1024
+
 
 class ByteStreamer:
     __slots__ = ("client", "chat_id")
@@ -54,10 +58,10 @@ class ByteStreamer:
         offset: int = 0,
         limit: int = 0,
     ) -> AsyncGenerator[bytes]:
-        chunk_offset = offset // (1024 * 1024)
+        chunk_offset = offset // CHUNK_SIZE
         chunk_limit = 0
         if limit > 0:
-            chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
+            chunk_limit = ((limit + CHUNK_SIZE - 1) // CHUNK_SIZE) + 1
 
         # fetch the target ONCE, outside the retry loop: per-retry re-fetches
         # cost an extra RPC per FloodWait and turn hiccups into spurious 404s
@@ -122,9 +126,3 @@ class ByteStreamer:
             "unique_id": getattr(media, "file_unique_id", None),
             "media_type": media_type,
         }
-
-    async def get_file_info(self, message_id: int) -> dict[str, Any]:
-        # no blanket swallow: the route's error ladder maps FileNotFound -> 404
-        # and all else -> 500; masking here turned outages into misleading 404s
-        message = await self.get_message(message_id)
-        return self.get_file_info_sync(message)

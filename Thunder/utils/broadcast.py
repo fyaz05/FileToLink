@@ -256,7 +256,11 @@ async def _send_one(
 
             logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
             try:
-                is_authorized = await db.is_user_authorized(user_id)
+                # raise_on_error=True: a Mongo brownout is NOT "unauthorized".
+                # The fail-soft default would prune live authorized users and
+                # inflate the deleted counter; the handler below counts it as
+                # a plain failure instead.
+                is_authorized = await db.is_user_authorized(user_id, raise_on_error=True)
                 if not is_authorized:
                     prune_ids.append(user_id)
                     stats["deleted"] += 1

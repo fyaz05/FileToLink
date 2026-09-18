@@ -69,14 +69,22 @@ class FlagCache:
         key: Hashable,
         loader: Callable[[], Awaitable[Any]],
     ) -> Any:
+        task = asyncio.current_task()
         try:
             value = await loader()
-        finally:
+        except BaseException:
             self._inflight.pop(key, None)
-        self._data[key] = (value, time.monotonic())
-        self._data.move_to_end(key)
-        while len(self._data) > self.max_items:
-            self._data.popitem(last=False)
+            raise
+        # Fence (P2-1): invalidate()/clear() may have dropped our registration
+        # while the loader was in flight; re-storing the pre-mutation value
+        # would re-cache a stale gate answer for a full TTL. Store only if we
+        # are still the registered loader for this key.
+        if self._inflight.get(key) is task:
+            self._data[key] = (value, time.monotonic())
+            self._data.move_to_end(key)
+            while len(self._data) > self.max_items:
+                self._data.popitem(last=False)
+        self._inflight.pop(key, None)
         return value
 
     def invalidate(self, *keys: Hashable) -> None:
@@ -103,8 +111,6 @@ class FlagCache:
             await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
             try:
                 self.sweep()
-            except asyncio.CancelledError:
-                raise
             except Exception as e:
                 logger.error(f"flag_cache[{self.name}] sweeper error: {e}", exc_info=True)
 

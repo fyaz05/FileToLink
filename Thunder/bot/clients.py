@@ -13,7 +13,7 @@ from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
 
-def _harden_session_files() -> None:
+def harden_session_files() -> None:
     """Session files hold credentials; chmod 0600 best-effort."""
     for path in glob.glob("*.session"):
         try:
@@ -74,7 +74,7 @@ async def initialize_clients():
 
     multi_clients.update(dict(clients))
 
-    _harden_session_files()
+    harden_session_files()
 
     if len(multi_clients) > 1:
         print("╠══════════════════════ MULTI-CLIENT ═══════════════════════╣")

@@ -3,7 +3,6 @@
 import pytest
 
 from Thunder.utils.decorators import (
-    GATES_INFO,
     GATES_STANDARD,
     GATES_START,
     PREFLIGHT_GATES,
@@ -21,7 +20,6 @@ def test_gate_presets_exist_in_registry():
     for preset, name in (
         (GATES_STANDARD, "GATES_STANDARD"),
         (GATES_START, "GATES_START"),
-        (GATES_INFO, "GATES_INFO"),
     ):
         for gate_id in preset:
             assert gate_id in PREFLIGHT_GATES, f"{name}: unknown gate id {gate_id!r}"
@@ -60,7 +58,7 @@ async def test_preflight_returns_shortener_status_for_owner(monkeypatch):
     # pin the knob off: with it env-overridden on, the old `or` fallback
     # turned the assertion below into a tautology
     monkeypatch.setattr(Var, "SHORTEN_MEDIA_LINKS", False)
-    result = await preflight(object(), _Msg(), gates=GATES_INFO)
+    result = await preflight(object(), _Msg(), gates=GATES_START)
     assert result is False
 
 

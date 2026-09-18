@@ -61,10 +61,10 @@ jobs:
           uv run ruff format --check Thunder/ update.py tests/
 
       - name: Mypy (blocking)
-        run: uv run mypy Thunder update.py --ignore-missing-imports
+        run: uv run mypy Thunder update.py
 
       - name: Unit tests
-        run: uv run pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35
+        run: uv run pytest --cov=Thunder --cov-report=term-missing --cov-fail-under=35
 
       # Audit the locked env: `-r requirements.txt` (direct pins only) never covered transitives.
       - name: pip-audit (locked environment incl. transitives)

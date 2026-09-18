@@ -9,6 +9,7 @@ from urllib.parse import quote, quote_plus, unquote
 
 from aiohttp import web
 from pymongo.errors import PyMongoError
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 
 from Thunder import StartTime, __version__
@@ -23,7 +24,7 @@ from Thunder.utils.canonical_files import (
     touch_buffer_stats,
     update_cached_file_id,
 )
-from Thunder.utils.custom_dl import ByteStreamer
+from Thunder.utils.custom_dl import CHUNK_SIZE, ByteStreamer
 from Thunder.utils.file_properties import get_media
 from Thunder.utils.logger import logger
 from Thunder.utils.render_template import render_media_page, render_page
@@ -34,7 +35,6 @@ routes = web.RouteTableDef()
 
 # legacy 6-char capability hash family (L1: kept while ENABLE_LEGACY_LINKS=on)
 SECURE_HASH_LENGTH = 6
-CHUNK_SIZE = 1024 * 1024
 # M9: per-client admission cap
 MAX_CONCURRENT_PER_CLIENT = max(1, Var.MAX_CONCURRENT_STREAMS)
 OVERLOAD_RETRY_AFTER_SECONDS = 2
@@ -79,27 +79,21 @@ def get_streamer(client_id: int) -> ByteStreamer:
 def parse_media_request(path: str, query: Mapping[str, str]) -> tuple[int, str]:
     clean_path = unquote(path).strip("/")
 
+    # both ids are regex-derived \d+, so int() cannot raise here
     match = PATTERN_HASH_FIRST.match(clean_path)
     if match:
-        try:
-            message_id = int(match.group(2))
-            secure_hash = match.group(1)
-            if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
-                return message_id, secure_hash
-        except ValueError as e:
-            raise InvalidHash(f"Invalid message ID format in path: {e}") from e
+        message_id = int(match.group(2))
+        secure_hash = match.group(1)
+        if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
+            return message_id, secure_hash
 
     match = PATTERN_ID_FIRST.match(clean_path)
     if match:
-        try:
-            message_id = int(match.group(1))
-            secure_hash = query.get("hash", "").strip()
-            if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
-                return message_id, secure_hash
-            else:
-                raise InvalidHash("Invalid or missing hash in query parameter")
-        except ValueError as e:
-            raise InvalidHash(f"Invalid message ID format in path: {e}") from e
+        message_id = int(match.group(1))
+        secure_hash = query.get("hash", "").strip()
+        if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
+            return message_id, secure_hash
+        raise InvalidHash("Invalid or missing hash in query parameter")
 
     raise InvalidHash("Invalid URL structure or missing hash")
 
@@ -225,8 +219,9 @@ async def _fetch_file_record(secure_hash: str) -> dict | None:
 
 @contextlib.asynccontextmanager
 async def _route_ladder(label: str):
-    """Shared outer ladder: client errors -> 404, HTTP pass-through, the
-    rest -> error-id 500 (no internals in the body)."""
+    """Shared outer ladder: client errors -> 404, Telegram unavailability
+    (FloodWait/transport, P2-6) -> uniform 503 + Retry-After, HTTP
+    pass-through, the rest -> error-id 500 (no internals in the body)."""
     try:
         yield
     except (InvalidHash, FileNotFound) as e:
@@ -235,6 +230,9 @@ async def _route_ladder(label: str):
             text="Resource not found",
             headers=_ERROR_HEADERS,
         ) from e
+    except (TelegramUnavailable, FloodWait) as e:
+        logger.warning(f"{label}: Telegram unavailable ({type(e).__name__})")
+        raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except web.HTTPException as e:
         logger.warning(f"HTTP exception in {label}: {e}")
         raise
@@ -436,8 +434,8 @@ async def status_endpoint(request):
             },
         },
         headers={
-            "Access-Control-Allow-Origin": "*",
-            # L3: status is dynamic -- never serve it from cache
+            # L3: status is dynamic -- never serve it from cache.  No CORS:
+            # the workload/touch internals are operator-facing (P3-9).
             "Cache-Control": "no-store",
         },
     )
@@ -593,7 +591,10 @@ async def media_delivery(request: web.Request):
         work_loads[client_id] += 1
 
         async with _admission_ladder(client_id, "media stream"):
-            file_info = await streamer.get_file_info(message_id)
+            # one vault fetch serves both the info derivation and the stream:
+            # passing the Message on means stream_file does not re-fetch (P3-7)
+            vault_message = await streamer.get_message(message_id)
+            file_info = streamer.get_file_info_sync(vault_message)
             unique_id = _resolve_unique_id(file_info)
 
             if unique_id[:SECURE_HASH_LENGTH] != secure_hash:
@@ -603,5 +604,5 @@ async def media_delivery(request: web.Request):
                 file_info=file_info,
                 streamer=streamer,
                 client_id=client_id,
-                media_ref=message_id,
+                media_ref=vault_message,
             )

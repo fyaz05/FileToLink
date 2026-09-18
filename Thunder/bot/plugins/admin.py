@@ -6,6 +6,7 @@ import html
 import os
 import time
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import psutil
@@ -17,6 +18,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, 
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
+from Thunder.bot.clients import cleanup_clients
 from Thunder.utils.bot_utils import reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
@@ -236,7 +238,17 @@ async def restart_bot(client: Client, message: Message):
     from Thunder.utils.canonical_files import drain_background_touch_tasks
 
     await drain_background_touch_tasks()
-    os.execv("/bin/bash", ["bash", "thunder.sh"])
+    # Abbreviated teardown (P3-3): execv replaces the process without running
+    # M13's graceful shutdown, so stop the clients + DB best-effort first.
+    # Bounded: a hung RPC must never wedge the restart.
+    for step, name in ((cleanup_clients, "clients"), (db.close, "database")):
+        try:
+            await asyncio.wait_for(step(), timeout=10)
+        except Exception as e:
+            logger.warning(f"Restart teardown: {name} cleanup incomplete: {e}")
+    # absolute path: exec'ing into thunder.sh must work from any cwd (P3-4)
+    script = Path(__file__).resolve().parents[3] / "thunder.sh"
+    os.execv("/bin/bash", ["bash", str(script)])
 
 
 @StreamBot.on_message(filters.command("log") & owner_filter)

@@ -311,9 +311,7 @@ async def channel_receive_handler(bot: Client, msg: Message):
             return
         notification_msg = handler_kwargs.get("notification_msg")
 
-        is_banned_statically = (
-            hasattr(Var, "BANNED_CHANNELS") and message.chat.id in Var.BANNED_CHANNELS
-        )
+        is_banned_statically = message.chat.id in Var.BANNED_CHANNELS
         # Fail-open is deliberate: leave_chat is irreversible.
         is_banned_dynamically = (
             await flags.get_or_load(
@@ -464,6 +462,13 @@ async def process_single(
                 stored_msg = await fwd_media(file_msg)
                 if not stored_msg:
                     logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
+                    # unstick the status message: without this the user's chat
+                    # keeps saying "Processing your file..." forever (P2-9)
+                    if status_msg:
+                        try:
+                            await edit_safe(status_msg, MSG_ERROR_PROCESSING_MEDIA)
+                        except Exception:
+                            pass
                     return None
             links = await gen_links(stored_msg, shortener=shortener_val)
             canonical_reply_id = stored_msg.id
@@ -623,14 +628,7 @@ async def process_batch(
                 await progress_edit()
 
     try:
-        await edit_safe(
-            status_msg,
-            MSG_PROCESSING_BATCH.format(
-                batch_number=1,
-                total_batches=(count + BATCH_SIZE - 1) // BATCH_SIZE,
-                file_count=count,
-            ),
-        )
+        await edit_safe(status_msg, MSG_PROCESSING_BATCH.format(file_count=count))
     except Exception as e:
         logger.debug(f"Could not update batch status message: {e}")
 

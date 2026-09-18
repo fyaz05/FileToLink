@@ -5,9 +5,8 @@ description = "FileToLink — Telegram file-to-link streaming bot (pyrofork + ai
 requires-python = ">=3.13"
 dependencies = [
     "aiohttp==3.14.3",           # OSV-clean; 3 2026 CVEs fixed (Aug-2026 advisory cycle) (H1)
-    "pyrofork==2.3.69",           # latest; upstream quiet since 2025-12 -- watch for Telegram API drift
-    "tgcrypto-pyrofork==1.2.8",  # H1: maintained crypto backend (pyrofork[speedup])
-    "pymongo==4.18.0",           # async AsyncMongoClient; timeoutMS since 4.2
+    "pyrofork[speedup]==2.3.69",  # latest; [speedup] = tgcrypto-pyrofork + uvloop extras. NOTE: upstream (Mayuri-Chan/pyrofork) was archived 2026-09 -- plan the exit to a maintained fork or pyrogram
+    "pymongo==4.18.1",            # async AsyncMongoClient; timeoutMS since 4.2
     "Jinja2==3.1.6",
     "python-dotenv==1.2.3",
     "psutil==7.2.2",

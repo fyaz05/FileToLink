@@ -3,12 +3,14 @@
 """Central FloodWait-safe call helpers.
 
 Every Telegram RPC goes through :func:`tg_call` or a thin wrapper.  On
-``FloodWait`` the call sleeps ``min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)``
-and retries at most ``retries`` times, then the exception propagates
-unchanged.  Wall-clock budgets (H8): lightweight RPCs get a default timeout
-so a hung call cannot pin a handler forever; file-transfer paths default to
-*no* timeout (large media legitimately takes minutes) -- pass ``timeout=``
-explicitly where a budget is known.
+``FloodWait`` the call sleeps ``min(e.value, cap)`` -- where the cap is
+30 s for lightweight RPCs and :data:`MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS`
+(600 s, the pre-branch pyrogram auto-sleep ceiling) for file-transfer
+shapes -- and retries at most ``retries`` times, then the exception
+propagates unchanged.  Wall-clock budgets (H8): lightweight RPCs get a
+default timeout so a hung call cannot pin a handler forever;
+file-transfer paths default to *no* timeout (large media legitimately
+takes minutes) -- pass ``timeout=`` explicitly where a budget is known.
 """
 
 import asyncio
@@ -26,6 +28,12 @@ DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
 
 # H8: cap FloodWait sleeps so a lightweight RPC cannot blow its advertised wall-clock budget.
 MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
+
+# File-transfer shapes may sleep the full FloodWait up to this ceiling -- the
+# pre-branch pyrogram auto-sleep budget.  Sustained throttling on the ingest
+# path (vault copy, uploads) must ride out long waits instead of hard-failing
+# (P2-5); waits beyond the ceiling still surface to the caller.
+MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS = 600.0
 
 # Call shapes allowed to run unbounded by default (large media transfers); matched by name.
 _UNBOUNDED_SHAPES = {
@@ -75,7 +83,6 @@ async def tg_call(
     *args: Any,
     retries: int = 1,
     timeout: float | None = None,
-    on_error: Callable[[Exception], None] | None = None,
     **kwargs: Any,
 ) -> T:
     """Call ``fn(*args, **kwargs)`` sleeping through ``FloodWait``.
@@ -96,19 +103,19 @@ async def tg_call(
             attempt += 1
             if attempt > retries:
                 raise
-            sleep_for = min(e.value, MAX_FLOODWAIT_SLEEP_SECONDS)
+            cap = (
+                MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS
+                if getattr(fn, "__name__", "") in _UNBOUNDED_SHAPES
+                else MAX_FLOODWAIT_SLEEP_SECONDS
+            )
+            sleep_for = min(e.value, cap)
             logger.debug(
                 f"FloodWait in {getattr(fn, '__name__', fn)}, "
                 f"sleeping {sleep_for}s (asked {e.value}s, attempt {attempt}/{retries})"
             )
             await asyncio.sleep(sleep_for)
-        except Exception as e:
-            if on_error is not None:
-                try:
-                    on_error(e)
-                except Exception:
-                    logger.debug("on_error hook raised", exc_info=True)
-            raise
+        # every other exception propagates unchanged (fail-closed callers
+        # classify the error; broadcast counts it; routes map it)
 
 
 async def reply_safe(msg: Any, text: str, retries: int = 1, **kwargs: Any):
@@ -140,4 +147,5 @@ __all__ = [
     "answer_safe",
     "DEFAULT_RPC_TIMEOUT_SECONDS",
     "MAX_FLOODWAIT_SLEEP_SECONDS",
+    "MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS",
 ]

@@ -100,3 +100,26 @@ async def test_concurrent_loaders_single_flight():
     # load-bearing private read: no public API exposes single-flight bookkeeping;
     # a leaked task here would stampede the backend on the next cold key
     assert cache._inflight == {}  # bookkeeping cleaned up
+
+
+@pytest.mark.unit
+async def test_invalidate_mid_load_defeats_stale_store():
+    """P2-1 regression: invalidate() while a loader is in flight must not let
+    that loader re-cache its pre-mutation value for a full TTL."""
+    import asyncio
+
+    release = asyncio.Event()
+    loads = {"n": 0}
+
+    async def slow_loader():
+        loads["n"] += 1
+        await release.wait()
+        return "pre-mutation"
+
+    cache = FlagCache(ttl_seconds=60)
+    task = asyncio.create_task(cache.get_or_load("k", slow_loader))
+    await asyncio.sleep(0)  # let the loader start and register itself
+    cache.invalidate("k")
+    release.set()
+    assert await task == "pre-mutation"  # the in-flight caller still gets a value...
+    assert cache._data.get("k") is None  # ...but nothing was cached

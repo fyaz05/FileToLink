@@ -24,8 +24,8 @@ from pyrogram.errors import MessageNotModified
 from Thunder import __version__
 from Thunder.bot import StreamBot, work_loads
 from Thunder.bot.clients import (
-    _harden_session_files,
     cleanup_clients,
+    harden_session_files,
     initialize_clients,
 )
 from Thunder.server import web_server
@@ -144,7 +144,7 @@ async def start_services():
         print("   ✓ Bot commands set successfully.")
         # managed background task: cancelled + awaited at shutdown
         background_tasks.append(schedule_index_ensure())
-        _harden_session_files()
+        harden_session_files()
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
@@ -164,6 +164,12 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
+        # the index-ensure task may already be scheduled -- stop it against a
+        # closing client BEFORE db.close (P3-2)
+        for t in background_tasks:
+            t.cancel()
+        if background_tasks:
+            await asyncio.wait(background_tasks, timeout=10)
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
         # M13: a failed boot must exit non-zero or container restart policies never fire.
@@ -192,9 +198,10 @@ async def start_services():
         for t in background_tasks:
             t.cancel()
         if background_tasks:
-            await asyncio.wait_for(
-                asyncio.gather(*background_tasks, return_exceptions=True), timeout=30
-            )
+            # bounded: boot failure must not hang forever on stuck workers;
+            # asyncio.wait (not wait_for+gather) so a task that ignores
+            # cancellation cannot skip the teardown below (P3-1)
+            await asyncio.wait(background_tasks, timeout=30)
         await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
@@ -228,10 +235,10 @@ async def start_services():
         for t in background_tasks:
             t.cancel()
         if background_tasks:
-            # bounded: boot failure must not hang forever on stuck workers
-            await asyncio.wait_for(
-                asyncio.gather(*background_tasks, return_exceptions=True), timeout=30
-            )
+            # bounded: boot failure must not hang forever on stuck workers;
+            # asyncio.wait (not wait_for+gather) so a task that ignores
+            # cancellation cannot skip the teardown below (P3-1)
+            await asyncio.wait(background_tasks, timeout=30)
         # touch buffer must flush BEFORE db.close, or _bulk_flush discards increments
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
@@ -355,7 +362,7 @@ async def schedule_limiter_sweep():
 
 
 if __name__ == "__main__":
-    # L5: restrictive umask covers session keys before _harden_session_files runs; logs/ predates umask, ambient perms (content redacted)
+    # L5: restrictive umask covers session keys before harden_session_files runs; logs/ predates umask, ambient perms (content redacted)
     os.umask(0o077)
     try:
         asyncio.run(start_services())

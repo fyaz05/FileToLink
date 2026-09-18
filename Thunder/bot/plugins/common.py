@@ -51,7 +51,6 @@ from Thunder.utils.messages import (
     MSG_PING_START,
     MSG_TOKEN_ACTIVATED,
     MSG_TOKEN_FAILED,
-    MSG_TOKEN_INVALID,
     MSG_WELCOME,
 )
 from Thunder.utils.safe_call import edit_safe, reply_safe
@@ -92,7 +91,14 @@ async def start_command(bot: Client, msg: Message):
                     text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours),
                     parse_mode=ParseMode.HTML,
                 )
-            return await reply_safe(msg, text=MSG_TOKEN_INVALID, parse_mode=ParseMode.HTML)
+            # no button here: the payload is a consumed/foreign/unknown token,
+            # so the "click the button below" copy of MSG_TOKEN_INVALID would
+            # be a dead end -- say what failed instead (P2-8)
+            return await reply_safe(
+                msg,
+                text=MSG_TOKEN_FAILED.format(reason="The token is invalid or has expired."),
+                parse_mode=ParseMode.HTML,
+            )
 
     txt = MSG_WELCOME.format(
         user_name=html.escape(user.first_name or "Unknown") if user else "Unknown",

@@ -8,6 +8,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from Thunder.utils.flag_cache import FlagCache
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_COMMUNITY_CHANNEL,
@@ -25,6 +26,25 @@ _resolved_at = 0.0
 _RESOLVED_TTL_SECONDS = 300.0
 _negative_until = 0.0
 _NEGATIVE_TTL_SECONDS = 60.0
+
+# Membership cache (P3-12): one get_chat_member RPC per gated message was the
+# last uncached hot-path read.  Short TTL bounds both the RPC volume and the
+# post-join access delay -- a user who joins waits at most this long.
+_membership_cache = FlagCache(ttl_seconds=60, max_items=4096, name="force_member")
+
+
+async def _is_member(client: Client, user_id: int) -> bool:
+    try:
+        member = await tg_call(
+            client.get_chat_member,
+            Var.FORCE_CHANNEL_ID,
+            user_id,
+            retries=1,
+        )
+        return member is not None
+    except UserNotParticipant:
+        return False
+    # any other error propagates: the gate stays fail-closed
 
 
 async def get_force_info(bot: Client):
@@ -77,43 +97,10 @@ async def force_channel_check(client: Client, message: Message):
         return False
 
     try:
-        member = await tg_call(
-            client.get_chat_member,
-            Var.FORCE_CHANNEL_ID,
-            message.from_user.id,
-            retries=1,
+        is_member = await _membership_cache.get_or_load(
+            (Var.FORCE_CHANNEL_ID, message.from_user.id),
+            lambda: _is_member(client, message.from_user.id),
         )
-        if member is None:
-            logger.error(
-                f"Failed to get chat member for {message.from_user.id} in "
-                f"force channel {Var.FORCE_CHANNEL_ID} after retries."
-            )
-            return False
-        return True
-    except UserNotParticipant:
-        link, title = await get_force_info(client)
-        if link and title:
-            try:
-                await reply_safe(
-                    message,
-                    MSG_COMMUNITY_CHANNEL.format(
-                        # escaped twin of the /help panel line (common.py);
-                        # HTML parse mode skips the markdown pre-pass
-                        channel_title=html.escape(title or "Channel")
-                    ),
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(MSG_FORCE_JOIN_BUTTON, url=link)]]
-                    ),
-                )
-            except Exception as e:
-                logger.warning(f"Could not send force-sub prompt: {e}")
-        else:
-            try:
-                await reply_safe(message, MSG_FORCE_SUB_REQUIRED)
-            except Exception as e:
-                logger.warning(f"Could not send force-sub notice: {e}")
-        return False
     except Exception as e:
         logger.error(f"Error checking force channel: {e}", exc_info=True)
         try:
@@ -121,3 +108,30 @@ async def force_channel_check(client: Client, message: Message):
         except Exception as inner_e:
             logger.warning(f"Could not send force-sub error notice: {inner_e}")
         return False
+
+    if is_member:
+        return True
+
+    link, title = await get_force_info(client)
+    if link and title:
+        try:
+            await reply_safe(
+                message,
+                MSG_COMMUNITY_CHANNEL.format(
+                    # escaped twin of the /help panel line (common.py);
+                    # HTML parse mode skips the markdown pre-pass
+                    channel_title=html.escape(title or "Channel")
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(MSG_FORCE_JOIN_BUTTON, url=link)]]
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Could not send force-sub prompt: {e}")
+    else:
+        try:
+            await reply_safe(message, MSG_FORCE_SUB_REQUIRED)
+        except Exception as e:
+            logger.warning(f"Could not send force-sub notice: {e}")
+    return False

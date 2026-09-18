@@ -521,13 +521,7 @@ A: Yes. Mixing clients from different accounts and data centers (like DC1, DC4, 
 
 ### Contributing
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to the branch (`git push origin feature/amazing-feature`).
-5. Open a Pull Request.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow — including the local quality gates (`make format lint test`) that CI enforces on every PR.
 
 ## License
 

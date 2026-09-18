@@ -37,17 +37,23 @@
 
     <!-- L7: preconnect hints for CDN origins -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="preconnect" href="https://cdn.vidstack.io" crossorigin>
 
-    <!-- Vidstack Player -->
+    <!-- Vidstack Player -- pinned @1.15.6 + SRI: originals from npm, not the
+         dynamically-minified cdn.vidstack.io proxy (whose own header says SRI-unsafe) -->
     {% if kind == 'video' %}
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
+    <link rel="stylesheet" integrity="sha384-Pye8mXuY3OU46b5zsf/OBfd+esy+JP/GiOsEnr6qo5iJ9+6c9kJPLAzuHXFsf7Su"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/video.css" />
+    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+        crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
     {% elif kind == 'audio' %}
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/audio.css" />
-    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
+    <link rel="stylesheet" integrity="sha384-KRJ7FoKJ+WR7M5eseizS0aAkjlHEiZqCLXWVCht10UU4q3mEdlccim7qsjalqt0k"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/audio.css" />
+    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+        crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
     {% endif %}
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -61,9 +67,10 @@
             rel="stylesheet" crossorigin="anonymous">
     </noscript>
 
-    <!-- Styles (CDN-hosted theme) -->
-    <link rel="stylesheet"
-        href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/ThunderGo/player.min.css">
+    <!-- Styles (CDN-hosted theme, pinned to an immutable commit + SRI) -->
+    <link rel="stylesheet" integrity="sha384-l4Ojw3YQu+8wpZ1HepaRCcvp81kEdUb2uDv+7XDJZDT1i6+j+YT5B5x0fkB65lui"
+        crossorigin="anonymous"
+        href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.css">
 
     <!-- L7: inline fallback keeps the page usable when all CDNs are blocked. -->
     <style>
@@ -381,7 +388,8 @@
             isAudio: {{ (kind == 'audio') | tojson }}
         };
     </script>
-    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/ThunderGo/player.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.js"
+        integrity="sha384-oHqpcdzrrFLizcr4kbAVv5G2FxKznDJrx5UOu1iHGZfgNRokonIa0t236CJBWSzV" crossorigin="anonymous" defer></script>
     <!-- L7 fallback: copy-link without the CDN script -->
     <script>
         (function () {

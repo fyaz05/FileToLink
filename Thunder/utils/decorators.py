@@ -24,6 +24,7 @@ Documented ordering (see AGENTS.md):
 import html
 from urllib.parse import quote_plus
 
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder.utils.database import db
@@ -83,11 +84,12 @@ async def check_banned(client, message: Message) -> bool:
                 await reply_safe(
                     message,
                     MSG_DECORATOR_BANNED.format(
-                        # reason is owner-set free text; escape so the
-                        # DEFAULT parse pass cannot reflow it into markup
+                        # reason is owner-set free text; escaped + explicit HTML
+                        # parse mode so it cannot reflow into markup (M7)
                         reason=html.escape(ban_details.get("reason", "Not specified")),
                         ban_time=ban_time,
                     ),
+                    parse_mode=ParseMode.HTML,
                 )
             except Exception:
                 pass
@@ -266,9 +268,8 @@ PREFLIGHT_GATES = {
 #: their own sequence and a new command cannot forget a gate
 GATES_STANDARD: tuple = ("banned", "private_mode", "token")
 GATES_START: tuple = ("banned", "private_mode")
-# info cmds skip private/token intentionally (see common.py): /dc and /ping
-# must stay reachable for token-pending users; force-sub still applies
-GATES_INFO: tuple = ("banned",)
+# info commands (/help, /about, /dc, /ping) run GATES_START on purpose: the
+# token gate must not block them for token-pending users
 
 
 async def preflight(
