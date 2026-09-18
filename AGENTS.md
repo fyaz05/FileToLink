@@ -12,7 +12,7 @@ bash thunder.sh            # best-effort self-update (shell-free) + python3 -m T
 
 ## Dependencies
 
-`pyproject.toml` owns 8 exact-pinned direct deps (CI fails beyond 8);
+`pyproject.toml` owns 7 exact-pinned direct deps (CI fails beyond 8);
 `uv.lock` pins the transitive graph (regenerate with `uv lock` on change);
 `requirements.lock` is the hashed export Docker installs with `--require-hashes`.
 CI fails if either drifts:
@@ -21,7 +21,7 @@ CI fails if either drifts:
 uv sync --frozen      # reproducible env
 pip install -r requirements.txt                  # human installs
 pip install --require-hashes -r requirements.lock  # what Docker ships
-# aiohttp, pyrofork, tgcrypto-pyrofork, pymongo, Jinja2, python-dotenv, psutil, uvloop
+# aiohttp, pyrofork[speedup], pymongo, Jinja2, python-dotenv, psutil, uvloop
 ```
 
 ## Development
