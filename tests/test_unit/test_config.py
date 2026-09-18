@@ -140,3 +140,14 @@ def test_all_problems_reported_together():
     assert proc.returncode != 0
     for var in ("API_ID", "BIN_CHANNEL", "MAX_BATCH_FILES"):
         assert var in combined, f"{var} problem not reported together with the others"
+
+
+@pytest.mark.unit
+def test_version_fallback_matches_pyproject():
+    """The __version__ fallback literal must track pyproject on every bump."""
+    import tomllib
+
+    import Thunder
+
+    with open(REPO_ROOT / "pyproject.toml", "rb") as f:
+        assert Thunder.__version__ == tomllib.load(f)["project"]["version"]

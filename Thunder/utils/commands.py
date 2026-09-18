@@ -2,6 +2,7 @@ from Thunder.bot import StreamBot
 from Thunder.bot.registry import bot_commands, help_command_rows
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import MSG_HELP_COMMANDS_HEADER, MSG_HELP_INTRO, MSG_HELP_TIPS
+from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
 
@@ -20,6 +21,6 @@ async def set_commands():
         try:
             commands = bot_commands()
             if commands:
-                await StreamBot.set_bot_commands(commands)
+                await tg_call(StreamBot.set_bot_commands, commands)
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}", exc_info=True)

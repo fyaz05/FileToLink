@@ -29,8 +29,8 @@ audit:
 	uv run vulture Thunder update.py --min-confidence 80
 	@count=$$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt); \
 	echo "Direct runtime deps: $$count"; \
-	if [ "$$count" -gt 8 ]; then \
-		echo "ERROR: dependency count increased beyond 8; justify or remove."; \
+	if [ "$$count" -gt 7 ]; then \
+		echo "ERROR: dependency count increased beyond 7; justify or remove."; \
 		exit 1; \
 	fi
 

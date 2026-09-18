@@ -12,7 +12,7 @@ bash thunder.sh            # best-effort self-update (shell-free) + python3 -m T
 
 ## Dependencies
 
-`pyproject.toml` owns 7 exact-pinned direct deps (CI fails beyond 8);
+`pyproject.toml` owns 7 exact-pinned direct deps (CI fails beyond 7);
 `uv.lock` pins the transitive graph (regenerate with `uv lock` on change);
 `requirements.lock` is the hashed export Docker installs with `--require-hashes`.
 CI fails if either drifts:
@@ -97,7 +97,7 @@ from Thunder.vars import Var                      # all env config
 
 - PEP 8, 4-space indent; ruff (E,F,W,I,UP,B,SIM) in CI
 - Import order: stdlib → third-party → local; all I/O async (`asyncio.to_thread` for blocking)
-- **Never `try/except FloodWait`**: use `tg_call(...)` / `reply_safe` / `send_safe` / `edit_safe` / `delete_safe` / `answer_safe`. Allowed inline: `custom_dl.py` streaming/resume, `rate_limiter.py` worker-requeue, `broadcast.py` classify-only catch.
+- **Never `try/except FloodWait`**: use `tg_call(...)` / `reply_safe` / `send_safe` / `edit_safe` / `delete_safe` / `answer_safe`. Allowed inline: `custom_dl.py` streaming/resume, `rate_limiter.py` worker-requeue, `broadcast.py` classify-only catch, `safe_call.py` itself, the server 503 ladder, `rate_limiter.py` notification catch-and-log.
 - Budgets: Mongo `timeoutMS=5000`, TG RPC `TG_RPC_TIMEOUT_SECONDS` (transfers unbounded), shortener/keepalive 10 s
 - `html.escape()` all user strings in HTML (M7); fail-closed deny with `MSG_ERROR_TEMP` (H7)
 - Owner handlers: `filters.user(Var.OWNER_ID)`; PascalCase / snake_case / UPPER_SNAKE_CASE

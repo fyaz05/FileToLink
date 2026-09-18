@@ -5,6 +5,8 @@ renames an id, drops a config key, or breaks a branch fails here — not in a
 browser. Hermetic: render_media_page takes an explicit src (no Var, no bot).
 """
 
+import re
+
 import pytest
 
 from Thunder.utils.render_template import render_media_page
@@ -70,9 +72,31 @@ async def test_download_uses_attachment():
 
 async def test_drawer_upgrade_keys():
     """All 19 static links carry data-player keys the JS rewrites with
-    Play-Store fallbacks; static hrefs remain the no-JS fallback."""
+    Play-Store fallbacks; static hrefs remain the no-JS fallback. The key
+    NAMES matter (unknown keys render dead hrefs), not just the count."""
     out = await _render()
-    assert out.count("data-player=") == 19
+    keys = set(re.findall(r'data-player="([^"]+)"', out))
+    assert keys == {
+        "android-vlc",
+        "android-mx",
+        "android-mx-pro",
+        "android-splayer",
+        "android-next",
+        "android-nova",
+        "android-mpv",
+        "android-just",
+        "android-nplayer",
+        "ios-vlc",
+        "ios-infuse",
+        "ios-nplayer",
+        "ios-outplayer",
+        "ios-oplayer",
+        "desktop-vlc",
+        "desktop-potplayer",
+        "desktop-iina",
+        "desktop-mpv",
+        "desktop-kmplayer",
+    }
     assert "intent:" in out and "vlc-x-callback" in out
 
 

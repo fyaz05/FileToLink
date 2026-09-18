@@ -238,6 +238,8 @@ class RateLimiter:
             dropped_global += 1
 
         dropped_files = 0
+        # insertion-order (not recency like users): file entries carry no
+        # timestamps, only estimates -- dropping the oldest estimator is fine
         if len(self.file_processing_times) > MAX_TRACKED_FILES:
             for key in list(self.file_processing_times.keys()):
                 if len(self.file_processing_times) <= MAX_TRACKED_FILES:
@@ -346,24 +348,27 @@ class RateLimiter:
 
         # charge-at-exec: the sliding window is charged exactly once, here.
         # Retries must not re-charge, or one upload can burn a user's entire
-        # window on server-side failures.
+        # window on server-side failures. Decide advisory-first, then charge
+        # only when admission is certain (breaker state cannot change the
+        # window in between: both checks are synchronous).
         if not self.is_owner(user_id):
             record = not request_data.get("charged")
-            if not await self.check_limits(user_id, record=record):
+            if not await self.check_limits(user_id, record=False):
                 wait = self._calculate_user_rate_limit_wait(user_id, now)
                 if self.global_rate_limit_enabled:
                     wait = max(wait, self._calculate_global_rate_limit_wait(now))
                 wait = min(max(wait, 1.0), self.rate_limit_period_seconds)
                 await self._requeue_request(request_data, queue_type, delay=wait)
                 return True
-            if record:
-                request_data["charged"] = True
             if self.breaker.rate > 0 and not self.breaker.allow():
                 # breaker active via GLOBAL_RPS_LIMIT or the derived per-minute rate:
                 # same exec-time shaping and requeue discipline for both sources
                 retry = max(self.breaker.retry_after(), 0.5)
                 await self._requeue_request(request_data, queue_type, delay=retry)
                 return True
+            if record:
+                await self.check_limits(user_id, record=True)
+                request_data["charged"] = True
 
         logger.debug(f"Processing request for user {user_id} from {queue_type} queue.")
         start_time = time.time()
@@ -402,6 +407,8 @@ class RateLimiter:
             raise
         except Exception as e:
             logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
+            # never leave the user on a stale "In Queue" notice for a dead item
+            await self._notify_drop(request_data)
         return True
 
     async def _notify_drop(self, request_data: dict) -> None:
@@ -594,10 +601,13 @@ async def handle_rate_limited_request(
 
     # the immediate path consumes a breaker token too -- bursts of
     # within-window users never touched the bucket; a dry bucket queues, not drops.
+    # Decide first (no consumption), then charge the window only for requests
+    # that actually execute now.
     immediate = await rate_limiter.check_limits(user_id, record=False)
     if immediate and rate_limiter.breaker.rate > 0:
         immediate = rate_limiter.breaker.allow()  # consumes a token on success
-    if immediate and await rate_limiter.check_limits(user_id, record=True):
+    if immediate:
+        await rate_limiter.check_limits(user_id, record=True)
         logger.debug(f"User {user_id} within rate limits, executing immediately.")
         await handler(bot, message, *args, **kwargs)
         return

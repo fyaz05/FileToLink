@@ -24,7 +24,9 @@ def harden_session_files() -> None:
 async def cleanup_clients():
     for client in multi_clients.values():
         try:
-            await tg_call(client.stop)
+            # short per-client budget: the outer teardown bounds the total,
+            # and a hung stop must not eat the whole budget for the rest
+            await tg_call(client.stop, timeout=10.0)
         except Exception as e:
             logger.error(f"Error stopping client: {e}", exc_info=True)
 

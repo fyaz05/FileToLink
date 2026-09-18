@@ -15,7 +15,12 @@ def _health_url() -> str:
     bot.  We now bind to the configured address explicitly and check the
     status code.
     """
-    fqdn = os.getenv("KEEPALIVE_HOST") or Var.BIND_ADDRESS
+    fqdn = (os.getenv("KEEPALIVE_HOST") or "").strip()
+    if fqdn and "://" in fqdn:
+        # full public URL for PaaS anti-sleep: external traffic keeps free
+        # tiers awake, so use it verbatim instead of rebuilding loopback
+        return f"{fqdn.rstrip('/')}/health"
+    fqdn = fqdn or Var.BIND_ADDRESS
     if fqdn in ("0.0.0.0", "::"):  # nosec B104 -- string check mapping bind-all to loopback
         fqdn = "127.0.0.1"
     # loopback unless KEEPALIVE_HOST overrides

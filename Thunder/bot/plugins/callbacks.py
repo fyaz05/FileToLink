@@ -179,7 +179,8 @@ async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
     if isinstance(raw, bytes):
         # stub-typed str|bytes|None; decode defensively, never crash the panel
         raw = raw.decode("utf-8", errors="replace")
-    broadcast_id = raw.split("_", 1)[1]
+    parts = raw.split("_", 1)
+    broadcast_id = parts[1] if len(parts) > 1 else ""
     entry = broadcast_ids.get(broadcast_id)
     if entry is not None:
         entry["cancelled"] = True

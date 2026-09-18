@@ -65,6 +65,7 @@ async def test_preflight_returns_shortener_status_for_owner(monkeypatch):
 @pytest.mark.unit
 async def test_owner_bypasses_force_sub(monkeypatch):
     """Owner skips the entire chain, including force-sub (no RPC made)."""
+    import Thunder.utils.force_channel as force_channel_module
     from Thunder.utils.force_channel import force_channel_check
 
     class _User:
@@ -73,8 +74,16 @@ async def test_owner_bypasses_force_sub(monkeypatch):
     class _Msg:
         from_user = _User()
 
+    calls = {"n": 0}
+
+    async def _boom(*args, **kwargs):
+        calls["n"] += 1
+        raise AssertionError("owner path must not touch the network")
+
+    monkeypatch.setattr(force_channel_module, "_is_member", _boom)
     monkeypatch.setattr(Var, "FORCE_CHANNEL_ID", -100123)
     assert await force_channel_check(object(), _Msg()) is True
+    assert calls["n"] == 0
 
 
 @pytest.mark.unit

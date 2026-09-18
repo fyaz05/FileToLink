@@ -17,7 +17,7 @@ from Thunder.utils.bot_utils import quote_media_name
 pytestmark = pytest.mark.unit
 
 _rng = random.Random(20260918)
-_HEX = string.hexdigits.lower()
+_HEX = string.digits + "abcdef"
 _SIZES = [1, 2, 99, 1023, 1024, 1025, 10 * 1024 * 1024, 2**31 - 1]
 
 

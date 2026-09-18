@@ -108,3 +108,22 @@ async def test_media_shape_floodwait_ceiling(monkeypatch):
     with pytest.raises(FloodWait):
         await tg_call(copy, retries=1)
     assert slept == [600.0]
+
+
+@pytest.mark.unit
+async def test_max_flood_sleep_overrides_shape_cap(monkeypatch):
+    """Fan-out callers cap the sleep explicitly: a media-shaped copy with
+    max_flood_sleep=30 sleeps 30s on a 3600s flood, then raises."""
+    slept = []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    monkeypatch.setattr("Thunder.utils.safe_call.asyncio.sleep", fake_sleep)
+
+    async def copy(*args, **kwargs):
+        raise FloodWait(value=3600)
+
+    with pytest.raises(FloodWait):
+        await tg_call(copy, retries=1, max_flood_sleep=30.0)
+    assert slept == [30.0]

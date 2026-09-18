@@ -23,7 +23,7 @@ URLs are capability links — anyone with the URL can download.
   older uploads validate side-by-side forever.
 - Legacy: `/watch/<hash><id>/<name>` (player) and `/<hash><id>/<name>`
   (bytes). Disable via `ENABLE_LEGACY_LINKS=False`.
-- Filenames are slash-normalized (`/` → `_`) then percent-encoded; 
+- Filenames are slash-normalized (`/` → `_`) then percent-encoded;
 - `?disposition=inline` streams in-browser, anything else (or absent) downloads
   as `attachment` (`filename` + RFC 5987 `filename*`).
 

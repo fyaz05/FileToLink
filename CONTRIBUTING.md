@@ -18,7 +18,7 @@ pre-commit install  # optional: same ruff hooks CI runs, before each commit
 4. New env vars: safe default + annotated entry in `config_sample.env` in the
    same PR.
 5. No new runtime dependency without a one-line justification; the
-   dependency-count CI gate fails beyond 8 direct deps.
+   dependency-count CI gate fails beyond 7 direct deps.
 6. Touching `pyproject.toml` or `uv.lock`? Run `make lock` -- the same drift
    gates CI enforces (uv.lock, requirements.txt, requirements.lock).
 

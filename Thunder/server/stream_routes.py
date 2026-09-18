@@ -77,17 +77,24 @@ def get_streamer(client_id: int) -> ByteStreamer:
 def parse_media_request(path: str, query: Mapping[str, str]) -> tuple[int, str]:
     clean_path = unquote(path).strip("/")
 
-    # both ids are regex-derived \d+, so int() cannot raise here
+    # ids are regex-derived \d+; the guards below only catch absurd 4300+
+    # digit ids against int's max_str_digits limit
     match = PATTERN_HASH_FIRST.match(clean_path)
     if match:
-        message_id = int(match.group(2))
+        try:
+            message_id = int(match.group(2))
+        except ValueError:
+            raise InvalidHash("Invalid message ID format in path") from None
         secure_hash = match.group(1)
         if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
             return message_id, secure_hash
 
     match = PATTERN_ID_FIRST.match(clean_path)
     if match:
-        message_id = int(match.group(1))
+        try:
+            message_id = int(match.group(1))
+        except ValueError:
+            raise InvalidHash("Invalid message ID format in path") from None
         secure_hash = query.get("hash", "").strip()
         if len(secure_hash) == SECURE_HASH_LENGTH and VALID_HASH_REGEX.match(secure_hash):
             return message_id, secure_hash
@@ -257,6 +264,12 @@ async def _admission_ladder(client_id: int, label: str):
         work_loads[client_id] -= 1
         logger.warning(f"{label}: Telegram unavailable: {e}")
         raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
+    except FloodWait as e:
+        # defense in depth: get_message converts exhaustions already, but any
+        # raw FloodWait reaching admission must shed as 503, never 500
+        work_loads[client_id] -= 1
+        logger.warning(f"{label}: Telegram FloodWait: {e.value}s")
+        raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except web.HTTPException as e:
         work_loads[client_id] -= 1
         logger.debug(f"Client HTTP error in {label}: {e}")
@@ -268,6 +281,11 @@ async def _admission_ladder(client_id: int, label: str):
         raise web.HTTPInternalServerError(
             text=f"Server error during streaming: {error_id}", headers=_ERROR_HEADERS
         ) from e
+    except BaseException:
+        # cancellation (client disconnect) must still release the slot,
+        # or abandoned tickets pile up into false 503s
+        work_loads[client_id] -= 1
+        raise
 
 
 async def _serve_media_response(
@@ -302,6 +320,9 @@ async def _serve_media_response(
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": ("Content-Length, Content-Range, Content-Disposition"),
         "X-Content-Type-Options": "nosniff",
+        # sandbox: attacker-uploaded SVG/HTML served inline must not execute
+        # in site origin; players fetch bytes cross-origin, unaffected
+        "Content-Security-Policy": "sandbox",
     }
 
     if range_header:
@@ -402,7 +423,10 @@ async def activate_endpoint(request: web.Request):
             text="Bot is still starting; try again shortly.",
             headers=_RETRY_5,
         )
-    raise web.HTTPFound(_telegram_activate_url(username, token))
+    raise web.HTTPFound(
+        _telegram_activate_url(username, token),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @routes.get("/status", allow_head=True)
@@ -432,8 +456,9 @@ async def status_endpoint(request):
             },
         },
         headers={
-            # status is dynamic -- never serve it from cache.  No CORS:
-            # the workload/touch internals are operator-facing.
+            # status is dynamic -- never serve it from cache.  CORS stays so
+            # browser dashboards can read it; nothing here is secret.
+            "Access-Control-Allow-Origin": "*",
             "Cache-Control": "no-store",
         },
     )
@@ -482,7 +507,7 @@ async def media_preview(request: web.Request):
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
             "Please re-send the file to the bot to get a fresh link.",
-            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
+            headers=_ERROR_HEADERS,
         )
     async with _route_ladder("preview"):
         path = request.match_info["path"]
@@ -578,7 +603,7 @@ async def media_delivery(request: web.Request):
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
             "Please re-send the file to the bot to get a fresh link.",
-            headers={**CORS_HEADERS, "Cache-Control": "no-store"},
+            headers=_ERROR_HEADERS,
         )
     async with _route_ladder("media stream"):
         path = request.match_info["path"]

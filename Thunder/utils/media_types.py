@@ -6,6 +6,8 @@ lower-cased with no underscore (``videonote``) while message attribute names
 use ``video_note`` -- both are accepted everywhere.
 """
 
+from Thunder.utils.logger import logger
+
 # message attribute name -> stable canonical key
 _ATTR_TO_MEDIA_TYPE: dict[str, str] = {
     "audio": "audio",
@@ -64,6 +66,9 @@ def ext_and_mime_for_class(class_name_lower: str) -> tuple[str, str]:
     """Direct lookup by pyrogram class name (``videonote``, ``photo``, ...)."""
     key = _CLASS_TO_MEDIA_TYPE.get(class_name_lower)
     if key is None:
+        # unknown classes fall back instead of raising (download path must
+        # not die on a new pyrogram type); debug-logged for visibility
+        logger.debug(f"Unknown media class for ext/mime lookup: {class_name_lower!r}")
         return DEFAULT_EXT, DEFAULT_MIME
     return _MEDIA_EXT_MIME.get(key, (DEFAULT_EXT, DEFAULT_MIME))
 

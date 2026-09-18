@@ -146,6 +146,7 @@ async def start_services():
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
+            edited_ok = True
             try:
                 await tg_call(
                     StreamBot.edit_message_text,
@@ -154,20 +155,22 @@ async def start_services():
                     text=MSG_ADMIN_RESTART_DONE,
                     retries=1,
                 )
-                await db.delete_restart_message(restart_message_data["message_id"])
             except MessageNotModified:
-                pass
+                pass  # a previous boot already wrote it; still clear below
             except Exception as e:
                 logger.error(f"Error processing restart message: {e}", exc_info=True)
+                edited_ok = False
+            if edited_ok:
+                try:
+                    await db.delete_restart_message(restart_message_data["message_id"])
+                except Exception as e:
+                    logger.error(f"Error clearing restart marker: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
         # the index-ensure task may already be scheduled -- stop it against a
         # closing client BEFORE db.close
-        for t in background_tasks:
-            t.cancel()
-        if background_tasks:
-            await asyncio.wait(background_tasks, timeout=10)
+        await _cancel_tasks(background_tasks, timeout=10)
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
         # a failed boot must exit non-zero or container restart policies never fire.
@@ -178,6 +181,8 @@ async def start_services():
         await initialize_clients()
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
+        # index-ensure may be live already -- stop it before db.close
+        await _cancel_tasks(background_tasks, timeout=10)
         await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
@@ -193,12 +198,10 @@ async def start_services():
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
     except Exception as e:
         logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
-        for t in background_tasks:
-            t.cancel()
-        if background_tasks:
-            # bounded: a cancellation-ignoring task must not skip the teardown
-            # below (asyncio.wait, not wait_for+gather)
-            await asyncio.wait(background_tasks, timeout=30)
+        await _cancel_tasks(background_tasks, timeout=30)
+        await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
+        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
+        await _safe_teardown_step(close_shortener, "shortener")
         await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
@@ -229,12 +232,7 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
-        for t in background_tasks:
-            t.cancel()
-        if background_tasks:
-            # bounded: a cancellation-ignoring task must not skip the teardown
-            # below (asyncio.wait, not wait_for+gather)
-            await asyncio.wait(background_tasks, timeout=30)
+        await _cancel_tasks(background_tasks, timeout=30)
         # touch buffer must flush BEFORE db.close, or _bulk_flush discards increments
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
@@ -259,11 +257,30 @@ async def start_services():
         await shutdown_services(background_tasks, app_runner)
 
 
+async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
+    """Cancel + bounded wait; re-cancel stragglers so teardown always runs.
+
+    ``asyncio.wait`` alone returns still-running tasks in ``pending`` -- without
+    the re-cancel a cancellation-ignoring task would skip every step below.
+    """
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        _done, pending = await asyncio.wait(tasks, timeout=timeout)
+        for t in pending:
+            t.cancel()
+            logger.warning(f"Background task {t.get_name()} ignored cancellation; re-cancelled")
+
+
 async def _safe_teardown_step(step, name: str, errors: list | None = None):
     try:
         await asyncio.wait_for(step(), timeout=30)
-    except asyncio.CancelledError:
-        raise
+    except asyncio.CancelledError as e:
+        # shutdown completeness wins over cancellation propagation: record
+        # and continue with the remaining steps instead of aborting them
+        logger.warning(f"{name} cleanup cancelled: {e}")
+        if errors is not None:
+            errors.append((name, e))
     except Exception as e:
         logger.error(f"Error during {name} cleanup: {e}", exc_info=True)
         if errors is not None:
@@ -283,15 +300,19 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     # one bounded wait for the whole batch (per-task waits would stack)
     if background_tasks:
         done, pending = await asyncio.wait(background_tasks, timeout=10)
+        for t in pending:
+            t.cancel()
+            logger.warning(f"Background task {t.get_name()} ignored cancellation; re-cancelled")
         for t in done:
             if t.cancelled():
                 continue
             exc = t.exception()
             if exc is not None:
-                errors.append((t.get_name(), exc))
+                # worker/index failures are fatal; sweeper/keepalive/token
+                # blips must not force a container restart loop
+                if t.get_name().startswith(("request_executor", "ensure_")):
+                    errors.append((t.get_name(), exc))
                 logger.error(f"Background task {t.get_name()} failed at shutdown: {exc}")
-        for t in pending:
-            logger.warning(f"Background task {t.get_name()} did not stop within 10s")
 
     # 2. stop accepting new HTTP before draining in-flight streams
     if app_runner is not None:

@@ -32,6 +32,10 @@ def _load_env_layers() -> None:
     for key, value in merged.items():
         if value is not None:
             os.environ.setdefault(key, value)
+    if "APP_VERSION" in merged:
+        # __init__ snapshots APP_VERSION at import, before this loader runs --
+        # a file value is silently ignored, so say so instead of lying
+        logger.warning("APP_VERSION in a config file is ignored; set it in the real environment.")
 
 
 _load_env_layers()
@@ -44,6 +48,9 @@ def str_to_bool(val: str) -> bool:
 
 _config_errors: list[str] = []
 _config_warnings: list[str] = []
+# vars whose parse already failed: _require must not pile a second,
+# misleading error onto the fallback value
+_parse_failed: set[str] = set()
 
 
 def str_to_int_set(val: str) -> set[int]:
@@ -71,6 +78,7 @@ def _get_int(
         value = int(str(raw).strip())
     except (TypeError, ValueError):
         _config_errors.append(f"{name}={raw!r} is not a valid integer")
+        _parse_failed.add(name)
         return int(default)
     if min_val is not None and value < min_val:
         _config_errors.append(f"{name}={value} must be >= {min_val}")
@@ -96,6 +104,7 @@ def _get_float(name: str, default: str, *, min_val: float | None = None) -> floa
         value = float(str(raw).strip())
     except (TypeError, ValueError):
         _config_errors.append(f"{name}={raw!r} is not a valid number")
+        _parse_failed.add(name)
         return float(default)
     if min_val is not None and value < min_val:
         _config_errors.append(f"{name}={value} must be >= {min_val}")
@@ -103,6 +112,8 @@ def _get_float(name: str, default: str, *, min_val: float | None = None) -> floa
 
 
 def _require(value: object, name: str, what: str) -> None:
+    if name in _parse_failed:
+        return  # parse error already reported; don't double-count the fallback
     if not value:
         _config_errors.append(f"{name} is required ({what})")
 
@@ -133,8 +144,8 @@ class Var:
     # missing OWNER_ID is fatal -- every owner check would match nobody.
     OWNER_ID: int = _get_int("OWNER_ID", "0", min_val=1)
 
-    FQDN: str = os.getenv("FQDN", "") or BIND_ADDRESS
-    if os.getenv("FQDN", "") == "":
+    FQDN: str = os.getenv("FQDN", "").strip() or BIND_ADDRESS
+    if not os.getenv("FQDN", "").strip():
         _config_warnings.append(
             "FQDN is not set; generated links will use the bind address and "
             "will not be reachable from outside this machine."
@@ -212,6 +223,13 @@ class Var:
 
     # default wall-clock budget for lightweight Telegram RPCs.
     TG_RPC_TIMEOUT_SECONDS: float = _get_float("TG_RPC_TIMEOUT_SECONDS", "30", min_val=0)
+
+
+if Var.TG_RPC_TIMEOUT_SECONDS > 0 and Var.SLEEP_THRESHOLD >= Var.TG_RPC_TIMEOUT_SECONDS:
+    _config_warnings.append(
+        "SLEEP_THRESHOLD should stay below TG_RPC_TIMEOUT_SECONDS or auto-slept "
+        "waits blow the per-RPC budget."
+    )
 
 
 # with both gates on, the private-mode gate rejects a token activation

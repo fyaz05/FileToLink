@@ -157,10 +157,11 @@ class GenericShortenerPlugin(ShortenerPlugin):
     async def shorten(
         self, session: aiohttp.ClientSession, url: str, api_key: str, domain: str
     ) -> str:
+        # provider-mandated wire format: shrinkme-style generic APIs take the
+        # key as a query param (cuttly/ouo keep their own documented schemes)
         async with session.get(
             f"https://{domain}/api",
-            params={"url": url},
-            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            params={"api": api_key, "url": url},
             allow_redirects=False,
         ) as resp:
             if resp.status == 200:
@@ -183,6 +184,18 @@ class ShortenerSystem:
         self._inflight: dict[str, asyncio.Future] = {}
         self._init_lock = asyncio.Lock()
 
+    @staticmethod
+    def _normalize_site(site: str) -> str:
+        """Operators paste full URLs; plugins need a bare host (port kept)."""
+        cleaned = site.strip()
+        if "://" not in cleaned:
+            cleaned = f"https://{cleaned}"
+        parsed = urlparse(cleaned)
+        host = parsed.hostname or ""
+        if parsed.port:
+            host = f"{host}:{parsed.port}"
+        return host
+
     def _get_plugin_class(self, domain: str):
         for plugin_class in ShortenerPlugin.__subclasses__():
             if plugin_class is not GenericShortenerPlugin and plugin_class.matches(domain):
@@ -198,7 +211,7 @@ class ShortenerSystem:
             if not (Var.SHORTEN_ENABLED or Var.SHORTEN_MEDIA_LINKS):
                 return False
 
-            site = Var.URL_SHORTENER_SITE
+            site = ShortenerSystem._normalize_site(Var.URL_SHORTENER_SITE)
             api_key = Var.URL_SHORTENER_API_KEY
 
             if not (site and api_key):
@@ -275,6 +288,12 @@ class ShortenerSystem:
     async def close(self) -> None:
         if self.session and not self.session.closed:
             await self.session.close()
+        # drop everything: a post-close call must re-initialize, not reuse a
+        # dead session or silently serve stale cache entries
+        self.session = None
+        self.plugin = None
+        self.domain = ""
+        self.ready = False
 
 
 _system = ShortenerSystem()

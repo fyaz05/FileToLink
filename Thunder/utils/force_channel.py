@@ -26,8 +26,9 @@ _negative_until = 0.0
 _NEGATIVE_TTL_SECONDS = 60.0
 
 # Membership cache: one get_chat_member RPC per gated message was the
-# last uncached hot-path read.  Short TTL bounds both the RPC volume and the
-# post-join access delay -- a user who joins waits at most this long.
+# last uncached hot-path read.  Short symmetric TTL bounds the RPC volume;
+# either direction is at most 60s stale (a join waits, a leave lingers) --
+# asymmetric caching would only move the fail-open window, not close it.
 _membership_cache = FlagCache(ttl_seconds=60, max_items=4096, name="force_member")
 
 

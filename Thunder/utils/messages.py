@@ -46,8 +46,8 @@ MSG_DEAUTHORIZE_FAILED = (
     "❌ **Deauthorization Failed:** User `{user_id}` was not authorized or an error occurred."
 )
 MSG_TOKEN_FAILED = (
-    "⚠️ **Token Activation Failed!**\n\n"
-    "> ❗ Reason: {reason}\n\n"
+    "⚠️ <b>Token Activation Failed!</b>\n\n"
+    "<blockquote>❗ Reason: {reason}</blockquote>\n\n"
     "🔑 Please check your token or contact support."
 )
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
@@ -308,6 +308,9 @@ MSG_BROADCAST_USAGE = (
 MSG_BROADCAST_FAILED_USERS = "❌ **Broadcast Failed:** Unable to fetch users for mode '{mode}'."
 MSG_BROADCAST_NO_USERS = "ℹ️ **No users found for broadcast mode:** `{mode}`"
 MSG_BROADCAST_CANCELLED_PREFIX = "🛑 **Broadcast Cancelled**\n\n"
+MSG_BROADCAST_INTERRUPTED_PREFIX = (
+    "⚠️ **Broadcast Interrupted** (worker failure; counts cover processed users only)\n\n"
+)
 MSG_BROADCAST_PROGRESS = "📣 **Broadcasting...** ✅ {success} / {total} delivered"
 
 # ====== PERMISSION MESSAGES ======

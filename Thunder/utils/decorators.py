@@ -3,15 +3,16 @@
 One preflight chain replaces the three ad-hoc per-plugin gate orders.
 Documented ordering (see AGENTS.md):
 
-    banned -> private-mode -> token-activation -> force-sub -> shortener-status
+    banned -> private-mode -> token (+ force-sub where applicable;
+    shortener-status is a routing value, not a gate)
 
 * ``preflight`` runs only ``banned -> private-mode -> token`` and returns
   the shortener status (which is a value, not a gate);
 * force-sub is NOT in ``PREFLIGHT_GATES``: it must be called explicitly
   after ``preflight`` via :func:`force_sub_gate` (see
   ``validate_request_common`` in ``bot/plugins/stream.py``);
-* owner bypasses everything; authorized users bypass everything but the
-  ban check;
+* owner bypasses everything; authorized users bypass private-mode + token,
+  but not the ban check or force-sub;
 * /start runs only ``banned + private-mode`` so the activation flow stays
   reachable;
 * every DB-backed gate is cached (``flag_cache``) and **fail-closed**:

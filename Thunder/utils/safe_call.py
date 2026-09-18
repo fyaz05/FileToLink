@@ -24,7 +24,8 @@ T = TypeVar("T")
 # Default wall-clock budget for lightweight RPCs; env-overridable via TG_RPC_TIMEOUT_SECONDS.
 DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
 
-# cap FloodWait sleeps so a lightweight RPC cannot blow its advertised wall-clock budget.
+# cap FloodWait sleeps so a lightweight RPC stays near its advertised wall-clock
+# budget (worst case per attempt: budget + cap + a final budgeted attempt).
 MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
 
 # File-transfer shapes may sleep the full FloodWait up to this ceiling (the
@@ -80,13 +81,16 @@ async def tg_call(
     *args: Any,
     retries: int = 1,
     timeout: float | None = None,
+    max_flood_sleep: float | None = None,
     **kwargs: Any,
 ) -> T:
     """Call ``fn(*args, **kwargs)`` sleeping through ``FloodWait``.
 
     ``timeout`` forces a wall-clock budget (``None`` = auto: unbounded for
     file-transfer shapes, :data:`DEFAULT_RPC_TIMEOUT_SECONDS` otherwise;
-    ``0`` or negative disables the budget entirely).
+    ``0`` or negative disables the budget entirely). ``max_flood_sleep``
+    overrides the shape-based sleep cap (e.g. fan-out callers that must
+    fail-count fast instead of riding out a long throttle).
     """
     attempt = 0
     while True:
@@ -100,11 +104,14 @@ async def tg_call(
             attempt += 1
             if attempt > retries:
                 raise
-            cap = (
-                MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS
-                if getattr(fn, "__name__", "") in _UNBOUNDED_SHAPES
-                else MAX_FLOODWAIT_SLEEP_SECONDS
-            )
+            if max_flood_sleep is not None:
+                cap = max_flood_sleep
+            else:
+                cap = (
+                    MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS
+                    if getattr(fn, "__name__", "") in _UNBOUNDED_SHAPES
+                    else MAX_FLOODWAIT_SLEEP_SECONDS
+                )
             sleep_for = min(e.value, cap)
             logger.debug(
                 f"FloodWait in {getattr(fn, '__name__', fn)}, "

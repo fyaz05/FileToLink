@@ -114,15 +114,20 @@ async def render_page(message_id: int, secure_hash: str) -> str:
 
     try:
         from Thunder.bot import StreamBot  # layering break: lazy import
-        from Thunder.server.exceptions import InvalidHash
+        from Thunder.server.exceptions import InvalidHash, TelegramUnavailable
 
-        message = await tg_call(
-            StreamBot.get_messages,
-            chat_id=int(Var.BIN_CHANNEL),
-            message_ids=int(message_id),
-            retries=1,
-            timeout=60,
-        )
+        try:
+            message = await tg_call(
+                StreamBot.get_messages,
+                chat_id=int(Var.BIN_CHANNEL),
+                message_ids=int(message_id),
+                retries=1,
+                timeout=60,
+            )
+        except TimeoutError as e:
+            # vault timeout is transient, never absence: map to 503 (not
+            # FileNotFound self-heal, not ladder 500) like the delivery path
+            raise TelegramUnavailable(f"vault lookup timed out: {e}") from e
 
         if not message:
             raise InvalidHash("Message not found")

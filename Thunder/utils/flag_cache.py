@@ -71,7 +71,10 @@ class FlagCache:
         try:
             value = await loader()
         except BaseException:
-            self._inflight.pop(key, None)
+            # only drop our own registration: a successor loader registered
+            # after an invalidate() must survive our failure
+            if self._inflight.get(key) is task:
+                self._inflight.pop(key, None)
             raise
         # Fence: invalidate()/clear() may have dropped our registration
         # while the loader was in flight; re-storing the pre-mutation value
@@ -82,7 +85,7 @@ class FlagCache:
             self._data.move_to_end(key)
             while len(self._data) > self.max_items:
                 self._data.popitem(last=False)
-        self._inflight.pop(key, None)
+            self._inflight.pop(key, None)
         return value
 
     def invalidate(self, *keys: Hashable) -> None:

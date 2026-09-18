@@ -172,15 +172,17 @@ async def about_command(bot: Client, msg: Message):
 
 @StreamBot.on_message(filters.command("link") & filters.private)
 async def link_private_hint(bot: Client, msg: Message):
-    # /link is group-only (stream.py); hint at the direct-send flow
-    # instead of answering private /link with silence.
+    # gated like the other info commands: banned users see the ban notice,
+    # private-mode outsiders are denied, everyone else gets the hint
+    if await preflight(bot, msg, gates=GATES_START) is None:
+        return
     await reply_safe(msg, text=MSG_LINK_PRIVATE_HINT, parse_mode=ParseMode.MARKDOWN)
 
 
 async def send_user_dc(msg: Message, user: User):
     txt = await gen_dc_txt(user)
     url = f"https://t.me/{user.username}" if user.username else f"tg://user?id={user.id}"
-    btns = [
+    btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
         [InlineKeyboardButton(MSG_BUTTON_VIEW_PROFILE, url=url)],
         [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")],
     ]
@@ -188,7 +190,7 @@ async def send_user_dc(msg: Message, user: User):
         msg,
         text=txt,
         parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
+        reply_markup=InlineKeyboardMarkup(btns),
     )
 
 
@@ -223,12 +225,14 @@ async def send_file_dc(msg: Message, file_msg: Message):
             dc_id=dc_id,
         )
 
-        btns = [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+        btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
+            [InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]
+        ]
         await reply_safe(
             msg,
             text=txt,
             parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
+            reply_markup=InlineKeyboardMarkup(btns),
         )
 
     except Exception as e:
@@ -288,7 +292,7 @@ async def ping_command(bot: Client, msg: Message):
     end = time.time()
     ms = (end - start) * 1000
 
-    btns = [
+    btns: list[list[InlineKeyboardButton | InlineKeyboardButtonBuy]] = [
         [
             InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
             InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel"),
@@ -299,7 +303,7 @@ async def ping_command(bot: Client, msg: Message):
         await edit_safe(
             sent,
             MSG_PING_RESPONSE.format(time_taken_ms=ms),
-            reply_markup=InlineKeyboardMarkup(btns),  # type: ignore[arg-type]
+            reply_markup=InlineKeyboardMarkup(btns),
             disable_web_page_preview=True,
         )
     except MessageNotModified:

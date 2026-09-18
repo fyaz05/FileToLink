@@ -486,7 +486,10 @@ class Database:
         try:
             return await self.files_col.find_one({"file_unique_id": file_unique_id})
         except Exception as e:
-            logger.error(f"Error getting file by unique_id {file_unique_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error getting file by unique_id {hash_path_token(file_unique_id)}: {e}",
+                exc_info=True,
+            )
             return None
 
     async def get_file_by_hash(
@@ -620,11 +623,15 @@ class Database:
                 return owner if result else None
             except Exception as e:
                 logger.error(
-                    f"Error updating ingest claim for {file_unique_id}: {e}", exc_info=True
+                    f"Error updating ingest claim for {hash_path_token(file_unique_id)}: {e}",
+                    exc_info=True,
                 )
                 raise
         except Exception as e:
-            logger.error(f"Error acquiring ingest claim for {file_unique_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error acquiring ingest claim for {hash_path_token(file_unique_id)}: {e}",
+                exc_info=True,
+            )
             raise
 
     async def release_file_ingest_claim(self, file_unique_id: str, owner: str) -> bool:
@@ -635,7 +642,10 @@ class Database:
             )
             return result.deleted_count > 0
         except Exception as e:
-            logger.error(f"Error releasing ingest claim for {file_unique_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error releasing ingest claim for {hash_path_token(file_unique_id)}: {e}",
+                exc_info=True,
+            )
             return False
 
     async def is_file_ingest_claim_active(self, file_unique_id: str) -> bool:
@@ -646,7 +656,10 @@ class Database:
             )
             return bool(claim)
         except Exception as e:
-            logger.error(f"Error checking ingest claim for {file_unique_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error checking ingest claim for {hash_path_token(file_unique_id)}: {e}",
+                exc_info=True,
+            )
             raise
 
     async def close(self):

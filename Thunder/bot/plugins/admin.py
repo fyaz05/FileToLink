@@ -124,7 +124,9 @@ async def broadcast_handler(client: Client, message: Message):
         elif arg == "regular":
             mode = "regular"
         else:
-            safe_arg = html.escape(arg)
+            # code spans are literal under MARKDOWN: only neutralize backticks,
+            # an html.escape here would leak "&lt;" into the span
+            safe_arg = arg.replace("`", "'")
             await reply(
                 message,
                 text=f"❌ **Invalid argument:** `{safe_arg}`\n\n{MSG_BROADCAST_USAGE}",
@@ -403,7 +405,8 @@ async def ban_command(client: Client, message: Message):
 
     try:
         target_id = int(message.command[1])
-        # store raw reason; escape at HTML render.
+        # M7: store raw reason; escape at HTML render.
+        has_reason = len(message.command) > 2
         reason = " ".join(message.command[2:]) or MSG_ADMIN_NO_BAN_REASON
         banned_by_id = message.from_user.id if message.from_user else None
 
@@ -417,7 +420,7 @@ async def ban_command(client: Client, message: Message):
             await db.add_banned_channel(channel_id=target_id, reason=reason, banned_by=banned_by_id)
             _invalidate_gates()
             text = MSG_CHANNEL_BANNED.format(channel_id=target_id)
-            if reason != MSG_ADMIN_NO_BAN_REASON:
+            if has_reason:
                 text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=html.escape(reason))
             await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:
@@ -428,7 +431,7 @@ async def ban_command(client: Client, message: Message):
             await db.add_banned_user(user_id=target_id, reason=reason, banned_by=banned_by_id)
             _invalidate_gates()
             text = MSG_ADMIN_USER_BANNED.format(user_id=target_id)
-            if reason != MSG_ADMIN_NO_BAN_REASON:
+            if has_reason:
                 text += MSG_BAN_REASON_SUFFIX.format(reason=html.escape(reason))
             await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:

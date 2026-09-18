@@ -80,8 +80,8 @@ jobs:
         run: |
           COUNT=$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt)
           echo "Direct runtime deps: $COUNT"
-          if [ "$COUNT" -gt 8 ]; then
-            echo "::error::Direct dependency count increased beyond the agreed 8; justify in the PR or remove."
+          if [ "$COUNT" -gt 7 ]; then
+            echo "::error::Direct dependency count increased beyond the agreed 7; justify in the PR or remove."
             exit 1
           fi
 

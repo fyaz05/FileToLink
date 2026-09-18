@@ -9,7 +9,7 @@ Peak Telegram RPC ≈ `active streams × per-stream concurrency`. Size
 `MAX_CONCURRENT_STREAMS` so `clients × cap` fits the host's file descriptors
 and upstream patience — not the other way round.
 
-| Host | Workers / batch / broadcast | Streams/client | Notes |
+| Host | EXECUTOR / BATCH / BROADCAST | Streams/client | Notes |
 |---|---|---|---|
 | Small VPS (1 vCPU, 1GB) | `5 / 5 / 4` (defaults) | `8` (default) | Defaults are the small preset |
 | Medium VPS (2 vCPU, 4GB) | `8 / 8 / 6` | `12` | Raise only after watching `FLOOD_WAIT` |

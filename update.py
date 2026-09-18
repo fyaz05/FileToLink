@@ -16,7 +16,9 @@ from Thunder.utils.logger import logger
 # Guarantees (the old shell=True chain had none): argv-list only, no
 # destructive git ops, no global config mutation; no-ops cleanly without git.
 
-# Real environment wins over the file (same precedence as Thunder/vars.py).
+# Real environment wins over files; .local wins over base (same precedence
+# as Thunder/vars.py — load local first so setdefault keeps its values).
+load_dotenv("config.env.local", override=False)
 load_dotenv("config.env", override=False)
 
 UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "")
@@ -41,7 +43,9 @@ def _recover_config_backup() -> None:
     restore = not os.path.exists("config.env")
     if not restore and os.path.isdir(".git") and shutil.which("git") is not None:
         tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "config.env"], capture_output=True
+            ["git", "ls-files", "--error-unmatch", "config.env"],
+            capture_output=True,
+            timeout=10,
         )
         restore = tracked.returncode == 0
     if restore:

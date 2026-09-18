@@ -11,6 +11,7 @@ from pyrogram.errors import (
     FloodWait,
     InputUserDeactivated,
     PeerIdInvalid,
+    RPCError,
     UserDeactivated,
     UserIsBlocked,
 )
@@ -22,6 +23,7 @@ from Thunder.utils.messages import (
     MSG_BROADCAST_CANCELLED_PREFIX,
     MSG_BROADCAST_COMPLETE,
     MSG_BROADCAST_FAILED_USERS,
+    MSG_BROADCAST_INTERRUPTED_PREFIX,
     MSG_BROADCAST_NO_USERS,
     MSG_BROADCAST_PROGRESS,
     MSG_BROADCAST_START,
@@ -141,11 +143,18 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
             except Exception as e:
                 logger.error(f"Broadcast cursor error: {e}", exc_info=True)
             finally:
+                # every worker needs exactly one pill or it blocks on get()
+                # forever: retry (workers drain concurrently) but bail out if
+                # all workers are already done
                 for _ in range(worker_count):
-                    try:
-                        queue.put_nowait(None)  # poison pills
-                    except asyncio.QueueFull:
-                        pass
+                    while True:
+                        try:
+                            queue.put_nowait(None)  # poison pills
+                            break
+                        except asyncio.QueueFull:
+                            if all(w.done() for w in workers):
+                                break
+                            await asyncio.sleep(0.05)
 
         async def worker():
             while True:
@@ -176,12 +185,14 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
         producer_task = asyncio.create_task(producer(), name="broadcast_producer")
 
         completed_normally = False
+        worker_crashed = False
         try:
             await producer_task
             results = await asyncio.gather(*workers, return_exceptions=True)
             for r in results:
                 if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError):
                     logger.error(f"Broadcast worker failed: {r!r}")
+                    worker_crashed = True
             completed_normally = True
         finally:
             # no worker/producer/status/registry leakage on ANY exit path
@@ -206,7 +217,9 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
                 deleted_accounts=stats["deleted"],
             )
 
-            if stats["cancelled"]:
+            if worker_crashed:
+                completion_msg = MSG_BROADCAST_INTERRUPTED_PREFIX + completion_msg
+            elif stats["cancelled"]:
                 completion_msg = MSG_BROADCAST_CANCELLED_PREFIX + completion_msg
 
             try:
@@ -244,7 +257,9 @@ async def _send_one(
     # retried FloodWaits with bounded sleeps)
     for attempt in range(1, 4):
         try:
-            await tg_call(message.reply_to_message.copy, user_id, retries=1)
+            # fail-count fast on sustained throttle: a per-recipient fan-out
+            # must not ride out a 600s ingest-style wait per user
+            await tg_call(message.reply_to_message.copy, user_id, retries=1, max_flood_sleep=30.0)
             stats["success"] += 1
             return
         except _PERMANENT_ERRORS as e:
@@ -272,13 +287,24 @@ async def _send_one(
             logger.warning(f"FloodWait persisted for user {user_id}, last wait: {e.value}s")
             stats["failed"] += 1
             return
+        except TimeoutError:
+            # transient transport stall: backoff below, fail after 3 attempts
+            pass
+        except RPCError as e:
+            if getattr(e, "code", 0) not in (500, 502, 503, 504):
+                logger.error(f"Non-retryable RPC error for user {user_id}: {e}", exc_info=True)
+                stats["failed"] += 1
+                return
+            # else: transient server-side error, backoff below
         except Exception as e:
-            if attempt < 3:
-                await asyncio.sleep(attempt * attempt)
-                continue
             logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
             stats["failed"] += 1
             return
+        if attempt >= 3:
+            logger.error(f"Transient error persisted for user {user_id}; giving up")
+            stats["failed"] += 1
+            return
+        await asyncio.sleep(attempt * attempt)
 
 
 async def _edit_progress(status_msg: Message, stats: dict) -> None:

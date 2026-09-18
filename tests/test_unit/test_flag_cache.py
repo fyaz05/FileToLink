@@ -118,7 +118,11 @@ async def test_invalidate_mid_load_defeats_stale_store():
 
     cache = FlagCache(ttl_seconds=60)
     task = asyncio.create_task(cache.get_or_load("k", slow_loader))
-    await asyncio.sleep(0)  # let the loader start and register itself
+    for _ in range(100):  # poll: one yield may not schedule the loader yet
+        if "k" in cache._inflight:
+            break
+        await asyncio.sleep(0)
+    assert "k" in cache._inflight  # loader registered before we invalidate
     cache.invalidate("k")
     release.set()
     assert await task == "pre-mutation"  # the in-flight caller still gets a value...

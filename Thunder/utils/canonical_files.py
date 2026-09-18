@@ -41,7 +41,7 @@ _upload_locks_guard = asyncio.Lock()
 _insert_counter: int = 0
 # value = (latest record, reuse_delta, seen_delta): deltas so N touches of
 # one hash flush as N increments instead of a single merged $inc: 1
-_pending_touches: dict[str, tuple[dict[str, Any], int, int]] = {}
+_pending_touches: "OrderedDict[str, tuple[dict[str, Any], int, int]]" = OrderedDict()
 _flush_task: asyncio.Task | None = None
 
 
@@ -199,6 +199,7 @@ async def _flush_pending_touches() -> None:
 
 
 async def _bulk_flush() -> None:
+    global _dropped_touches
     items = list(_pending_touches.items())
     _pending_touches.clear()
     if not items:
@@ -217,6 +218,12 @@ async def _bulk_flush() -> None:
                 _pending_touches[h] = payload
             else:
                 _pending_touches[h] = (payload[0], old[1] + payload[1], old[2] + payload[2])
+        # the cap binds here too: repeated failures must not grow the buffer
+        # without limit. Oldest entries drop first (counted, like the
+        # schedule-site overflow).
+        while len(_pending_touches) > _TOUCH_BUFFER_MAX:
+            _pending_touches.popitem(last=False)
+            _dropped_touches += 1
 
 
 def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) -> None:
