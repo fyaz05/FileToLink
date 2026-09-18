@@ -1,5 +1,3 @@
-# Thunder/bot/plugins/admin.py
-
 import asyncio
 import contextlib
 import html
@@ -88,12 +86,12 @@ from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
-# H10: /log tail cap
+# /log tail cap
 _LOG_TAIL_BYTES = 5 * 1024 * 1024
 
 
 def _invalidate_gates() -> None:
-    """H7: flush flag cache so admin changes apply immediately."""
+    """Flush flag cache so admin changes apply immediately."""
     flags.clear()
 
 
@@ -192,7 +190,7 @@ async def show_stats(client: Client, message: Message):
 
         disk = await asyncio.to_thread(psutil.disk_usage, ".")
         total_disk, used_disk, free_disk = disk.total, disk.used, disk.free
-        # H8: psutil off the event loop.
+        # psutil off the event loop.
         disk_percent = disk.percent
 
         limiter_line = (
@@ -234,19 +232,19 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
-    # M13: drain touch buffer here; execv skips finally blocks.
+    # drain touch buffer here; execv skips finally blocks.
     from Thunder.utils.canonical_files import drain_background_touch_tasks
 
     await drain_background_touch_tasks()
-    # Abbreviated teardown (P3-3): execv replaces the process without running
-    # M13's graceful shutdown, so stop the clients + DB best-effort first.
+    # Abbreviated teardown: execv replaces the process without running the full
+    # graceful shutdown, so stop the clients + DB best-effort first.
     # Bounded: a hung RPC must never wedge the restart.
     for step, name in ((cleanup_clients, "clients"), (db.close, "database")):
         try:
             await asyncio.wait_for(step(), timeout=10)
         except Exception as e:
             logger.warning(f"Restart teardown: {name} cleanup incomplete: {e}")
-    # absolute path: exec'ing into thunder.sh must work from any cwd (P3-4)
+    # absolute path: exec'ing into thunder.sh must work from any cwd
     script = Path(__file__).resolve().parents[3] / "thunder.sh"
     os.execv("/bin/bash", ["bash", str(script)])
 
@@ -261,7 +259,7 @@ async def send_logs(client: Client, message: Message):
         return
 
     try:
-        # H10: capped redacted tail; IO off the event loop.
+        # capped redacted tail; IO off the event loop.
         def _read_redacted_tail() -> str:
             with open(LOG_FILE, "rb") as f:
                 f.seek(0, os.SEEK_END)
@@ -339,7 +337,7 @@ async def list_authorized_command(client: Client, message: Message):
     if not users:
         return await reply(message, text=MSG_NO_AUTH_USERS)
 
-    # M7: escape display names; batched get_users avoids N+1 FloodWaits.
+    # escape display names; batched get_users avoids N+1 FloodWaits.
     id_to_user: dict[int, Any] = {}
     try:
         all_ids = [u["user_id"] for u in users]
@@ -405,7 +403,7 @@ async def ban_command(client: Client, message: Message):
 
     try:
         target_id = int(message.command[1])
-        # M7: store raw reason; escape at HTML render.
+        # store raw reason; escape at HTML render.
         reason = " ".join(message.command[2:]) or MSG_ADMIN_NO_BAN_REASON
         banned_by_id = message.from_user.id if message.from_user else None
 
@@ -480,7 +478,7 @@ async def unban_command(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
-    # L10: /shell is opt-in.
+    # /shell is opt-in.
     if not Var.ENABLE_SHELL:
         return await reply(message, text=MSG_SHELL_DISABLED, parse_mode=ParseMode.HTML)
 
@@ -488,7 +486,7 @@ async def run_shell_command(client: Client, message: Message):
         return await reply(message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
 
     command = " ".join(message.command[1:])
-    # L10: log who ran what.
+    # log who ran what.
     logger.info(
         f"/shell invoked by {message.from_user.id if message.from_user else 'unknown'}: {command}"
     )

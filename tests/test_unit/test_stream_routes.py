@@ -1,4 +1,4 @@
-"""HTTP parsing primitives (H2 target) + L4 dual-hash + L6 disposition."""
+"""HTTP parsing primitives + dual-hash validation + disposition rules."""
 
 from types import SimpleNamespace
 
@@ -270,7 +270,7 @@ class TestCanonicalDeliveryErrorLadder:
 
 
 class TestLegacyDisabledGone:
-    """L1: with ENABLE_LEGACY_LINKS=False the legacy families must 410."""
+    """With ENABLE_LEGACY_LINKS=False the legacy families must 410."""
 
     @staticmethod
     def _request(path="AbCdEf12345/name.mp4"):
@@ -296,7 +296,7 @@ class TestLegacyDisabledGone:
 
 
 class TestAdmissionControl:
-    """M9: saturated clients refuse with 503 + Retry-After instead of stacking."""
+    """Saturated clients refuse with 503 + Retry-After instead of stacking."""
 
     @pytest.mark.unit
     def test_full_pool_maps_to_503_with_retry_after(self, monkeypatch):

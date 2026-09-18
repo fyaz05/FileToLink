@@ -1,4 +1,4 @@
-"""M1: registry drives the menu (owner-only hidden) and AGENTS.md drift."""
+"""Registry drives the menu (owner-only hidden) and AGENTS.md drift."""
 
 import re
 from pathlib import Path
@@ -15,7 +15,6 @@ def test_owner_only_commands_hidden_from_menu():
     menu_names = {c.command for c in bot_commands()}
     owner_names = {c.name for c in COMMANDS if c.owner_only}
     assert owner_names.isdisjoint(menu_names)
-    # public commands are present
     assert {"start", "help", "link", "ping", "dc", "about"} <= menu_names
 
 
@@ -31,7 +30,7 @@ def test_help_rows_match_public_commands():
 
 @pytest.mark.unit
 def test_agents_md_documents_every_command():
-    """M1 code-gen drift check: AGENTS.md must mention each command name."""
+    """Code-gen drift check: AGENTS.md must mention each command name."""
     agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     for cmd in COMMANDS:
         assert re.search(rf"`/{cmd.name}`", agents), (

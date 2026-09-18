@@ -1,4 +1,4 @@
-"""consume() status ladder (review C-1): corrupt/expired tokens read "invalid", never "already"."""
+"""Consume() status ladder: corrupt/expired tokens read "invalid", never "already"."""
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -10,7 +10,7 @@ from Thunder.utils.tokens import consume
 
 
 class _FakeTokenCol:
-    """find_one_and_update always loses the CAS (returns None); find_one returns the
+    """Find_one_and_update always loses the CAS (returns None); find_one returns the
     pre-check row, or the scripted post-CAS doc when a projection arg is passed."""
 
     def __init__(self, doc, post_cas_doc=None):

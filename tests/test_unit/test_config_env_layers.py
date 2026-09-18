@@ -1,4 +1,4 @@
-"""config.env.local must override config.env (precedence: env > local > base)."""
+"""Config.env.local must override config.env (precedence: env > local > base)."""
 
 import os
 import subprocess

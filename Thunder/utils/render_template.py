@@ -1,5 +1,3 @@
-# Thunder/utils/render_template.py
-
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -17,7 +15,7 @@ from Thunder.vars import Var
 # NOTE: lazy import of Thunder.server.exceptions inside render_page() avoids
 # a circular import (server/__init__ -> stream_routes -> here).
 
-# M2: resolve templates relative to the package, not the process CWD.
+# resolve templates relative to the package, not the process CWD.
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "template"
 
 template_env = Environment(
@@ -31,7 +29,7 @@ template_env = Environment(
 
 
 def _page_kind(mime_type: str | None, file_name: str) -> str:
-    """M2: typed player page -- derive the layout from the mime type.
+    """Typed player page -- derive the layout from the mime type.
 
     A specific mime type is authoritative; extension sniffing only applies
     when the mime type is missing or generic (application/octet-stream).
@@ -76,7 +74,7 @@ async def render_media_page(
     return await template.render_async(**context)
 
 
-# L1: TTL+LRU cache so repeat legacy /watch views don't re-fetch the vault message.
+# TTL+LRU cache so repeat legacy /watch views don't re-fetch the vault message.
 _legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str, str | None, int]]" = OrderedDict()
 _LEGACY_CACHE_TTL_SECONDS = 600
 _LEGACY_CACHE_MAX_ITEMS = 1024
@@ -115,7 +113,7 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         )
 
     try:
-        from Thunder.bot import StreamBot  # M12 layering break: lazy import
+        from Thunder.bot import StreamBot  # layering break: lazy import
         from Thunder.server.exceptions import InvalidHash
 
         message = await tg_call(

@@ -1,6 +1,3 @@
-# Thunder.bot is already imported at module scope via the registry import,
-# so a top-level StreamBot import adds no new coupling (the old "lazy" import
-# pretended otherwise).
 from Thunder.bot import StreamBot
 from Thunder.bot.registry import bot_commands, help_command_rows
 from Thunder.utils.logger import logger
@@ -9,7 +6,7 @@ from Thunder.vars import Var
 
 
 def build_help_text(max_files: int) -> str:
-    """Assemble /help from its three parts (M1: commands come from the registry)."""
+    """Assemble /help from its three parts."""
     return (
         MSG_HELP_INTRO.format(max_files=max_files)
         + MSG_HELP_COMMANDS_HEADER

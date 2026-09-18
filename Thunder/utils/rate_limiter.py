@@ -1,13 +1,11 @@
-# Thunder/utils/rate_limiter.py
+"""Queue + rate limiting; users keep the queue / wait-estimate UX.
 
-"""Queue + rate limiting (plan H6); users keep the queue / wait-estimate UX.
-
-H6a: bounded bookkeeping + periodic sweep.
-H6b: worker pool -- the sliding window is charged at execution time (not
-enqueue), and FloodWait requeues the request instead of sleeping the worker.
-H6c: a global RPS token-bucket breaker shapes bursts through the queue: a
-dry bucket routes the request into the queue (workers consume tokens at
-exec time) instead of dropping it.
+Bounded bookkeeping + periodic sweep.  A worker pool executes queued
+requests -- the sliding window is charged at execution time (not enqueue),
+and FloodWait requeues the request instead of sleeping the worker.  A global
+RPS token-bucket breaker shapes bursts through the queue: a dry bucket
+routes the request into the queue (workers consume tokens at exec time)
+instead of dropping it.
 """
 
 import asyncio
@@ -44,7 +42,7 @@ class QueueFullError(Exception):
 
 
 class TokenBucket:
-    """Non-blocking RPS token bucket (global circuit breaker, H6c)."""
+    """Non-blocking RPS token bucket (global circuit breaker)."""
 
     def __init__(self, rate_per_second: float, burst_multiplier: float = 2.0):
         self.rate = max(rate_per_second, 0.0)
@@ -116,7 +114,7 @@ class RateLimiter:
             self.global_rate_limit_enabled = Var.GLOBAL_RATE_LIMIT
             self.max_global_requests_per_minute = Var.MAX_GLOBAL_REQUESTS_PER_MINUTE
             if Var.GLOBAL_RPS_LIMIT and not self.global_rate_limit_enabled:
-                # M6: surface dead knobs -- the RPS cap only bites when the
+                # surface dead knobs -- the RPS cap only bites when the
                 # breaker is enabled (see _breaker_rate)
                 logger.warning(
                     "GLOBAL_RPS_LIMIT is set but GLOBAL_RATE_LIMIT is disabled; "
@@ -210,7 +208,7 @@ class RateLimiter:
             user_timestamps.append(current_time)
         return True
 
-    # ---------------- sweep (H6a) ----------------
+    # ---------------- sweep ----------------
 
     async def sweep(self) -> dict[str, int]:
         """Prune stale bookkeeping; called every 5 min from the sweeper task."""
@@ -254,7 +252,7 @@ class RateLimiter:
         }
 
     def occupancy(self) -> dict[str, float | int]:
-        """Limiter occupancy for /stats (plan PR-13)."""
+        """Limiter occupancy for /stats."""
         return {
             "queued": len(self.request_queue) + len(self.priority_queue),
             "tracked_users": len(self.user_requests),
@@ -321,7 +319,7 @@ class RateLimiter:
             )
             self.request_event.set()
 
-    # ---------------- executor (H6b) ----------------
+    # ---------------- executor ----------------
 
     async def _process_one(self) -> bool:
         """Pop and process a single request.  Returns True when something was
@@ -563,7 +561,7 @@ rate_limiter = RateLimiter()
 
 
 def start_executors() -> list[asyncio.Task]:
-    """Start the worker pool (H6b) -- callers keep the tasks for shutdown."""
+    """Start the worker pool -- callers keep the tasks for shutdown."""
     workers: list[asyncio.Task] = []
     for i in range(Var.EXECUTOR_WORKERS):
         workers.append(
@@ -594,7 +592,7 @@ async def handle_rate_limited_request(
         await handler(bot, message, *args, **kwargs)
         return
 
-    # H6c: the immediate path consumes a breaker token too -- bursts of
+    # the immediate path consumes a breaker token too -- bursts of
     # within-window users never touched the bucket; a dry bucket queues, not drops.
     immediate = await rate_limiter.check_limits(user_id, record=False)
     if immediate and rate_limiter.breaker.rate > 0:

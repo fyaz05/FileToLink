@@ -1,4 +1,4 @@
-"""M6: config validation surfaces all problems; booleans/sets parse."""
+"""Config validation surfaces all problems; booleans/sets parse."""
 
 import os
 import subprocess
@@ -41,7 +41,7 @@ def test_str_to_int_set():
     before = len(vars_mod._config_errors)
     try:
         assert str_to_int_set("1 junk 2") == {1, 2}
-        # junk is surfaced (M6 collect-all-errors), never silently skipped
+        # junk is surfaced, never silently skipped
         assert len(vars_mod._config_errors) == before + 1
         assert "junk" in vars_mod._config_errors[-1]
     finally:
@@ -65,7 +65,7 @@ def test_var_facade_has_new_knobs():
 
 @pytest.mark.unit
 def test_owner_id_required_boot_fails():
-    """H7: missing OWNER_ID must refuse to boot (nobody had owner access)."""
+    """Missing OWNER_ID must refuse to boot (nobody had owner access)."""
     env = {
         k: v
         for k, v in os.environ.items()
@@ -98,7 +98,7 @@ def test_owner_id_required_boot_fails():
 
 @pytest.mark.unit
 def test_all_problems_reported_together():
-    """M6: three bad vars -> all three named before exit (not first-fail)."""
+    """Three bad vars -> all three named before exit (not first-fail)."""
     env = {
         k: v
         for k, v in os.environ.items()

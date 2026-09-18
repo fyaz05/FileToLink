@@ -16,7 +16,7 @@ from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
-# L4: new hashes are 32 hex chars; legacy 20-char hashes stay valid forever.
+# new hashes are 32 hex chars; legacy 20-char hashes stay valid forever.
 PUBLIC_HASH_LENGTH = 32
 LEGACY_PUBLIC_HASH_LENGTH = 20
 _CACHE_TTL_SECONDS = 600
@@ -27,7 +27,7 @@ _INGEST_CLAIM_POLL_SECONDS = 0.5
 _MAX_INGEST_RETRIES = 10
 _CACHE_PRUNE_INTERVAL = 50
 
-# M14: bounded touch buffer; overflow drops (counted), flush is one BulkWrite.
+# bounded touch buffer; overflow drops (counted), flush is one BulkWrite.
 _FLUSH_DELAY_SECONDS = max(1, min(60, Var.TOUCH_FLUSH_SECONDS))
 _TOUCH_BUFFER_MAX = max(100, min(10_000, Var.TOUCH_BUFFER_MAX))
 _dropped_touches = 0
@@ -162,7 +162,7 @@ async def get_file_by_hash(
 
 
 async def forget_stale_record(record: dict[str, Any]) -> bool:
-    """Self-healing (M10): drop a corrupted/stale record from cache + DB so
+    """Self-healing: drop a corrupted/stale record from cache + DB so
     the next upload re-ingests cleanly instead of erroring forever."""
     public_hash = record.get("public_hash")
     if not public_hash:
@@ -235,7 +235,7 @@ def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) 
         _, reuse_delta, seen_delta = _pending_touches[public_hash]
         _pending_touches[public_hash] = (record, reuse_delta + int(reused), seen_delta + 1)
     elif len(_pending_touches) >= _TOUCH_BUFFER_MAX:
-        # M14: drop-on-overflow with a counter -- memory stays capped
+        # drop-on-overflow with a counter -- memory stays capped
         _dropped_touches += 1
         if _dropped_touches % 100 == 1:
             logger.warning(
@@ -366,7 +366,7 @@ def _merge_replacement_record(
         "first_source_message_id", refreshed.get("first_source_message_id")
     )
     # preserve existing public_hash: re-hashing rewrites legacy 20-char hashes
-    # to 32-hex and breaks published links (L4 "valid forever" contract)
+    # to 32-hex and breaks published links
     preserved_hash = existing.get("public_hash")
     if preserved_hash:
         refreshed["public_hash"] = preserved_hash

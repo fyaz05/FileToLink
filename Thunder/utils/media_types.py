@@ -1,6 +1,4 @@
-# Thunder/utils/media_types.py
-
-"""Single source of truth for media-type -> extension / mime maps (plan H4c).
+"""Single source of truth for media-type -> extension / mime maps.
 
 ``common.send_file_dc`` keeps its own display-name map (presentation, not a
 mime/ext concern).  Both naming families are keyed: pyrogram class names are

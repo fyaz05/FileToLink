@@ -1,4 +1,4 @@
-"""H10: shared redaction regexes."""
+"""Shared redaction regexes."""
 
 import pytest
 

@@ -13,12 +13,8 @@ from dotenv import load_dotenv
 
 from Thunder.utils.logger import logger
 
-# Replaces the historical ``shell=True`` chain interpolating
-# UPSTREAM_REPO/UPSTREAM_BRANCH into a shell string at every boot (live
-# injection vector) that ran ``rm -rf .git`` / ``reset --hard`` and mutated
-# global git config -- a failed update could leave a half-wiped tree.
-# Now: argv-list (no shell), no destructive git ops, no global config
-# mutation; no-ops cleanly when git is missing or this is not a git repo.
+# Guarantees (the old shell=True chain had none): argv-list only, no
+# destructive git ops, no global config mutation; no-ops cleanly without git.
 
 # Real environment wins over the file (same precedence as Thunder/vars.py).
 load_dotenv("config.env", override=False)
@@ -75,7 +71,7 @@ def _restore_config(backed_up: bool) -> None:
 
 
 def _redact_credentials(text: str) -> str:
-    """git echoes remote URLs on failure; strip embedded tokens (user:pass
+    """Git echoes remote URLs on failure; strip embedded tokens (user:pass
     and user@host forms) before the output reaches the logs."""
     return re.sub(r"(?<=//)[^@/\s]+@", "<redacted>@", text)
 

@@ -1,5 +1,3 @@
-# Thunder/utils/bot_utils.py
-
 import asyncio
 import html
 from typing import Any
@@ -32,10 +30,10 @@ def quote_media_name(file_name: str) -> str:
 
 
 def format_link_message(links: dict[str, str]) -> str:
-    """Render the MSG_LINKS template, appending the TTL expiry note (L2).
+    """Render the MSG_LINKS template, appending the TTL expiry note.
 
     ``media_name`` is user-controlled and MSG_LINKS is HTML -- escape it
-    (M7) so a crafted file name cannot inject markup into the link message.
+    so a crafted file name cannot inject markup into the link message.
     """
     text = MSG_LINKS.format(
         file_name=html.escape(str(links["media_name"])),
@@ -139,7 +137,7 @@ async def log_newusr(cli: Client, uid: int, fname: str):
                 await send_safe(
                     cli,
                     Var.BIN_CHANNEL,
-                    # MSG_NEW_USER is HTML; first_name is user-controlled (M7)
+                    # MSG_NEW_USER is HTML; first_name is user-controlled
                     text=MSG_NEW_USER.format(first_name=html.escape(str(fname or "")), user_id=uid),
                 )
             except Exception as e:

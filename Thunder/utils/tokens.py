@@ -1,5 +1,3 @@
-# Thunder/utils/tokens.py
-
 import asyncio
 import random
 import secrets
@@ -32,7 +30,7 @@ def _as_aware_utc(value: Any) -> datetime | None:
 
 
 async def check(user_id: int) -> bool:
-    """Token/authorization gate (H7: cached, fail-closed)."""
+    """Token/authorization gate (cached, fail-closed)."""
     try:
         if not Var.TOKEN_ENABLED:
             return True
@@ -114,7 +112,7 @@ async def generate(user_id: int) -> str:
 
 
 async def consume(token: str, user_id: int) -> tuple[str, float]:
-    """Atomically activate a token (plan M8).
+    """Atomically activate a token.
 
     ``find_one_and_update`` conditioned on ``activated != True``: exactly one
     concurrent activation can win.  Returns ``(status, hours_valid)`` with
@@ -175,7 +173,7 @@ async def consume(token: str, user_id: int) -> tuple[str, float]:
 
 
 async def allowed(user_id: int, *, raise_on_error: bool = True) -> bool:
-    """Cached authorized-user check (H7).  With ``raise_on_error=True`` (default)
+    """Cached authorized-user check.  With ``raise_on_error=True`` (default)
     a DB failure raises so fail-closed callers deny; with False it returns False."""
     return await flags.get_or_load(
         ("allowed", user_id),

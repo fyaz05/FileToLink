@@ -1,6 +1,6 @@
 .PHONY: format lint test integration coverage lock audit run clean
 
-# L8: developer entry points (see CONTRIBUTING.md)
+# Developer entry points (see CONTRIBUTING.md)
 # Recipes need hard TABs; tools run via `uv run` (project env, not the ambient venv).
 
 format:

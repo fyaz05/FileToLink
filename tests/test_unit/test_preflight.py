@@ -1,4 +1,4 @@
-"""M12: unified preflight chain -- gate presets, ordering, fail-closed ids."""
+"""Unified preflight chain -- gate presets, ordering, fail-closed ids."""
 
 import pytest
 

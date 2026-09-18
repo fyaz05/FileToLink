@@ -22,10 +22,10 @@ COPY --chown=thunder:thunder . .
 
 RUN mkdir -p /app Thunder/logs && chown -R thunder:thunder /app
 
-# L8: run as non-root
+# run as non-root
 USER thunder
 
-# L8: container health follows /health (M3); PORT comes from the environment
+# container health follows /health; PORT comes from the environment
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python3 -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8080').split('#')[0].strip()+'/health',timeout=5)"
 
 CMD ["bash", "thunder.sh"]

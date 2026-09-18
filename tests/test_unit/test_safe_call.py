@@ -1,4 +1,4 @@
-"""H4a helper semantics: retry-then-retry, exhaustion, timeout."""
+"""Helper semantics: retry-then-retry, exhaustion, timeout."""
 
 import asyncio
 
@@ -57,7 +57,7 @@ async def test_timeout_fires():
 
 @pytest.mark.unit
 async def test_lightweight_shape_caps_floodwait_sleep(monkeypatch):
-    """Non-media RPCs cap the FloodWait sleep at 30s (H8 wall-clock budget)."""
+    """Non-media RPCs cap the FloodWait sleep at 30s (wall-clock budget)."""
     slept = []
 
     async def fake_sleep(s):

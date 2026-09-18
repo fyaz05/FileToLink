@@ -1,5 +1,3 @@
-# Thunder/bot/plugins/stream.py
-
 import asyncio
 import html
 import secrets
@@ -463,7 +461,7 @@ async def process_single(
                 if not stored_msg:
                     logger.error(f"Failed to forward media for message {file_msg.id}. Skipping.")
                     # unstick the status message: without this the user's chat
-                    # keeps saying "Processing your file..." forever (P2-9)
+                    # keeps saying "Processing your file..." forever
                     if status_msg:
                         try:
                             await edit_safe(status_msg, MSG_ERROR_PROCESSING_MEDIA)
@@ -582,7 +580,6 @@ async def process_batch(
         queue.put_nowait(None)
 
     async def progress_edit():
-        # done (incl. skipped).
         try:
             await edit_safe(
                 status_msg,

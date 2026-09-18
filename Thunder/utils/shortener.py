@@ -1,8 +1,6 @@
-# Thunder/utils/shortener.py
+"""URL shortener.
 
-"""URL shortener (plan H5b + M5).
-
-aiohttp HTTP layer.  M5 hardening: LRU cache + per-URL singleflight, https-only
+aiohttp HTTP layer.  Hardening: LRU cache + per-URL singleflight, https-only
 endpoints, redirects never followed, and the returned short URL's host must
 match the configured site's host (anti redirect-to-attacker).  API-key
 placement is provider-mandated (Bitly: Bearer header; path/query-key
@@ -39,7 +37,7 @@ class ShortenerPlugin(ABC):
 
     @staticmethod
     def _validate_short_url(short_url: str, domain: str) -> bool:
-        """The response host must match the configured site (M5)."""
+        """The response host must match the configured site."""
         try:
             # trailing-dot tolerant, matching _host_matches semantics
             result_host = (urlparse(short_url).hostname or "").removesuffix(".")
@@ -96,13 +94,13 @@ class BitlyPlugin(ShortenerPlugin):
             "https://api-ssl.bit.ly/v4/shorten",
             json={"long_url": url},
             headers={"Authorization": f"Bearer {api_key}"},
-            allow_redirects=False,  # M5: a 30x can never pass for a short URL
+            allow_redirects=False,  # a 30x can never pass for a short URL
         ) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 short = data.get("link")
                 # Bitly answers on its own hosts (bit.ly / bitly.com), never on
-                # the configured site: validate against the provider hosts (M5)
+                # the configured site: validate against the provider hosts
                 if (
                     short
                     and short != url
@@ -283,7 +281,7 @@ _system = ShortenerSystem()
 
 
 async def close_shortener() -> None:
-    """Shutdown hook: close the shared aiohttp session (H5b lifecycle)."""
+    """Shutdown hook: close the shared aiohttp session."""
     await _system.close()
 
 

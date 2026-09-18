@@ -1,4 +1,4 @@
-"""H10 access-log middleware: path pseudonymization + log-forging escape."""
+"""Access-log middleware: path pseudonymization + log-forging escape."""
 
 import pytest
 
@@ -49,7 +49,7 @@ def test_id_first_segment_suffixed(fake_hash):
 
 @pytest.mark.unit
 def test_bare_legacy_segment_suffixed(fake_hash):
-    # review fix regression: the no-filename legacy URL is served by the
+    # Regression: the no-filename legacy URL is served by the
     # catch-all route; its bare hash+id is the whole link credential
     out = _redact_path("/AbCdEf12345")
     assert out == f"/{_FAKE_PSEUDONYM}…"

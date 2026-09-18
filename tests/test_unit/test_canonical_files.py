@@ -1,4 +1,4 @@
-"""Hash building (L4 dual lengths) + merge precedence (H2 target)."""
+"""Hash building (dual lengths) + merge precedence."""
 
 import pytest
 
@@ -25,7 +25,7 @@ def test_hash_is_deterministic():
 
 @pytest.mark.unit
 def test_legacy_length_constant_still_20():
-    # L4: the old family must remain representable for dual validation
+    # the old family must remain representable for dual validation
     assert LEGACY_PUBLIC_HASH_LENGTH == 20
 
 

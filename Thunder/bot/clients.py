@@ -1,5 +1,3 @@
-# Thunder/bot/clients.py
-
 import asyncio
 import glob
 import os

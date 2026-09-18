@@ -58,7 +58,7 @@ async def test_stream_file_sustained_floodwait_caps_at_60s():
     class _C:
         async def stream_media(self, target, offset=0, limit=0):
             raise FloodWait(value=61)
-            yield b"never"  # noqa: unreachable -- keeps the generator shape
+            yield b"never"  # unreachable: keeps the async-generator shape
 
     streamer = ByteStreamer(_C())
     with pytest.raises(TelegramUnavailable, match="Sustained Telegram flood"):

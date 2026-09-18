@@ -1,5 +1,3 @@
-# Thunder/bot/plugins/callbacks.py
-
 import functools
 import secrets
 

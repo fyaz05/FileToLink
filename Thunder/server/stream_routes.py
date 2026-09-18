@@ -1,5 +1,3 @@
-# Thunder/server/stream_routes.py
-
 import contextlib
 import re
 import secrets
@@ -33,16 +31,16 @@ from Thunder.vars import Var
 
 routes = web.RouteTableDef()
 
-# legacy 6-char capability hash family (L1: kept while ENABLE_LEGACY_LINKS=on)
+# Legacy 6-char capability hash family (kept while ENABLE_LEGACY_LINKS=on)
 SECURE_HASH_LENGTH = 6
-# M9: per-client admission cap
+# Per-client admission cap
 MAX_CONCURRENT_PER_CLIENT = max(1, Var.MAX_CONCURRENT_STREAMS)
 OVERLOAD_RETRY_AFTER_SECONDS = 2
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 PATTERN_HASH_FIRST = re.compile(rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
 PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
 VALID_HASH_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
-# L4: both hash families validate side-by-side forever (20 = legacy links,
+# Both hash families validate side-by-side forever (20 = legacy links,
 # 32 = new ingestions), so existing links never break.
 VALID_PUBLIC_HASH_REGEX = re.compile(
     rf"^[0-9a-f]{{{LEGACY_PUBLIC_HASH_LENGTH}}}$|^[0-9a-f]{{{PUBLIC_HASH_LENGTH}}}$"
@@ -117,7 +115,7 @@ def select_optimal_client() -> tuple[int, ByteStreamer]:
     ]
 
     if not available_clients:
-        # M9 admission control: refuse instead of stacking unlimited
+        # admission control: refuse instead of stacking unlimited
         # handlers on one client; always advertise Retry-After.
         loads = list(work_loads.values())
         load_range = f"~{min(loads)}–{max(loads)}" if min(loads) != max(loads) else f"~{min(loads)}"
@@ -142,7 +140,7 @@ def get_content_disposition(request: web.Request) -> str:
 
 
 def build_content_disposition(disposition: str, filename: str) -> str:
-    """L6: RFC 5987 ``filename*`` plus an ASCII fallback so non-Latin names
+    """RFC 5987 ``filename*`` plus an ASCII fallback so non-Latin names
     survive on clients that ignore RFC 5987."""
     ascii_name = _ASCII_FALLBACK_RE.sub("_", filename).strip() or "file"
     return f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
@@ -180,7 +178,7 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
         end = file_size - 1
 
     if start >= file_size or start > end:
-        # L6: 416 discipline with Content-Range
+        # 416 discipline with Content-Range
         raise web.HTTPRequestRangeNotSatisfiable(
             headers={**_ERROR_HEADERS, "Content-Range": f"bytes */{file_size}"}
         )
@@ -355,7 +353,7 @@ async def root_redirect(request):
 
 @routes.get("/health", allow_head=True)
 async def health_endpoint(request):
-    """M3: zero-dependency liveness endpoint (keepalive now targets this)."""
+    """Zero-dependency liveness endpoint (keepalive now targets this)."""
     return web.json_response(
         {"status": "ok"},
         headers={"Cache-Control": "no-store"},
@@ -394,7 +392,7 @@ def _telegram_activate_url(username: str, token: str) -> str:
 
 @routes.get("/activate/{token}")
 async def activate_endpoint(request: web.Request):
-    """M8: web entry for activation -- shorteners can produce real URLs."""
+    """Web entry for activation -- shorteners can produce real URLs."""
     token = request.match_info.get("token", "").strip()
     username = getattr(StreamBot, "username", None)
     if not token or not _is_activation_token(token):
@@ -434,8 +432,8 @@ async def status_endpoint(request):
             },
         },
         headers={
-            # L3: status is dynamic -- never serve it from cache.  No CORS:
-            # the workload/touch internals are operator-facing (P3-9).
+            # status is dynamic -- never serve it from cache.  No CORS:
+            # the workload/touch internals are operator-facing.
             "Cache-Control": "no-store",
         },
     )
@@ -469,7 +467,7 @@ async def canonical_media_preview(request: web.Request):
             headers={
                 "Access-Control-Allow-Origin": "*",
                 "X-Content-Type-Options": "nosniff",
-                # M2: player pages are per-file dynamic; keep them unindexed
+                # player pages are per-file dynamic; keep them unindexed
                 "X-Robots-Tag": "noindex, nofollow",
             },
         )
@@ -479,7 +477,7 @@ async def canonical_media_preview(request: web.Request):
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
 async def media_preview(request: web.Request):
-    # L1: the legacy URL family can be switched off explicitly.
+    # the legacy URL family can be switched off explicitly.
     if not Var.ENABLE_LEGACY_LINKS:
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
@@ -520,7 +518,7 @@ async def canonical_media_delivery(request: web.Request):
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
 
-            # M10: one vault fetch serves both the self-heal check and the
+            # one vault fetch serves both the self-heal check and the
             # Content-Length verification; the Message is passed on so stream_file does not re-fetch.
             try:
                 vault_message = await streamer.get_message(media_ref)
@@ -575,7 +573,7 @@ async def canonical_media_delivery(request: web.Request):
 
 @routes.get(r"/{path:.+}", allow_head=True)
 async def media_delivery(request: web.Request):
-    # L1: legacy delivery route honors the same switch
+    # legacy delivery route honors the same switch
     if not Var.ENABLE_LEGACY_LINKS:
         raise web.HTTPGone(
             text="Legacy links are disabled on this server. "
@@ -592,7 +590,7 @@ async def media_delivery(request: web.Request):
 
         async with _admission_ladder(client_id, "media stream"):
             # one vault fetch serves both the info derivation and the stream:
-            # passing the Message on means stream_file does not re-fetch (P3-7)
+            # passing the Message on means stream_file does not re-fetch
             vault_message = await streamer.get_message(message_id)
             file_info = streamer.get_file_info_sync(vault_message)
             unique_id = _resolve_unique_id(file_info)

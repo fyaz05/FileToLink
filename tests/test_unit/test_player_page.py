@@ -22,7 +22,7 @@ async def _render(name="v.mp4", mime="video/mp4", size=10 * 1024 * 1024, src=Non
 
 
 async def test_cinema_config_contract():
-    """player.min.js reads src/mimeType/fileName/isVideo/isAudio — all present."""
+    """Player.min.js reads src/mimeType/fileName/isVideo/isAudio — all present."""
     out = await _render()
     for key in ("src:", "mimeType:", "fileName:", "isVideo:", "isAudio:"):
         assert key in out

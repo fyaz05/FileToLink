@@ -1,4 +1,4 @@
-"""H6: window math, breaker, sweep -- pure logic, no Mongo."""
+"""Window math, breaker, sweep -- pure logic, no Mongo."""
 
 import time
 
@@ -100,7 +100,7 @@ async def test_occupancy_shape():
 
 @pytest.mark.unit
 async def test_immediate_path_consumes_breaker_token(monkeypatch):
-    """H6c (revised): fresh-user bursts execute inline, so the immediate path
+    """Fresh-user bursts execute inline, so the immediate path
     must consume a breaker token BEFORE running the handler."""
     from types import SimpleNamespace
 

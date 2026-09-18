@@ -1,5 +1,3 @@
-# Thunder/utils/config_parser.py
-
 import os
 
 

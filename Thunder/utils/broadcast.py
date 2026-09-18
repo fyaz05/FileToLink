@@ -1,5 +1,3 @@
-# Thunder/utils/broadcast.py
-
 import asyncio
 import os
 import time
@@ -56,7 +54,7 @@ _PERMANENT_ERROR_REASONS: dict[type[Exception], tuple[str, str]] = {
     ChatWriteForbidden: ("Chat", "write forbidden"),
 }
 
-# pacing between sends per worker + progress-edit cadence (M4a)
+# pacing between sends per worker + progress-edit cadence
 _BROADCAST_PACE_SECONDS = 0.2
 _PROGRESS_EVERY = 25
 
@@ -130,7 +128,7 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
         return
 
     async def do_broadcast():
-        # M4a: bounded-queue worker pool; cursor streamed, never materialized;
+        # bounded-queue worker pool; cursor streamed, never materialized;
         # sends paced, progress edits throttled, cancel stays responsive
         queue: asyncio.Queue = asyncio.Queue(maxsize=200)
 
@@ -256,10 +254,9 @@ async def _send_one(
 
             logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
             try:
-                # raise_on_error=True: a Mongo brownout is NOT "unauthorized".
-                # The fail-soft default would prune live authorized users and
-                # inflate the deleted counter; the handler below counts it as
-                # a plain failure instead.
+                # raise_on_error=True: a Mongo brownout is not "unauthorized" -- the
+                # fail-soft default would prune live authorized users; counted as a
+                # plain failure below.
                 is_authorized = await db.is_user_authorized(user_id, raise_on_error=True)
                 if not is_authorized:
                     prune_ids.append(user_id)

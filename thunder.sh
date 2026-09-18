@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# (H9) boot orchestration only: best-effort shell-free update; a failing update never blocks boot.
+# boot orchestration only: best-effort shell-free update; a failing update never blocks boot.
 set -u
 
 # work from the script's directory so manual invocations from any cwd behave
-# like the Docker entrypoint (P3-4)
+# like the Docker entrypoint
 cd "$(dirname "$0")" || exit 1
 
 python3 update.py || true

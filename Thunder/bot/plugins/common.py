@@ -1,5 +1,3 @@
-# Thunder/bot/plugins/common.py
-
 import html
 import time
 
@@ -91,9 +89,8 @@ async def start_command(bot: Client, msg: Message):
                     text=MSG_TOKEN_ACTIVATED.format(duration_hours=hours),
                     parse_mode=ParseMode.HTML,
                 )
-            # no button here: the payload is a consumed/foreign/unknown token,
-            # so the "click the button below" copy of MSG_TOKEN_INVALID would
-            # be a dead end -- say what failed instead (P2-8)
+            # no button here: payload is a consumed/foreign/unknown token; the
+            # "click the button below" copy of MSG_TOKEN_INVALID would be a dead end
             return await reply_safe(
                 msg,
                 text=MSG_TOKEN_FAILED.format(reason="The token is invalid or has expired."),

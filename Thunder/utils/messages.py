@@ -1,14 +1,10 @@
-# Thunder/utils/messages.py
-
 # ====== ERROR MESSAGES ======
 
-# ------ General Errors ------
 MSG_ERROR_GENERIC = (
     "⚠️ **Oops!** Something went wrong. Please try again. If the issue persists, contact support."
 )
 MSG_ERROR_USER_INFO = "❗ **User Not Found:** Couldn't find user. Please check the ID or Username."
 
-# ------ User Input & Validation Errors ------
 MSG_INVALID_USER_ID = "❌ **Invalid User ID:** Please provide a numeric user ID."
 MSG_ERROR_START_BOT = "⚠️ You need to start the bot in private first to use this command.\n👉 [Click here]({invite_link}) to start a private chat."
 MSG_LINK_PRIVATE_HINT = (
@@ -25,7 +21,6 @@ MSG_ERROR_DM_BATCH_FAILED = (
     "> This usually means you haven't started a private chat with me, or you've blocked me."
 )
 
-# H7/M12: fail-closed + private-mode surfaces
 MSG_ERROR_TEMP = (
     "⚠️ **Temporary service error.** Access checks are unavailable right now, "
     "so your request was rejected. Please try again in a few minutes."
@@ -44,10 +39,8 @@ MSG_FORCE_SUB_CHECK_FAILED = (
     "An unexpected error occurred while checking channel membership. Please try again."
 )
 
-# ------ File & Media Errors ------
 MSG_ERROR_PROCESSING_MEDIA = "⚠️ **Oops!** Something went wrong while processing your media. Please try again. If the issue persists, contact support."
 
-# ------ Admin Action Errors (Ban, Auth, etc.) ------
 MSG_AUTHORIZE_FAILED = "❌ **Authorization Failed:** Could not authorize user `{user_id}`."
 MSG_DEAUTHORIZE_FAILED = (
     "❌ **Deauthorization Failed:** User `{user_id}` was not authorized or an error occurred."
@@ -60,7 +53,6 @@ MSG_TOKEN_FAILED = (
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
 <pre>{error}</pre>"""
 
-# ------ System & Bot Errors ------
 MSG_ERROR_NOT_ADMIN = "⚠️ **Admin Required:** I need admin privileges to work here."
 MSG_DC_INVALID_USAGE = (
     "🤔 **Invalid Usage:** Please reply to a user's message or a media file to get DC info."
@@ -79,7 +71,7 @@ MSG_CRITICAL_ERROR = (
 
 # ====== ADMIN MESSAGES ======
 
-# ------ Ban/Unban (HTML for reason surfaces: reason is user-controlled, M7) ------
+# Ban surfaces are HTML: reason is user-controlled, escape at render.
 MSG_DECORATOR_BANNED = (
     "You are currently banned and cannot use this bot.\nReason: {reason}\nBanned on: {ban_time}"
 )
@@ -99,7 +91,6 @@ MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 <b>Reason:</b> {reason}"
 MSG_CHANNEL_UNBANNED = "✅ **Channel {channel_id} has been unbanned.**"
 MSG_CHANNEL_NOT_BANNED = "ℹ️ **Channel {channel_id} was not found in the ban list.**"
 
-# ------ Token & Authorization ------
 MSG_AUTHORIZE_USAGE = "🔑 **Usage:** `/authorize <user_id>`"
 MSG_DEAUTHORIZE_USAGE = "🔒 **Usage:** `/deauthorize <user_id>`"
 MSG_AUTHORIZE_SUCCESS = (
@@ -124,7 +115,6 @@ MSG_ADMIN_AUTH_OWNER_FOOTER = (
     "\n👑 <b>Owner:</b> <code>{owner_id}</code> <i>(implicit, all access)</i>"
 )
 
-# ------ Shell Commands (guarded by ENABLE_SHELL, L10) ------
 MSG_SHELL_USAGE = "<b>Usage:</b>\n/shell <command>\n\n<b>Example:</b>\n/shell ls -l"
 MSG_SHELL_DISABLED = (
     "⛔ <b>Shell is disabled.</b>\n\n"
@@ -136,8 +126,6 @@ MSG_SHELL_OUTPUT_CAPTION = "**Shell Command Output** (see attached file):\n<pre>
 MSG_SHELL_OUTPUT_STDOUT = "<b>[stdout]:</b>\n<pre>{output}</pre>"
 MSG_SHELL_OUTPUT_STDERR = "<b>[stderr]:</b>\n<pre>{error}</pre>"
 MSG_SHELL_NO_OUTPUT = "✅ <b>Command Executed:</b> No output."
-
-# ------ Admin View & Control ------
 
 MSG_WORKLOAD_ITEM = "   {bot_name}: {load}\n"
 MSG_ADMIN_RESTART_DONE = "✅ **Restart Successful!**"
@@ -160,10 +148,9 @@ MSG_BUTTON_GITHUB = "🛠️ GitHub"
 MSG_BUTTON_START_CHAT = "📩 Start Chat"
 MSG_BUTTON_CLOSE = "✖ Close"
 
-
 # ====== COMMAND RESPONSES (User-facing) ======
 
-# M7: welcome/help/about are HTML and interpolate html.escape()d values.
+# welcome/help/about are HTML and interpolate html.escape()d values.
 MSG_WELCOME = (
     "🌟 <b>Welcome, {user_name}!</b> 🌟\n\n"
     "I'm <b>Thunder File to Link Bot</b> ⚡\n"
@@ -196,7 +183,7 @@ MSG_HELP_INTRO = (
     "> • Auto-posting links if the bot has admin privileges with delete rights.\n"
 )
 
-# M1: the commands section is generated from bot/registry.py.
+# the commands section is generated from bot/registry.py.
 MSG_HELP_COMMANDS_HEADER = "\n<b>⚙️ Available Commands:</b>\n"
 MSG_HELP_COMMAND_ROW = "> /{name} - {description}\n"
 
@@ -226,7 +213,6 @@ MSG_ABOUT = (
     "💖 If you find me useful, please consider sharing me with your friends!"
 )
 
-# ------ Ping ------
 MSG_PING_START = "🛰️ **Pinging...** Please wait."
 MSG_PING_RESPONSE = (
     "☁️ **PONG! Bot is Online!** ⚡\n\n"
@@ -234,7 +220,6 @@ MSG_PING_RESPONSE = (
     "> 🤖 **Bot Status:** `Active`"
 )
 
-# ------ DC Info ------
 MSG_DC_USER_INFO = (
     "📍 <b>Information</b>\n"
     '👤 <b>User:</b> <a href="tg://user?id={user_id}">{user_name}</a>\n'
@@ -252,7 +237,7 @@ MSG_DC_FILE_INFO = (
 
 MSG_DC_UNKNOWN = "Unknown"
 
-# ------ File Link Generation (HTML: file names are user-controlled, M7) ------
+# Link messages are HTML: file names are user-controlled, escape at render.
 MSG_DM_SINGLE_PREFIX = "📬 <b>From {chat_title}</b>\n"
 MSG_LINKS = (
     "✨ <b>Your Links are Ready!</b> ✨\n\n"
@@ -263,7 +248,7 @@ MSG_LINKS = (
     "⌛️ <b>Note: Links remain active while the bot is running and the file is accessible.</b>"
 )
 
-# L2: appended to link messages only when FILE_TTL_DAYS > 0
+# appended to link messages only when FILE_TTL_DAYS > 0
 MSG_FILE_EXPIRY_NOTE = "⏳ <b>Files expire after {days} of inactivity.</b>"
 MSG_FILE_TTL_DAYS_LABEL = "{days} day(s)"
 
@@ -278,7 +263,6 @@ MSG_COMMUNITY_CHANNEL = "📢 <b>{channel_title}:</b> 🔒 Join this channel to 
 
 # ====== PROCESSING MESSAGES ======
 
-# ------ General File Processing ------
 MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
 MSG_PROCESSING_FILE = "⏳ **Processing your file...**"
 MSG_NEW_FILE_REQUEST = (
@@ -288,7 +272,7 @@ MSG_NEW_FILE_REQUEST = (
     "🖥️ <b>Stream:</b> <code>{stream_link}</code>"
 )
 
-# ------ Batch Processing (M4b: skipped counts non-media files) ------
+# skipped counts non-media files
 MSG_PROCESSING_BATCH = "♻️ **Processing {file_count} files**"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
@@ -361,12 +345,11 @@ MSG_RATE_LIMIT_DROPPED = (
     "⚠️ Service is busy and your request could not be completed. Please try again in a few minutes."
 )
 
-# H7/M12 decorator gate failures (user-facing, shared by all entry points)
+# decorator gate failures (user-facing, shared by all entry points)
 MSG_ERROR_TOKEN_LINK_FAILED = (
     "Sorry, could not generate an access token link. Please try again later."
 )
 MSG_ERROR_UNEXPECTED = "Sorry, an unexpected error occurred. Please try again later."
-
 
 # ====== FILE TYPE DESCRIPTIONS ======
 MSG_FILE_TYPE_DOCUMENT = "📄 Document"

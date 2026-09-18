@@ -1,4 +1,4 @@
-"""H5b/M5: plugin registry lookup, offline builders, host validation."""
+"""Plugin registry lookup, offline builders, host validation."""
 
 import pytest
 

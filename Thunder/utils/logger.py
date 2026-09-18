@@ -1,5 +1,3 @@
-# Thunder/utils/logger.py
-
 import atexit
 import hashlib
 import json
@@ -18,7 +16,7 @@ logging._srcfile = None
 logging.logThreads = False
 logging.logProcesses = False
 
-# H10: shared secret redaction -- the access-log middleware and /log upload
+# shared secret redaction -- the access-log middleware and /log upload
 # both go through these so no token / Mongo URI can leave the machine.
 
 BOT_TOKEN_PATTERN = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{35,}")

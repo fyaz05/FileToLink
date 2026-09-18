@@ -86,10 +86,8 @@ jobs:
           fi
 
   docker:
-    # smoke-build on PRs (no push, no secrets needed); publish only from
-    # main pushes so a feature-branch push can never overwrite
-    # fyaz05/thunder:latest.  Without the PR build, Dockerfile regressions
-    # merged green and only broke the post-merge publish.
+    # Smoke-build on PRs (no secrets); publish only from main pushes so a
+    # feature branch can never overwrite fyaz05/thunder:latest.
     if: github.repository == 'fyaz05/FileToLink' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     needs: quality
     runs-on: ubuntu-latest
@@ -109,10 +107,8 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'push' }}
-          # NOTE: provenance/sbom attestations stay off: the default docker
-          # driver rejects them even on no-push smoke builds, and gating them
-          # behind push would only surface a publish breakage post-merge.
-          # Revisit with a containerd-backed builder if attestations are wanted.
+          # Attestations stay off: the default docker driver rejects them even
+          # on no-push smoke builds; revisit with a containerd-backed builder.
           tags: |
             fyaz05/thunder:latest
             fyaz05/thunder:${{ github.sha }}

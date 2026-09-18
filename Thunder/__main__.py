@@ -1,5 +1,3 @@
-# Thunder/__main__.py
-
 import asyncio
 import glob
 import importlib.util
@@ -165,14 +163,14 @@ async def start_services():
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
         # the index-ensure task may already be scheduled -- stop it against a
-        # closing client BEFORE db.close (P3-2)
+        # closing client BEFORE db.close
         for t in background_tasks:
             t.cancel()
         if background_tasks:
             await asyncio.wait(background_tasks, timeout=10)
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
-        # M13: a failed boot must exit non-zero or container restart policies never fire.
+        # a failed boot must exit non-zero or container restart policies never fire.
         raise SystemExit(1) from e
 
     print("   ▶ Starting Client initialization...")
@@ -189,7 +187,7 @@ async def start_services():
 
     print("   ▶ Starting Request Executor initialization...")
     try:
-        # H6b: worker pool; registered early so a later boot failure cancels live workers too
+        # worker pool; registered early so a later boot failure cancels live workers too
         executor_tasks = start_executors()
         background_tasks.extend(executor_tasks)
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
@@ -198,9 +196,8 @@ async def start_services():
         for t in background_tasks:
             t.cancel()
         if background_tasks:
-            # bounded: boot failure must not hang forever on stuck workers;
-            # asyncio.wait (not wait_for+gather) so a task that ignores
-            # cancellation cannot skip the teardown below (P3-1)
+            # bounded: a cancellation-ignoring task must not skip the teardown
+            # below (asyncio.wait, not wait_for+gather)
             await asyncio.wait(background_tasks, timeout=30)
         await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
@@ -222,7 +219,7 @@ async def start_services():
             schedule_token_cleanup(), name="token_cleanup_task"
         )
         background_tasks.append(token_cleanup_task)
-        # H6a: bounded bookkeeping -- periodic sweepers
+        # bounded bookkeeping -- periodic sweepers
         limiter_sweeper_task = asyncio.create_task(
             schedule_limiter_sweep(), name="limiter_sweeper_task"
         )
@@ -235,9 +232,8 @@ async def start_services():
         for t in background_tasks:
             t.cancel()
         if background_tasks:
-            # bounded: boot failure must not hang forever on stuck workers;
-            # asyncio.wait (not wait_for+gather) so a task that ignores
-            # cancellation cannot skip the teardown below (P3-1)
+            # bounded: a cancellation-ignoring task must not skip the teardown
+            # below (asyncio.wait, not wait_for+gather)
             await asyncio.wait(background_tasks, timeout=30)
         # touch buffer must flush BEFORE db.close, or _bulk_flush discards increments
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
@@ -259,7 +255,7 @@ async def start_services():
     try:
         await idle()
     finally:
-        # M13: ordered teardown with a bounded drain + error aggregation
+        # ordered teardown with a bounded drain + error aggregation
         await shutdown_services(background_tasks, app_runner)
 
 
@@ -275,7 +271,7 @@ async def _safe_teardown_step(step, name: str, errors: list | None = None):
 
 
 async def shutdown_services(background_tasks, app_runner) -> None:
-    """M13: restart-marker-safe, bounded drain, aggregated errors."""
+    """Restart-marker-safe, bounded drain, aggregated errors."""
     print("   ▶ Shutting down services...")
     errors: list = []
 
@@ -326,7 +322,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
 
     logger.info(f"Touch buffer final state: {touch_buffer_stats()}")
 
-    # M13: aggregate, log everything, exit non-zero when anything failed
+    # aggregate, log everything, exit non-zero when anything failed
     if errors:
         logger.error(
             f"Shutdown completed with {len(errors)} error(s): "
@@ -348,7 +344,7 @@ async def schedule_token_cleanup():
 
 
 async def schedule_limiter_sweep():
-    """H6a: prune limiter bookkeeping every 5 minutes."""
+    """Prune limiter bookkeeping every 5 minutes."""
     while True:
         try:
             await asyncio.sleep(300)
@@ -362,7 +358,8 @@ async def schedule_limiter_sweep():
 
 
 if __name__ == "__main__":
-    # L5: restrictive umask covers session keys before harden_session_files runs; logs/ predates umask, ambient perms (content redacted)
+    # Restrictive umask covers session keys before harden_session_files runs;
+    # logs/ predates it, but log content is redacted.
     os.umask(0o077)
     try:
         asyncio.run(start_services())

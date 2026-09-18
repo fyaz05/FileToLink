@@ -1,5 +1,3 @@
-# Thunder/utils/database.py
-
 import datetime
 import uuid
 from typing import Any
@@ -12,7 +10,7 @@ from Thunder.utils.flag_cache import flags
 from Thunder.utils.logger import hash_path_token, logger
 from Thunder.vars import Var
 
-# H8: every Mongo op gets a server-side budget so a brownout cannot pin
+# every Mongo op gets a server-side budget so a brownout cannot pin
 # handlers forever; per-op overrides remain possible at call sites.
 MONGO_TIMEOUT_MS = 5000
 
@@ -201,7 +199,7 @@ class Database:
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
-            # L2: backfill before the TTL index exists so pre-existing rows
+            # backfill before the TTL index exists so pre-existing rows
             # get a full window instead of vanishing on activation (default off)
             if Var.FILE_TTL_DAYS > 0:
                 expected_ttl = Var.FILE_TTL_DAYS * 86400
@@ -225,7 +223,7 @@ class Database:
             await self._ensure_index(self.banned_channels_col, "channel_id", unique=True)
             await self._ensure_index(self.token_col, "token", unique=True)
             # /start + generate() look tokens up by user; without this the
-            # per-user scans walk the whole collection (H8-adjacent gap)
+            # per-user scans walk the whole collection
             await self._ensure_index(
                 self.token_col, [("user_id", 1), ("activated", 1), ("expires_at", -1)]
             )
@@ -333,7 +331,7 @@ class Database:
             await self.banned_users_col.update_one(
                 {"user_id": user_id}, {"$set": ban_data}, upsert=True
             )
-            # the ban gate is flag-cached (H7): without this invalidation a
+            # the ban gate is flag-cached: without this invalidation a
             # fresh ban would not take effect until the 5-min TTL expired
             flags.invalidate(("banned_user", user_id))
             logger.debug(f"Added/Updated banned user {user_id}. Reason: {reason}")
@@ -532,7 +530,7 @@ class Database:
     async def bulk_touch_file_records(
         self, items: list[tuple[str, int, int]], *, raise_on_error: bool = False
     ) -> bool:
-        """Batched touch (M14): one BulkWrite for the whole flush cycle.
+        """Batched touch: one BulkWrite for the whole flush cycle.
 
         ``items`` is a list of ``(public_hash, reuse_delta, seen_delta)``
         triples; deltas accumulate per hash so N touches flush as N, not 1.
@@ -561,7 +559,7 @@ class Database:
             return False
 
     async def delete_file_record(self, public_hash: str) -> bool:
-        """Remove a stale canonical record (M10 self-healing)."""
+        """Remove a stale canonical record."""
         try:
             result = await self.files_col.delete_one({"public_hash": public_hash})
             return result.deleted_count > 0

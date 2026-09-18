@@ -1,5 +1,3 @@
-# Thunder/utils/force_channel.py
-
 import html
 import time
 
@@ -27,7 +25,7 @@ _RESOLVED_TTL_SECONDS = 300.0
 _negative_until = 0.0
 _NEGATIVE_TTL_SECONDS = 60.0
 
-# Membership cache (P3-12): one get_chat_member RPC per gated message was the
+# Membership cache: one get_chat_member RPC per gated message was the
 # last uncached hot-path read.  Short TTL bounds both the RPC volume and the
 # post-join access delay -- a user who joins waits at most this long.
 _membership_cache = FlagCache(ttl_seconds=60, max_items=4096, name="force_member")

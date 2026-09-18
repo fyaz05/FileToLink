@@ -1,6 +1,4 @@
-# Thunder/utils/decorators.py
-
-"""Access gates (plan H7 + M12).
+"""Access gates.
 
 One preflight chain replaces the three ad-hoc per-plugin gate orders.
 Documented ordering (see AGENTS.md):
@@ -47,7 +45,7 @@ from Thunder.vars import Var
 
 
 async def check_banned(client, message: Message) -> bool:
-    """Ban gate -- cached, fail-closed (H7)."""
+    """Ban gate -- cached, fail-closed."""
     try:
         if not message.from_user:
             return True
@@ -85,7 +83,7 @@ async def check_banned(client, message: Message) -> bool:
                     message,
                     MSG_DECORATOR_BANNED.format(
                         # reason is owner-set free text; escaped + explicit HTML
-                        # parse mode so it cannot reflow into markup (M7)
+                        # parse mode so it cannot reflow into markup
                         reason=html.escape(ban_details.get("reason", "Not specified")),
                         ban_time=ban_time,
                     ),
@@ -102,7 +100,7 @@ async def check_banned(client, message: Message) -> bool:
 
 
 async def check_private_mode(client, message: Message) -> bool:
-    """PRIVATE_MODE allowlist gate (M12): owner + authorized users only."""
+    """PRIVATE_MODE allowlist gate: owner + authorized users only."""
     if not Var.PRIVATE_MODE:
         return True
     if not message.from_user:
@@ -136,7 +134,7 @@ async def check_private_mode(client, message: Message) -> bool:
 
 
 async def require_token(client, message: Message) -> bool:
-    """Token-activation gate (H7: cached checks, fail-closed)."""
+    """Token-activation gate (cached checks, fail-closed)."""
     try:
         # TOKEN_ENABLED short-circuit comes FIRST: with the feature off the
         # gate must no-op even for anonymous senders, or anonymous /link breaks
@@ -254,18 +252,18 @@ async def get_shortener_status(client, message: Message) -> bool:
         return Var.SHORTEN_MEDIA_LINKS
 
 
-# M12: unified preflight chain
+# unified preflight chain
 
-#: gate registry -- order is the documented contract; adding a new gate is a
-#: one-place change here (chain asserted by tests/test_unit/test_preflight.py).
+# gate registry -- order is the documented contract; adding a new gate is a
+# one-place change here (chain asserted by tests/test_unit/test_preflight.py).
 PREFLIGHT_GATES = {
     "banned": check_banned,
     "private_mode": check_private_mode,
     "token": require_token,
 }
 
-#: preset gate chains -- the documented orders, so callers cannot invent
-#: their own sequence and a new command cannot forget a gate
+# preset gate chains -- the documented orders, so callers cannot invent
+# their own sequence and a new command cannot forget a gate
 GATES_STANDARD: tuple = ("banned", "private_mode", "token")
 GATES_START: tuple = ("banned", "private_mode")
 # info commands (/help, /about, /dc, /ping) run GATES_START on purpose: the

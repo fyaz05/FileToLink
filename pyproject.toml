@@ -4,13 +4,13 @@ version = "2.2.0"
 description = "FileToLink — Telegram file-to-link streaming bot (pyrofork + aiohttp + MongoDB)"
 requires-python = ">=3.13"
 dependencies = [
-    "aiohttp==3.14.3",           # OSV-clean; 3 2026 CVEs fixed (Aug-2026 advisory cycle) (H1)
-    "pyrofork[speedup]==2.3.69",  # latest; [speedup] = tgcrypto-pyrofork + uvloop extras. NOTE: upstream (Mayuri-Chan/pyrofork) was archived 2026-09 -- plan the exit to a maintained fork or pyrogram
-    "pymongo==4.18.1",            # async AsyncMongoClient; timeoutMS since 4.2
+    "aiohttp==3.14.3",
+    "pyrofork[speedup]==2.3.69",  # upstream pyrofork was archived 2026-09 -- plan the exit to a maintained fork
+    "pymongo==4.18.1",
     "Jinja2==3.1.6",
     "python-dotenv==1.2.3",
     "psutil==7.2.2",
-    "uvloop==0.22.1",            # py3.13 support
+    "uvloop==0.22.1",
 ]
 
 [dependency-groups]

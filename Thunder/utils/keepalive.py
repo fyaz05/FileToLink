@@ -1,5 +1,3 @@
-# Thunder/utils/keepalive.py
-
 import asyncio
 import os
 
@@ -10,7 +8,7 @@ from Thunder.vars import Var
 
 
 def _health_url() -> str:
-    """Ping /health on ourselves (M3).
+    """Ping /health on ourselves.
 
     The historical implementation GET ``Var.URL``, whose root handler is a
     302 to GitHub -- so the keepalive had been validating GitHub, not this

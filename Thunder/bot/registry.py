@@ -1,5 +1,3 @@
-# Thunder/bot/registry.py
-
 """Single command registry: drives menu, /help, and AGENTS.md (tested)."""
 
 from typing import NamedTuple
@@ -41,7 +39,7 @@ _MAX_DESC_LEN = 256
 
 
 def bot_commands() -> list[BotCommand]:
-    """Menu surface: owner-only commands are hidden (M1 fix)."""
+    """Menu surface: owner-only commands are hidden."""
     return [
         BotCommand(cmd.name, cmd.description[:_MAX_DESC_LEN])
         for cmd in COMMANDS

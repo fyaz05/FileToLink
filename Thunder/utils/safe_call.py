@@ -1,5 +1,3 @@
-# Thunder/utils/safe_call.py
-
 """Central FloodWait-safe call helpers.
 
 Every Telegram RPC goes through :func:`tg_call` or a thin wrapper.  On
@@ -26,13 +24,12 @@ T = TypeVar("T")
 # Default wall-clock budget for lightweight RPCs; env-overridable via TG_RPC_TIMEOUT_SECONDS.
 DEFAULT_RPC_TIMEOUT_SECONDS = 30.0
 
-# H8: cap FloodWait sleeps so a lightweight RPC cannot blow its advertised wall-clock budget.
+# cap FloodWait sleeps so a lightweight RPC cannot blow its advertised wall-clock budget.
 MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
 
-# File-transfer shapes may sleep the full FloodWait up to this ceiling -- the
-# pre-branch pyrogram auto-sleep budget.  Sustained throttling on the ingest
-# path (vault copy, uploads) must ride out long waits instead of hard-failing
-# (P2-5); waits beyond the ceiling still surface to the caller.
+# File-transfer shapes may sleep the full FloodWait up to this ceiling (the
+# pyrogram auto-sleep budget): sustained throttling on the ingest path must
+# ride out long waits instead of hard-failing; beyond it, surface to caller.
 MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS = 600.0
 
 # Call shapes allowed to run unbounded by default (large media transfers); matched by name.

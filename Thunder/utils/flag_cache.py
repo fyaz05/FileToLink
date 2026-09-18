@@ -1,5 +1,3 @@
-# Thunder/utils/flag_cache.py
-
 """Tiny lazy TTL+LRU cache for per-user/per-channel flags.
 
 Mirrors ThunderGo's ``internal/store/cache.go``: values are loaded on first
@@ -75,7 +73,7 @@ class FlagCache:
         except BaseException:
             self._inflight.pop(key, None)
             raise
-        # Fence (P2-1): invalidate()/clear() may have dropped our registration
+        # Fence: invalidate()/clear() may have dropped our registration
         # while the loader was in flight; re-storing the pre-mutation value
         # would re-cache a stale gate answer for a full TTL. Store only if we
         # are still the registered loader for this key.

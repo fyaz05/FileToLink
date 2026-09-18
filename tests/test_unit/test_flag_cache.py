@@ -1,4 +1,4 @@
-"""H7: TTL-LRU flag cache semantics."""
+"""TTL-LRU flag cache semantics."""
 
 import pytest
 
@@ -104,7 +104,7 @@ async def test_concurrent_loaders_single_flight():
 
 @pytest.mark.unit
 async def test_invalidate_mid_load_defeats_stale_store():
-    """P2-1 regression: invalidate() while a loader is in flight must not let
+    """Regression: invalidate() while a loader is in flight must not let
     that loader re-cache its pre-mutation value for a full TTL."""
     import asyncio
 

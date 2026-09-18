@@ -1,4 +1,4 @@
-"""L9: real-MongoDB tier via testcontainers; opt in with `pytest -m integration` (needs Docker)."""
+"""Real-MongoDB tier via testcontainers; opt in with `pytest -m integration` (needs Docker)."""
 
 import os
 from datetime import UTC
@@ -47,7 +47,7 @@ def db(mongo_container):
 async def test_ensure_indexes_and_token_atomicity(db):  # pragma: no cover
     assert await db.ensure_indexes(raise_on_error=True) is True
 
-    # M8: atomic activation -- two concurrent consume() calls, one winner
+    # atomic activation -- two concurrent consume() calls, one winner
     import asyncio
     from datetime import datetime, timedelta
 

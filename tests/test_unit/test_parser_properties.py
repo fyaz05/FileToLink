@@ -88,7 +88,7 @@ def test_canonical_hash_shapes():
 
 @pytest.mark.unit
 def test_quoted_media_name_never_splits_path():
-    """quote_media_name output must never contain a path separator."""
+    """Quote_media_name output must never contain a path separator."""
     alphabet = string.ascii_letters + string.digits + " /._-()<>&\"'%\u00e9\u4e2d"
     for _ in range(300):
         name = "".join(_rng.choice(alphabet) for _ in range(_rng.randint(0, 120)))

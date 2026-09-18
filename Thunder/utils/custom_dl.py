@@ -1,5 +1,3 @@
-# Thunder/utils/custom_dl.py
-
 import asyncio
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -15,7 +13,7 @@ from Thunder.utils.media_types import ext_and_mime_for_class
 from Thunder.utils.safe_call import tg_call
 from Thunder.vars import Var
 
-# M9/H4b: caps the total FloodWait pinning of one stream handler before a 503.
+# Caps the total FloodWait pinning of one stream handler before a 503.
 _MAX_STREAM_FLOODWAIT_SECONDS = 60.0
 
 # Shared media chunk size (1 MiB): also used by the HTTP streaming routes to
@@ -31,7 +29,7 @@ class ByteStreamer:
         self.chat_id = int(Var.BIN_CHANNEL)
 
     async def get_message(self, message_id: int) -> Message:
-        # H4b/H8: bounded FloodWait handling via tg_call; transient failures
+        # bounded FloodWait handling via tg_call; transient failures
         # raise TelegramUnavailable, NEVER FileNotFound -- the delivery route
         # self-heals (deletes the record) on FileNotFound.
         try:

@@ -1,5 +1,3 @@
-# Thunder/server/__init__.py
-
 import re
 import time
 
@@ -9,7 +7,7 @@ from Thunder.utils.logger import hash_path_token, logger
 
 from .stream_routes import routes
 
-# H10: access log middleware -- method, redacted path, status, bytes, duration.
+# access log middleware -- method, redacted path, status, bytes, duration.
 
 
 # Single pass: sequential rules would let the id-first rule re-match 8-hex
@@ -70,7 +68,7 @@ async def access_log_middleware(request: web.Request, handler):
 
 
 async def web_server():
-    # H4b: GET-only server -- no request bodies, so no client_max_size cap.
+    # GET-only server -- no request bodies, so no client_max_size cap.
     web_app = web.Application(middlewares=[access_log_middleware])
     web_app.add_routes(routes)
     return web_app

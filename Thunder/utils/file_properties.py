@@ -1,5 +1,3 @@
-# Thunder/utils/file_properties.py
-
 from datetime import datetime as dt
 from typing import Any
 
@@ -58,7 +56,7 @@ def get_fname(msg: Message) -> str:
     if not fname:
         ext = "bin"
         if media:
-            # single media-type map (H4c): attribute -> canonical key -> ext
+            # single media-type map: attribute -> canonical key -> ext
             for attr in ("photo", "audio", "voice", "video", "animation", "video_note", "sticker"):
                 if getattr(msg, attr, None) is not None:
                     ext = ext_for(canonical_media_type(attr=attr))
