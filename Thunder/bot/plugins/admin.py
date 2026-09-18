@@ -362,14 +362,28 @@ async def list_authorized_command(client: Client, message: Message):
 
     text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)
 
-    await reply(
-        message,
-        text=text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
-        ),
-    )
+    # long auth lists exceed the 4096-char message cap: page by lines
+    if len(text) <= 3500:
+        pages = [text]
+    else:
+        pages, current = [], ""
+        for line in text.split("\n"):
+            if len(current) + len(line) + 1 > 3500:
+                pages.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            pages.append(current)
+
+    for page in pages:
+        await reply(
+            message,
+            text=page,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+            ),
+        )
 
 
 @StreamBot.on_message(filters.command("ban") & owner_filter)
