@@ -1,58 +1,97 @@
-# Thunder/utils/broadcast.py
-
 import asyncio
 import os
 import time
+from typing import Any
 
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
-from pyrogram.errors import (ChatWriteForbidden, FloodWait, PeerIdInvalid, UserDeactivated,
-                             UserIsBlocked, ChannelInvalid, InputUserDeactivated)
-from pyrogram.types import (InlineKeyboardButton, InlineKeyboardMarkup,
-                            Message)
+from pyrogram.errors import (
+    ChannelInvalid,
+    ChatWriteForbidden,
+    FloodWait,
+    InputUserDeactivated,
+    PeerIdInvalid,
+    RPCError,
+    UserDeactivated,
+    UserIsBlocked,
+)
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder.utils.database import db
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
-    MSG_INVALID_BROADCAST_CMD,
+    MSG_BROADCAST_CANCELLED_PREFIX,
+    MSG_BROADCAST_COMPLETE,
+    MSG_BROADCAST_FAILED_USERS,
+    MSG_BROADCAST_INTERRUPTED_PREFIX,
+    MSG_BROADCAST_NO_USERS,
+    MSG_BROADCAST_PROGRESS,
     MSG_BROADCAST_START,
     MSG_BUTTON_CANCEL_BROADCAST,
-    MSG_BROADCAST_COMPLETE
+    MSG_INVALID_BROADCAST_CMD,
 )
+from Thunder.utils.safe_call import reply_safe, tg_call
 from Thunder.utils.time_format import get_readable_time
+from Thunder.vars import Var
 
+broadcast_ids: dict[str, dict[str, Any]] = {}
 
-broadcast_ids = {}
+# Errors that mean the recipient will never be reachable again.
+_PERMANENT_ERRORS = (
+    UserDeactivated,
+    UserIsBlocked,
+    PeerIdInvalid,
+    ChatWriteForbidden,
+    ChannelInvalid,
+    InputUserDeactivated,
+)
+
+# Closed mapping for the exact exception set above -- no dead fallback branch.
+_PERMANENT_ERROR_REASONS: dict[type[Exception], tuple[str, str]] = {
+    ChannelInvalid: ("Channel", "invalid channel"),
+    InputUserDeactivated: ("User", "deactivated account"),
+    UserIsBlocked: ("User", "blocked the bot"),
+    UserDeactivated: ("User", "deactivated account"),
+    PeerIdInvalid: ("Recipient", "invalid ID"),
+    ChatWriteForbidden: ("Chat", "write forbidden"),
+}
+
+# pacing between sends per worker + progress-edit cadence
+_BROADCAST_PACE_SECONDS = 0.2
+_PROGRESS_EVERY = 25
+
+# strong refs: CPython only weakly references tasks; unreferenced ones
+# can be garbage-collected mid-run
+_BROADCAST_TASKS: set[asyncio.Task] = set()
+
 
 async def broadcast_message(client: Client, message: Message, mode: str = "all"):
     if not message.reply_to_message:
         try:
-            await message.reply_text(MSG_INVALID_BROADCAST_CMD)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await message.reply_text(MSG_INVALID_BROADCAST_CMD)
+            await reply_safe(message, MSG_INVALID_BROADCAST_CMD)
         except Exception as e:
             logger.error(f"Error sending invalid broadcast message: {e}", exc_info=True)
         return
 
     broadcast_id = os.urandom(3).hex()
     stats = {"total": 0, "success": 0, "failed": 0, "deleted": 0, "cancelled": False}
+    # unreachable ids; deletes happen after the summary, never in workers
+    prune_ids: list[int] = []
     broadcast_ids[broadcast_id] = stats
 
     try:
-        status_msg = await message.reply_text(
+        status_msg = await tg_call(
+            message.reply_text,
             MSG_BROADCAST_START,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}")
-            ]])
-        )
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        status_msg = await message.reply_text(
-            MSG_BROADCAST_START,
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}")
-            ]])
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            MSG_BUTTON_CANCEL_BROADCAST, callback_data=f"cancel_{broadcast_id}"
+                        )
+                    ]
+                ]
+            ),
         )
     except Exception as e:
         logger.error(f"Error starting broadcast: {e}", exc_info=True)
@@ -74,116 +113,206 @@ async def broadcast_message(client: Client, message: Message, mode: str = "all")
     except Exception as e:
         logger.error(f"Error getting user cursor for mode '{mode}': {e}", exc_info=True)
         try:
-            await status_msg.edit_text(f"❌ **Broadcast Failed:** Unable to fetch users for mode '{mode}'.")
+            await tg_call(
+                status_msg.edit_text, MSG_BROADCAST_FAILED_USERS.format(mode=mode), retries=0
+            )
         except Exception:
             pass
         del broadcast_ids[broadcast_id]
         return
-    
+
     if stats["total"] == 0:
         try:
-            await status_msg.edit_text(f"ℹ️ **No users found for broadcast mode:** `{mode}`")
+            await tg_call(status_msg.edit_text, MSG_BROADCAST_NO_USERS.format(mode=mode), retries=0)
         except Exception:
             pass
         del broadcast_ids[broadcast_id]
         return
 
     async def do_broadcast():
-        async for user in cursor:
-            if stats["cancelled"]:
-                break
+        # bounded-queue worker pool; cursor streamed, never materialized;
+        # sends paced, progress edits throttled, cancel stays responsive
+        queue: asyncio.Queue = asyncio.Queue(maxsize=200)
 
-            user_id = user.get('id') or user.get('user_id')
-            if not user_id:
-                logger.warning(f"Skipping user with no ID: {user}")
-                continue
+        async def producer():
+            try:
+                async for user in cursor:
+                    if stats["cancelled"]:
+                        break
+                    await queue.put(user)
+            except Exception as e:
+                logger.error(f"Broadcast cursor error: {e}", exc_info=True)
+            finally:
+                # every worker needs exactly one pill or it blocks on get()
+                # forever: retry (workers drain concurrently) but bail out if
+                # all workers are already done
+                for _ in range(worker_count):
+                    while True:
+                        try:
+                            queue.put_nowait(None)  # poison pills
+                            break
+                        except asyncio.QueueFull:
+                            if all(w.done() for w in workers):
+                                break
+                            await asyncio.sleep(0.05)
+
+        async def worker():
+            while True:
+                user = await queue.get()
+                try:
+                    if user is None:
+                        return
+                    if stats["cancelled"]:
+                        continue
+                    user_id = user.get("id") or user.get("user_id")
+                    if not user_id:
+                        logger.warning(f"Skipping user with no ID: {user}")
+                        continue
+                    await _send_one(client, message, user_id, stats, prune_ids)
+                    # idempotent modulo _PROGRESS_EVERY: concurrent workers may
+                    # skip or duplicate a progress edit; the final completion
+                    # message is the source of truth
+                    if stats["success"] and stats["success"] % _PROGRESS_EVERY == 0:
+                        await _edit_progress(status_msg, stats)
+                finally:
+                    if user is not None:
+                        await asyncio.sleep(_BROADCAST_PACE_SECONDS)
+
+        worker_count = Var.BROADCAST_WORKERS
+        workers = [
+            asyncio.create_task(worker(), name=f"broadcast_worker_{i}") for i in range(worker_count)
+        ]
+        producer_task = asyncio.create_task(producer(), name="broadcast_producer")
+
+        completed_normally = False
+        worker_crashed = False
+        try:
+            await producer_task
+            results = await asyncio.gather(*workers, return_exceptions=True)
+            for r in results:
+                if isinstance(r, BaseException) and not isinstance(r, asyncio.CancelledError):
+                    logger.error(f"Broadcast worker failed: {r!r}")
+                    worker_crashed = True
+            completed_normally = True
+        finally:
+            # no worker/producer/status/registry leakage on ANY exit path
+            for t in workers:
+                if not t.done():
+                    t.cancel()
+            if not producer_task.done():
+                producer_task.cancel()
+            try:
+                await tg_call(status_msg.delete, retries=0)
+            except Exception:
+                pass
+            broadcast_ids.pop(broadcast_id, None)
+
+        if completed_normally:
+            completion_msg = MSG_BROADCAST_COMPLETE.format(
+                elapsed_time=get_readable_time(int(time.time() - start_time)),
+                mode=mode,
+                total_users=stats["total"],
+                successes=stats["success"],
+                failures=stats["failed"],
+                deleted_accounts=stats["deleted"],
+            )
+
+            if worker_crashed:
+                completion_msg = MSG_BROADCAST_INTERRUPTED_PREFIX + completion_msg
+            elif stats["cancelled"]:
+                completion_msg = MSG_BROADCAST_CANCELLED_PREFIX + completion_msg
 
             try:
-                success = False
-                for attempt in range(3):
-                    try:
-                        await message.reply_to_message.copy(user_id)
-                        stats["success"] += 1
-                        success = True
-                        break
-                    except FloodWait as e:
-                        if attempt < 2:
-                            await asyncio.sleep(e.value)
-                        else:
-                            logger.warning(f"FloodWait persisted for user {user_id} after 3 attempts, last wait: {e.value}s")
-                            stats["failed"] += 1
-                            break
+                await reply_safe(message, completion_msg, parse_mode=ParseMode.MARKDOWN)
+            except Exception as e:
+                logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
 
-            except (UserDeactivated, UserIsBlocked, PeerIdInvalid, ChatWriteForbidden, ChannelInvalid, InputUserDeactivated) as e:
-                if isinstance(e, ChannelInvalid):
-                    recipient_type = "Channel"
-                    reason = "invalid channel"
-                elif isinstance(e, InputUserDeactivated):
-                    recipient_type = "User"
-                    reason = "deactivated account"
-                elif isinstance(e, UserIsBlocked):
-                    recipient_type = "User"
-                    reason = "blocked the bot"
-                elif isinstance(e, UserDeactivated):
-                    recipient_type = "User"
-                    reason = "deactivated account"
-                elif isinstance(e, PeerIdInvalid):
-                    recipient_type = "Recipient"
-                    reason = "invalid ID"
-                elif isinstance(e, ChatWriteForbidden):
-                    recipient_type = "Chat"
-                    reason = "write forbidden"
-                else:
-                    recipient_type = "Recipient"
-                    reason = f"error: {type(e).__name__}"
+            if prune_ids:
+                # summary is out; prune in the background so sequential
+                # deletes never stall workers
+                prune_task = asyncio.create_task(_prune_collected(prune_ids))
+                _BROADCAST_TASKS.add(prune_task)
+                prune_task.add_done_callback(_BROADCAST_TASKS.discard)
 
-                logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
+    task = asyncio.create_task(do_broadcast())
+    # hold a strong ref so CPython cannot GC the task mid-run
+    _BROADCAST_TASKS.add(task)
+    task.add_done_callback(_BROADCAST_TASKS.discard)
 
-                is_authorized = await db.is_user_authorized(user_id)
+
+async def _prune_collected(user_ids: list[int]) -> None:
+    """Best-effort background prune of unreachable recipients."""
+    for user_id in user_ids:
+        try:
+            await db.delete_user(user_id)
+        except Exception as e:
+            logger.error(f"Background prune failed for {user_id}: {e}", exc_info=True)
+
+
+async def _send_one(
+    client: Client, message: Message, user_id: int, stats: dict, prune_ids: list[int]
+) -> None:
+    # transient errors get 3 attempts with attempt-squared backoff (1s, 4s);
+    # permanent and FloodWait outcomes return immediately (tg_call already
+    # retried FloodWaits with bounded sleeps)
+    for attempt in range(1, 4):
+        try:
+            # fail-count fast on sustained throttle: a per-recipient fan-out
+            # must not ride out a 600s ingest-style wait per user
+            await tg_call(message.reply_to_message.copy, user_id, retries=1, max_flood_sleep=30.0)
+            stats["success"] += 1
+            return
+        except _PERMANENT_ERRORS as e:
+            recipient_type, reason = _PERMANENT_ERROR_REASONS.get(
+                type(e), ("Recipient", "unreachable")
+            )
+
+            logger.warning(f"{recipient_type} {user_id} removed due to {reason}")
+            try:
+                # raise_on_error=True: a Mongo brownout is not "unauthorized" -- the
+                # fail-soft default would prune live authorized users; counted as a
+                # plain failure below.
+                is_authorized = await db.is_user_authorized(user_id, raise_on_error=True)
                 if not is_authorized:
-                    await db.delete_user(user_id)
+                    prune_ids.append(user_id)
                     stats["deleted"] += 1
                 else:
                     stats["failed"] += 1
-
-            except Exception as e:
-                logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
+            except Exception as db_err:
+                logger.error(f"Prune lookup failed for {user_id}: {db_err}", exc_info=True)
                 stats["failed"] += 1
-
-        try:
-            await status_msg.delete()
+            return
         except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try:
-                await status_msg.delete()
-            except Exception:
-                pass
+            # allowed: classify-only, no sleep (tg_call already retried)
+            logger.warning(f"FloodWait persisted for user {user_id}, last wait: {e.value}s")
+            stats["failed"] += 1
+            return
+        except TimeoutError:
+            # transient transport stall: backoff below, fail after 3 attempts
+            pass
+        except RPCError as e:
+            if getattr(e, "code", 0) not in (500, 502, 503, 504):
+                logger.error(f"Non-retryable RPC error for user {user_id}: {e}", exc_info=True)
+                stats["failed"] += 1
+                return
+            # else: transient server-side error, backoff below
         except Exception as e:
-            logger.debug(f"Could not delete status message: {e}")
+            logger.error(f"Error copying message to user {user_id}: {e}", exc_info=True)
+            stats["failed"] += 1
+            return
+        if attempt >= 3:
+            logger.error(f"Transient error persisted for user {user_id}; giving up")
+            stats["failed"] += 1
+            return
+        await asyncio.sleep(attempt * attempt)
 
-        completion_msg = MSG_BROADCAST_COMPLETE.format(
-            elapsed_time=get_readable_time(int(time.time() - start_time)),
-            total_users=stats["total"],
-            successes=stats["success"],
-            failures=stats["failed"],
-            deleted_accounts=stats["deleted"]
+
+async def _edit_progress(status_msg: Message, stats: dict) -> None:
+    try:
+        await tg_call(
+            status_msg.edit_text,
+            MSG_BROADCAST_PROGRESS.format(success=stats["success"], total=stats["total"]),
+            retries=0,
         )
-        
-        if stats["cancelled"]:
-            completion_msg = "🛑 **Broadcast Cancelled**\n\n" + completion_msg
-        
-        try:
-            await message.reply_text(completion_msg, parse_mode=ParseMode.MARKDOWN)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try:
-                await message.reply_text(completion_msg, parse_mode=ParseMode.MARKDOWN)
-            except Exception as e:
-                logger.error(f"Failed to send completion message after FloodWait: {e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"Failed to send broadcast completion message: {e}", exc_info=True)
-
-        if broadcast_id in broadcast_ids:
-            del broadcast_ids[broadcast_id]
-
-    asyncio.create_task(do_broadcast())
+    except Exception:
+        pass

@@ -1,77 +1,112 @@
-# Thunder/bot/plugins/admin.py
-
 import asyncio
+import contextlib
 import html
 import os
-import shutil
-import sys
 import time
 from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 import psutil
 from pyrogram import filters
 from pyrogram.client import Client
 from pyrogram.enums import ParseMode
-from pyrogram.errors import FloodWait, MessageNotModified
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.errors import MessageNotModified
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, User
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.utils.bot_utils import get_user, reply
+from Thunder.bot.clients import cleanup_clients
+from Thunder.utils.bot_utils import reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
+from Thunder.utils.flag_cache import flags
 from Thunder.utils.human_readable import humanbytes
-from Thunder.utils.logger import LOG_FILE, logger
+from Thunder.utils.logger import LOG_FILE, logger, redact_secrets
 from Thunder.utils.messages import (
-    MSG_ADMIN_AUTH_LIST_HEADER, MSG_ADMIN_NO_BAN_REASON,
-    MSG_ADMIN_USER_BANNED, MSG_ADMIN_USER_UNBANNED, MSG_AUTHORIZE_FAILED,
-    MSG_AUTHORIZE_SUCCESS, MSG_AUTHORIZE_USAGE, MSG_AUTH_USER_INFO,
-    MSG_BAN_REASON_SUFFIX, MSG_BAN_USAGE, MSG_BROADCAST_USAGE,
-    MSG_BUTTON_CLOSE, MSG_CANNOT_BAN_OWNER, MSG_CHANNEL_BANNED,
-    MSG_CHANNEL_BANNED_REASON_SUFFIX, MSG_CHANNEL_NOT_BANNED,
-    MSG_CHANNEL_UNBANNED, MSG_DB_ERROR, MSG_DB_STATS,
-    MSG_DEAUTHORIZE_FAILED, MSG_DEAUTHORIZE_SUCCESS,
-    MSG_DEAUTHORIZE_USAGE, MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
-    MSG_INVALID_USER_ID, MSG_LOG_FILE_CAPTION, MSG_LOG_FILE_EMPTY,
-    MSG_LOG_FILE_MISSING, MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
-    MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
-    MSG_SHELL_OUTPUT_STDERR, MSG_SHELL_OUTPUT_STDOUT, MSG_SHELL_USAGE,
-    MSG_SPEEDTEST_ERROR, MSG_SPEEDTEST_INIT, MSG_SPEEDTEST_RESULT,
-    MSG_STATUS_ERROR, MSG_SYSTEM_STATS, MSG_SYSTEM_STATUS,
-    MSG_UNBAN_USAGE, MSG_USER_BANNED_NOTIFICATION,
-    MSG_USER_NOT_IN_BAN_LIST, MSG_USER_UNBANNED_NOTIFICATION,
-    MSG_WORKLOAD_ITEM
+    MSG_ADMIN_AUTH_LIST_HEADER,
+    MSG_ADMIN_AUTH_OWNER_FOOTER,
+    MSG_ADMIN_NO_BAN_REASON,
+    MSG_ADMIN_USER_BANNED,
+    MSG_ADMIN_USER_UNBANNED,
+    MSG_AUTH_USER_INFO,
+    MSG_AUTHORIZE_FAILED,
+    MSG_AUTHORIZE_SUCCESS,
+    MSG_AUTHORIZE_USAGE,
+    MSG_BAN_REASON_SUFFIX,
+    MSG_BAN_USAGE,
+    MSG_BROADCAST_USAGE,
+    MSG_BUTTON_CLOSE,
+    MSG_CANNOT_BAN_OWNER,
+    MSG_CANNOT_BAN_SELF,
+    MSG_CHANNEL_BANNED,
+    MSG_CHANNEL_BANNED_REASON_SUFFIX,
+    MSG_CHANNEL_NOT_BANNED,
+    MSG_CHANNEL_UNBANNED,
+    MSG_DB_ERROR,
+    MSG_DB_STATS,
+    MSG_DEAUTHORIZE_FAILED,
+    MSG_DEAUTHORIZE_SUCCESS,
+    MSG_DEAUTHORIZE_USAGE,
+    MSG_ERROR_GENERIC,
+    MSG_INVALID_BROADCAST_CMD,
+    MSG_INVALID_USER_ID,
+    MSG_LOG_FILE_CAPTION_SIZED,
+    MSG_LOG_FILE_EMPTY,
+    MSG_LOG_FILE_MISSING,
+    MSG_NO_AUTH_USERS,
+    MSG_RESTARTING,
+    MSG_SHELL_DISABLED,
+    MSG_SHELL_ERROR,
+    MSG_SHELL_EXECUTING,
+    MSG_SHELL_NO_OUTPUT,
+    MSG_SHELL_OUTPUT_CAPTION,
+    MSG_SHELL_OUTPUT_STDERR,
+    MSG_SHELL_OUTPUT_STDOUT,
+    MSG_SHELL_USAGE,
+    MSG_STATUS_ERROR,
+    MSG_SYSTEM_STATS,
+    MSG_SYSTEM_STATUS,
+    MSG_UNBAN_USAGE,
+    MSG_USER_BANNED_NOTIFICATION,
+    MSG_USER_NOT_IN_BAN_LIST,
+    MSG_USER_UNBANNED_NOTIFICATION,
+    MSG_WORKLOAD_ITEM,
+)
+from Thunder.utils.rate_limiter import rate_limiter
+from Thunder.utils.safe_call import (
+    delete_safe,
+    edit_safe,
+    send_safe,
+    tg_call,
 )
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.tokens import authorize, deauthorize, list_allowed
-from Thunder.utils.speedtest import run_speedtest
 from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
-_MARKDOWN_ESCAPE_TRANS = str.maketrans({
-    "\\": "\\\\",
-    "_": "\\_",
-    "*": "\\*",
-    "[": "\\[",
-    "]": "\\]",
-    "`": "\\`",
-})
+# /log tail cap
+_LOG_TAIL_BYTES = 5 * 1024 * 1024
 
 
-def _escape_markdown(text: str) -> str:
-    return text.translate(_MARKDOWN_ESCAPE_TRANS)
+def _invalidate_gates() -> None:
+    """Flush flag cache so admin changes apply immediately."""
+    flags.clear()
 
 
 @StreamBot.on_message(filters.command("users") & owner_filter)
 async def get_total_users(client: Client, message: Message):
     try:
         total = await db.total_users_count()
-        await reply(message,
-                    text=MSG_DB_STATS.format(total_users=total),
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
+        await reply(
+            message,
+            text=MSG_DB_STATS.format(total_users=total),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+            ),
+        )
     except Exception as e:
         logger.error(f"Error in get_total_users: {e}", exc_info=True)
         await reply(message, text=MSG_DB_ERROR)
@@ -89,11 +124,13 @@ async def broadcast_handler(client: Client, message: Message):
         elif arg == "regular":
             mode = "regular"
         else:
+            # code spans are literal under MARKDOWN: only neutralize backticks,
+            # an html.escape here would leak "&lt;" into the span
             safe_arg = arg.replace("`", "'")
             await reply(
                 message,
                 text=f"❌ **Invalid argument:** `{safe_arg}`\n\n{MSG_BROADCAST_USAGE}",
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.MARKDOWN,
             )
             return
 
@@ -111,18 +148,27 @@ async def show_status(client: Client, message: Message):
         sorted_workloads = sorted(work_loads.items(), key=lambda item: item[0])
         for client_id, load_val in sorted_workloads:
             workload_items += MSG_WORKLOAD_ITEM.format(
-                bot_name=f"🔹 Client {client_id}", load=load_val)
+                bot_name=f"🔹 Client {client_id}", load=load_val
+            )
 
         total_workload = sum(work_loads.values())
+        bot_username = getattr(getattr(client, "me", None), "username", None) or "?"
         status_text_str = MSG_SYSTEM_STATUS.format(
-            uptime=uptime_str, active_bots=len(multi_clients),
-            total_workload=total_workload, workload_items=workload_items,
-            version=__version__)
-        await reply(message,
-                    text=status_text_str,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
+            uptime=uptime_str,
+            bot_username=bot_username,
+            active_bots=len(multi_clients),
+            total_workload=total_workload,
+            workload_items=workload_items,
+            version=__version__,
+        )
+        await reply(
+            message,
+            text=status_text_str,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+            ),
+        )
     except Exception as e:
         logger.error(f"Error in show_status: {e}", exc_info=True)
         await reply(message, text=MSG_STATUS_ERROR)
@@ -144,8 +190,14 @@ async def show_stats(client: Client, message: Message):
         ram_used = humanbytes(ram_info.used)
         ram_free = humanbytes(ram_info.free)
 
-        total_disk, used_disk, free_disk = await asyncio.to_thread(
-            shutil.disk_usage, '.')
+        disk = await asyncio.to_thread(psutil.disk_usage, ".")
+        total_disk, used_disk, free_disk = disk.total, disk.used, disk.free
+        # psutil off the event loop.
+        disk_percent = disk.percent
+
+        limiter_line = (
+            ", ".join(f"{k}={v}" for k, v in rate_limiter.occupancy().items()) or "disabled"
+        )
 
         stats_text_val = MSG_SYSTEM_STATS.format(
             sys_uptime=sys_uptime_str,
@@ -156,19 +208,23 @@ async def show_stats(client: Client, message: Message):
             ram_total=ram_total,
             ram_used=ram_used,
             ram_free=ram_free,
-            disk_percent=psutil.disk_usage('.').percent,
+            disk_percent=disk_percent,
             total=humanbytes(total_disk),
             used=humanbytes(used_disk),
             free=humanbytes(free_disk),
             upload=humanbytes(net_io_counters.bytes_sent),
-            download=humanbytes(net_io_counters.bytes_recv)
+            download=humanbytes(net_io_counters.bytes_recv),
+            limiter=limiter_line,
         )
 
-        await reply(message,
-                    text=stats_text_val,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=InlineKeyboardMarkup(
-                        [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
+        await reply(
+            message,
+            text=stats_text_val,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+            ),
+        )
     except Exception as e:
         logger.error(f"Error in show_stats: {e}", exc_info=True)
         await reply(message, text=MSG_STATUS_ERROR)
@@ -178,7 +234,21 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
-    os.execv("/bin/bash", ["bash", "thunder.sh"])
+    # drain touch buffer here; execv skips finally blocks.
+    from Thunder.utils.canonical_files import drain_background_touch_tasks
+
+    await drain_background_touch_tasks()
+    # Abbreviated teardown: execv replaces the process without running the full
+    # graceful shutdown, so stop the clients + DB best-effort first.
+    # Bounded: a hung RPC must never wedge the restart.
+    for step, name in ((cleanup_clients, "clients"), (db.close, "database")):
+        try:
+            await asyncio.wait_for(step(), timeout=10)
+        except Exception as e:
+            logger.warning(f"Restart teardown: {name} cleanup incomplete: {e}")
+    # absolute path: exec'ing into thunder.sh must work from any cwd
+    script = Path(__file__).resolve().parents[3] / "thunder.sh"
+    os.execv("/bin/bash", ["bash", str(script)])
 
 
 @StreamBot.on_message(filters.command("log") & owner_filter)
@@ -186,17 +256,28 @@ async def send_logs(client: Client, message: Message):
     if not os.path.exists(LOG_FILE) or os.path.getsize(LOG_FILE) == 0:
         await reply(
             message,
-            text=(MSG_LOG_FILE_MISSING if not os.path.exists(LOG_FILE) else MSG_LOG_FILE_EMPTY)
+            text=(MSG_LOG_FILE_MISSING if not os.path.exists(LOG_FILE) else MSG_LOG_FILE_EMPTY),
         )
         return
-    
+
     try:
-        try:
-            await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
-        except FloodWait as e:
-            logger.debug(f"FloodWait in log file sending, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
+        # capped redacted tail; IO off the event loop.
+        def _read_redacted_tail() -> str:
+            with open(LOG_FILE, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - _LOG_TAIL_BYTES))
+                return redact_secrets(f.read().decode("utf-8", errors="replace"))
+
+        payload = await asyncio.to_thread(_read_redacted_tail)
+
+        doc = BytesIO(payload.encode("utf-8"))
+        doc.name = "bot_redacted.txt"
+        caption = MSG_LOG_FILE_CAPTION_SIZED.format(
+            tailed=humanbytes(len(doc.getvalue())),
+            total=humanbytes(os.path.getsize(LOG_FILE)),
+        )
+        await tg_call(message.reply_document, doc, caption=caption, retries=1)
     except Exception as e:
         logger.error(f"Error sending log file: {e}", exc_info=True)
         await reply(message, text=MSG_ERROR_GENERIC)
@@ -205,14 +286,21 @@ async def send_logs(client: Client, message: Message):
 @StreamBot.on_message(filters.command("authorize") & owner_filter)
 async def authorize_command(client: Client, message: Message):
     if len(message.command) != 2:
-        return await reply(
-            message, text=MSG_AUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
-    
+        return await reply(message, text=MSG_AUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
+
     try:
         user_id = int(message.command[1])
         success = await authorize(user_id, message.from_user.id)
-        await reply(message,
-                    text=((MSG_AUTHORIZE_SUCCESS.format(user_id=user_id) if success else MSG_AUTHORIZE_FAILED.format(user_id=user_id))))
+        if success:
+            _invalidate_gates()
+        await reply(
+            message,
+            text=(
+                MSG_AUTHORIZE_SUCCESS.format(user_id=user_id)
+                if success
+                else MSG_AUTHORIZE_FAILED.format(user_id=user_id)
+            ),
+        )
     except ValueError:
         await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
@@ -223,14 +311,21 @@ async def authorize_command(client: Client, message: Message):
 @StreamBot.on_message(filters.command("deauthorize") & owner_filter)
 async def deauthorize_command(client: Client, message: Message):
     if len(message.command) != 2:
-        return await reply(
-            message, text=MSG_DEAUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
-    
+        return await reply(message, text=MSG_DEAUTHORIZE_USAGE, parse_mode=ParseMode.MARKDOWN)
+
     try:
         user_id = int(message.command[1])
         success = await deauthorize(user_id)
-        await reply(message,
-                    text=((MSG_DEAUTHORIZE_SUCCESS.format(user_id=user_id) if success else MSG_DEAUTHORIZE_FAILED.format(user_id=user_id))))
+        if success:
+            _invalidate_gates()
+        await reply(
+            message,
+            text=(
+                MSG_DEAUTHORIZE_SUCCESS.format(user_id=user_id)
+                if success
+                else MSG_DEAUTHORIZE_FAILED.format(user_id=user_id)
+            ),
+        )
     except ValueError:
         await reply(message, text=MSG_INVALID_USER_ID)
     except Exception as e:
@@ -242,33 +337,65 @@ async def deauthorize_command(client: Client, message: Message):
 async def list_authorized_command(client: Client, message: Message):
     users = await list_allowed()
     if not users:
-        return await reply(
-            message, text=MSG_NO_AUTH_USERS)
-    
+        return await reply(message, text=MSG_NO_AUTH_USERS)
+
+    # escape display names; batched get_users avoids N+1 FloodWaits.
+    id_to_user: dict[int, Any] = {}
+    try:
+        all_ids = [u["user_id"] for u in users]
+        tg_users_all: list = []
+        for i in range(0, len(all_ids), 200):
+            chunk = all_ids[i : i + 200]
+            tg_users = await tg_call(client.get_users, chunk, retries=1)
+            if isinstance(tg_users, User):
+                tg_users = [tg_users]
+            tg_users_all.extend(tg_users or [])
+        id_to_user = {u.id: u for u in tg_users_all if u}
+    except Exception:
+        logger.error("Failed to batch-fetch tg_users for /listauth", exc_info=True)
+
     text = MSG_ADMIN_AUTH_LIST_HEADER
     for i, user in enumerate(users, 1):
         display_name = "Unknown"
-        try:
-            tg_user = await get_user(client, user['user_id'])
-            if tg_user is not None:
-                raw_display_name = f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
-                display_name = _escape_markdown(raw_display_name)
-        except Exception:
-            logger.error("Failed to fetch tg_user for user_id=%s", user['user_id'], exc_info=True)
+        tg_user = id_to_user.get(user["user_id"])
+        if tg_user is not None:
+            raw_display_name = (
+                f"@{tg_user.username}" if tg_user.username else tg_user.first_name or "Unknown"
+            )
+            display_name = html.escape(raw_display_name)
 
         text += MSG_AUTH_USER_INFO.format(
             i=i,
             display_name=display_name,
-            user_id=user['user_id'],
-            authorized_by=user['authorized_by'],
-            auth_time=user['authorized_at']
+            user_id=user["user_id"],
+            authorized_by=user["authorized_by"],
+            auth_time=user["authorized_at"],
         )
-    
-    await reply(message,
-                text=text,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]))
+
+    text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)
+
+    # long auth lists exceed the 4096-char message cap: page by lines
+    if len(text) <= 3500:
+        pages = [text]
+    else:
+        pages, current = [], ""
+        for line in text.split("\n"):
+            if len(current) + len(line) + 1 > 3500:
+                pages.append(current)
+                current = ""
+            current += line + "\n"
+        if current:
+            pages.append(current)
+
+    for page in pages:
+        await reply(
+            message,
+            text=page,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+            ),
+        )
 
 
 @StreamBot.on_message(filters.command("ban") & owner_filter)
@@ -278,48 +405,37 @@ async def ban_command(client: Client, message: Message):
 
     try:
         target_id = int(message.command[1])
+        # M7: store raw reason; escape at HTML render.
+        has_reason = len(message.command) > 2
         reason = " ".join(message.command[2:]) or MSG_ADMIN_NO_BAN_REASON
         banned_by_id = message.from_user.id if message.from_user else None
 
         if target_id == Var.OWNER_ID:
             return await reply(message, text=MSG_CANNOT_BAN_OWNER)
 
+        if message.from_user and target_id == message.from_user.id:
+            return await reply(message, text=MSG_CANNOT_BAN_SELF)
+
         if target_id < 0:
-            await db.add_banned_channel(
-                channel_id=target_id,
-                reason=reason,
-                banned_by=banned_by_id
-            )
+            await db.add_banned_channel(channel_id=target_id, reason=reason, banned_by=banned_by_id)
+            _invalidate_gates()
             text = MSG_CHANNEL_BANNED.format(channel_id=target_id)
-            if reason != MSG_ADMIN_NO_BAN_REASON:
-                text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=reason)
-            await reply(message, text=text)
+            if has_reason:
+                text += MSG_CHANNEL_BANNED_REASON_SUFFIX.format(reason=html.escape(reason))
+            await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:
-                try:
-                    await client.leave_chat(target_id)
-                except FloodWait as e:
-                    logger.debug(f"FloodWait in leave_chat, sleeping for {e.value}s")
-                    await asyncio.sleep(e.value)
-                    await client.leave_chat(target_id)
+                await tg_call(client.leave_chat, target_id, retries=1)
             except Exception as e:
                 logger.warning(f"Could not leave banned channel {target_id}: {e}", exc_info=True)
         else:
-            await db.add_banned_user(
-                user_id=target_id,
-                reason=reason,
-                banned_by=banned_by_id
-            )
+            await db.add_banned_user(user_id=target_id, reason=reason, banned_by=banned_by_id)
+            _invalidate_gates()
             text = MSG_ADMIN_USER_BANNED.format(user_id=target_id)
-            if reason != MSG_ADMIN_NO_BAN_REASON:
-                text += MSG_BAN_REASON_SUFFIX.format(reason=reason)
-            await reply(message, text=text)
+            if has_reason:
+                text += MSG_BAN_REASON_SUFFIX.format(reason=html.escape(reason))
+            await reply(message, text=text, parse_mode=ParseMode.HTML)
             try:
-                try:
-                    await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
-                except FloodWait as e:
-                    logger.debug(f"FloodWait in ban notification, sleeping for {e.value}s")
-                    await asyncio.sleep(e.value)
-                    await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
+                await send_safe(client, target_id, text=MSG_USER_BANNED_NOTIFICATION)
             except Exception as e:
                 logger.warning(f"Could not notify banned user {target_id}: {e}", exc_info=True)
 
@@ -340,21 +456,20 @@ async def unban_command(client: Client, message: Message):
 
         if target_id < 0:
             if await db.remove_banned_channel(channel_id=target_id):
+                _invalidate_gates()
                 await reply(message, text=MSG_CHANNEL_UNBANNED.format(channel_id=target_id))
             else:
                 await reply(message, text=MSG_CHANNEL_NOT_BANNED.format(channel_id=target_id))
         else:
             if await db.remove_banned_user(user_id=target_id):
+                _invalidate_gates()
                 await reply(message, text=MSG_ADMIN_USER_UNBANNED.format(user_id=target_id))
                 try:
-                    try:
-                        await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
-                    except FloodWait as e:
-                        logger.debug(f"FloodWait in unban notification, sleeping for {e.value}s")
-                        await asyncio.sleep(e.value)
-                        await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
+                    await send_safe(client, target_id, text=MSG_USER_UNBANNED_NOTIFICATION)
                 except Exception as e:
-                    logger.warning(f"Could not notify unbanned user {target_id}: {e}", exc_info=True)
+                    logger.warning(
+                        f"Could not notify unbanned user {target_id}: {e}", exc_info=True
+                    )
             else:
                 await reply(message, text=MSG_USER_NOT_IN_BAN_LIST.format(user_id=target_id))
     except ValueError:
@@ -366,164 +481,79 @@ async def unban_command(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("shell") & owner_filter)
 async def run_shell_command(client: Client, message: Message):
+    # /shell is opt-in.
+    if not Var.ENABLE_SHELL:
+        return await reply(message, text=MSG_SHELL_DISABLED, parse_mode=ParseMode.HTML)
+
     if len(message.command) < 2:
-        return await reply(
-            message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
-    
+        return await reply(message, text=MSG_SHELL_USAGE, parse_mode=ParseMode.HTML)
+
     command = " ".join(message.command[1:])
-    status_msg = await reply(message,
-                text=MSG_SHELL_EXECUTING.format(
-                    command=html.escape(command)),
-                parse_mode=ParseMode.HTML)
-    
+    # log who ran what.
+    logger.info(
+        f"/shell invoked by {message.from_user.id if message.from_user else 'unknown'}: {command}"
+    )
+
+    status_msg = await reply(
+        message,
+        text=MSG_SHELL_EXECUTING.format(command=html.escape(command)),
+        parse_mode=ParseMode.HTML,
+    )
+
     try:
         process = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        
-        stdout, stderr = await process.communicate()
-        
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.communicate()
+            raise TimeoutError("shell command exceeded 60s") from None
+
         output = ""
         if stdout:
             output += MSG_SHELL_OUTPUT_STDOUT.format(
-                output=html.escape(stdout.decode(errors='ignore')))
+                output=html.escape(stdout.decode(errors="ignore"))
+            )
         if stderr:
             output += MSG_SHELL_OUTPUT_STDERR.format(
-                error=html.escape(stderr.decode(errors='ignore')))
-        
+                error=html.escape(stderr.decode(errors="ignore"))
+            )
+
         output = output.strip() or MSG_SHELL_NO_OUTPUT
-        
+
         try:
-            await status_msg.delete()
-        except FloodWait as e:
-            logger.debug(f"FloodWait in shell status message delete, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await status_msg.delete()
-        
+            await delete_safe(status_msg)
+        except Exception:
+            pass
+
         if len(output) > 4096:
             file = BytesIO(output.encode())
             file.name = "shell_output.txt"
-            try:
-                await message.reply_document(
-                    file,
-                    caption=MSG_SHELL_OUTPUT.format(
-                        command=html.escape(command)))
-            except FloodWait as e:
-                logger.debug(f"FloodWait in shell output document, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-                await message.reply_document(
-                    file,
-                    caption=MSG_SHELL_OUTPUT.format(
-                        command=html.escape(command)))
+            await tg_call(
+                message.reply_document,
+                file,
+                caption=MSG_SHELL_OUTPUT_CAPTION.format(command=html.escape(command)),
+                retries=1,
+            )
         else:
             await reply(message, text=output, parse_mode=ParseMode.HTML)
-            
+
     except Exception as e:
         try:
-            try:
-                await status_msg.edit_text(
-                    MSG_SHELL_ERROR.format(error=html.escape(str(e))),
-                    parse_mode=ParseMode.HTML)
-            except FloodWait as e:
-                logger.debug(f"FloodWait in shell error message edit, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-                await status_msg.edit_text(
-                    MSG_SHELL_ERROR.format(error=html.escape(str(e))),
-                    parse_mode=ParseMode.HTML)
-            except MessageNotModified:
-                pass
+            await edit_safe(
+                status_msg,
+                MSG_SHELL_ERROR.format(error=html.escape(str(e))),
+                parse_mode=ParseMode.HTML,
+            )
+        except MessageNotModified:
+            pass
         except Exception:
             await reply(
                 message,
                 text=MSG_SHELL_ERROR.format(error=html.escape(str(e))),
-                parse_mode=ParseMode.HTML)
-
-
-@StreamBot.on_message(filters.command("speedtest") & owner_filter)
-async def speedtest_command(client: Client, message: Message):
-    status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
-    try:
-        result_dict, image_url = await run_speedtest()
-        if result_dict is None:
-            try:
-                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
-            except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest error edit, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
-            except MessageNotModified:
-                pass
-            return
-        
-        result_text = _format_speedtest_result(result_dict)
-        await _send_result(message, status_msg, result_text, image_url)
-    except Exception as e:
-        logger.error(f"Error in speedtest_command: {e}", exc_info=True)
-        try:
-            try:
-                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
-            except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest exception error edit, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-                await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
-            except MessageNotModified:
-                pass
-        except Exception:
-            await reply(message, text=MSG_SPEEDTEST_ERROR)
-
-
-def _format_speedtest_result(result_dict: dict) -> str:
-    s, c = result_dict['server'], result_dict['client']
-    return MSG_SPEEDTEST_RESULT.format(
-        download_mbps=_fmt(result_dict['download_mbps']),
-        upload_mbps=_fmt(result_dict['upload_mbps']),
-        download_bps=humanbytes(result_dict['download_bps']),
-        upload_bps=humanbytes(result_dict['upload_bps']),
-        ping=_fmt(result_dict['ping']),
-        timestamp=result_dict['timestamp'],
-        bytes_sent=humanbytes(result_dict['bytes_sent']),
-        bytes_received=humanbytes(result_dict['bytes_received']),
-        server_name=s['name'],
-        server_country=f"{s['country']} ({s['cc']})",
-        server_sponsor=s['sponsor'],
-        server_latency=_fmt(s['latency']),
-        server_lat=_fmt(s['lat'], 4),
-        server_lon=_fmt(s['lon'], 4),
-        client_ip=c['ip'],
-        client_lat=_fmt(c['lat'], 4),
-        client_lon=_fmt(c['lon'], 4),
-        client_isp=c['isp'],
-        client_isprating=c['isprating'],
-        client_country=c['country']
-    )
-
-
-async def _send_result(message: Message, status_msg: Message, result_text: str, image_url: str):
-    if image_url:
-        try:
-            await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
-        except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest photo reply, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
-        try:
-            await status_msg.delete()
-        except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest status delete, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await status_msg.delete()
-    else:
-        try:
-            await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
-        except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest result edit, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
-        except MessageNotModified:
-            pass
-
-
-def _fmt(value, decimals: int = 2) -> str:
-    return f"{float(value):.{decimals}f}"
+                parse_mode=ParseMode.HTML,
+            )

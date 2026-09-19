@@ -8,11 +8,12 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf9f7">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#030304">
 
-    <!-- Logo & Favicon -->
+    <!-- M2: per-file player pages must never be indexed -->
+    <meta name="robots" content="noindex, nofollow">
+
     <link rel="icon" type="image/jpeg" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
     <link rel="apple-touch-icon" href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- SEO & Social Sharing (Open Graph) -->
     <meta name="description"
         content="A premium cinema experience for '{{ file_name }}'. Stream in high quality with advanced controls.">
     <meta property="og:type" content="website">
@@ -21,66 +22,109 @@
         content="Stream '{{ file_name }}' in a beautiful, atmospheric environment with professional playback controls.">
     <meta property="og:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- Twitter Cards -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="{{ file_name }} — Cinema">
     <meta name="twitter:description" content="Stream '{{ file_name }}' in a beautiful, atmospheric environment.">
     <meta name="twitter:image" content="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/logo.png">
 
-    <!-- Vidstack Player -->
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
-    <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
-    <script type="module" src="https://cdn.vidstack.io/player"></script>
+    {% if kind == 'video' %}
+    <meta property="og:video" content="{{ src|safe }}">
+    <meta property="og:video:type" content="{{ mime_type }}">
+    {% elif kind == 'audio' %}
+    <meta property="og:audio" content="{{ src|safe }}">
+    <meta property="og:audio:type" content="{{ mime_type }}">
+    {% endif %}
 
-    <!-- Typography: Outfit (geometric display) + DM Sans (refined body) -->
+    <!-- L7: preconnect hints for CDN origins -->
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+
+    <!-- Vidstack Player -- pinned @1.15.6 + SRI: originals from npm, not the
+         dynamically-minified cdn.vidstack.io proxy (whose own header says SRI-unsafe) -->
+    {% if kind == 'video' %}
+    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
+    <link rel="stylesheet" integrity="sha384-Pye8mXuY3OU46b5zsf/OBfd+esy+JP/GiOsEnr6qo5iJ9+6c9kJPLAzuHXFsf7Su"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/video.css" />
+    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+        crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
+    {% elif kind == 'audio' %}
+    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
+    <link rel="stylesheet" integrity="sha384-KRJ7FoKJ+WR7M5eseizS0aAkjlHEiZqCLXWVCht10UU4q3mEdlccim7qsjalqt0k"
+        crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/audio.css" />
+    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+        crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
+    {% endif %}
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap"
-        rel="stylesheet" media="print" onload="this.media='all'">
+        rel="stylesheet" media="print" onload="this.media='all'" crossorigin="anonymous">
     <noscript>
         <link
             href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap"
-            rel="stylesheet">
+            rel="stylesheet" crossorigin="anonymous">
     </noscript>
 
-    <!-- Styles (CDN-hosted) -->
-    <link rel="stylesheet"
-        href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/styles.css">
+    <!-- Styles (CDN-hosted theme, pinned to an immutable commit + SRI) -->
+    <link rel="stylesheet" integrity="sha384-l4Ojw3YQu+8wpZ1HepaRCcvp81kEdUb2uDv+7XDJZDT1i6+j+YT5B5x0fkB65lui"
+        crossorigin="anonymous"
+        href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.css">
+
+    <!-- L7: inline fallback keeps the page usable when all CDNs are blocked. -->
+    <style>
+        body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; gap:1.25rem;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+                background:#0b0a09; color:#f3ede4; padding:2rem; text-align:center; }
+        .cinema, .drawer, .atmosphere, .masthead .file-meta { display:none; }
+        body.fallback-ready .cinema, body.fallback-ready .command-bar { display:block; }
+    </style>
 </head>
 
 <body>
-    <!-- Atmospheric Background -->
+    <noscript>
+        <div style="padding:.75rem 1rem;text-align:center;background:#2a1c0d;color:#ffd9a0;">
+            JavaScript is disabled — direct playback is unavailable, but the download link below still works.
+        </div>
+    </noscript>
     <div class="atmosphere" aria-hidden="true">
         <div class="gradient-mesh"></div>
         <div class="noise"></div>
         <div class="vignette"></div>
     </div>
 
-    <!-- Main Viewport -->
     <main class="viewport">
-        <!-- Masthead -->
         <header class="masthead">
             <div class="title-group">
-                <h1 class="title">{{ file_name }}</h1>
+                <h1 class="title" title="{{ file_name }}">{{ file_name }}</h1>
                 <div class="file-meta" id="fileMeta">
+                    {% if size_formatted %}
+                    <span class="meta-tag" id="metaSize">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
+                        </svg>
+                        <span>{{ size_formatted }}</span>
+                    </span>
+                    {% endif %}
                     <span class="meta-tag" id="metaDuration">
                         <svg viewBox="0 0 24 24">
                             <path
                                 d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
                         </svg>
-                        <span>Loading...</span>
+                        <span><span class="skeleton-text"></span></span>
                     </span>
-                    <span class="meta-tag" id="metaResolution">
+                    <span class="meta-tag" id="metaResolution" hidden>
                         <svg viewBox="0 0 24 24">
                             <path
                                 d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9 8h2v8H9zm4 0h2v8h-2z" />
                         </svg>
-                        <span>Loading...</span>
+                        <span>—</span>
                     </span>
                 </div>
             </div>
-            <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+            <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
                 <!-- Sun icon (shown in dark mode) -->
                 <svg class="icon-sun" viewBox="0 0 24 24">
                     <path
@@ -94,9 +138,18 @@
             </button>
         </header>
 
-        <!-- Cinema Screen -->
-        <section class="cinema">
+        <section class="cinema{% if kind == 'audio' %} cinema--audio{% elif kind not in ('video', 'audio') %} cinema--fallback{% endif %}">
             <div class="screen">
+                {% if kind == 'audio' %}
+                <div class="audio-face" aria-hidden="true">
+                    <div class="audio-face-ring">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                        </svg>
+                    </div>
+                </div>
+                {% endif %}
+                {% if kind in ('video', 'audio') %}
                 <div class="player-background-message">
                     <svg class="bg-msg-icon" viewBox="0 0 24 24" fill="currentColor">
                         <path
@@ -105,17 +158,38 @@
                     <span class="bg-msg-title">If video not playing</span>
                     <span class="bg-msg-sub">Use External Player</span>
                 </div>
-                <media-player id="player" title="{{ file_name }}" playsinline keyTarget="document">
+                {% endif %}
+                {% if kind == 'video' %}
+                <media-player id="player" title="{{ file_name }}" view-type="video" playsinline key-target="document" load="eager">
                     <media-provider></media-provider>
                     <media-video-layout></media-video-layout>
                 </media-player>
+                {% elif kind == 'audio' %}
+                <media-player id="player" title="{{ file_name }}" view-type="audio" playsinline key-target="document" load="eager">
+                    <media-provider></media-provider>
+                    <media-audio-layout></media-audio-layout>
+                </media-player>
+                {% elif kind == 'image' %}
+                <div class="image-viewer">
+                    <img src="{{ src|safe }}" alt="{{ file_name }}" loading="lazy">
+                </div>
+                {% else %}
+                <!-- M2: non-media types get a download card, not a broken player -->
+                <div class="non-media">
+                    <p>This file type ({{ mime_type }}) can't be played in the browser.</p>
+                    <a class="cmd-btn primary" href="{{ download_src|safe }}" download="{{ file_name }}">Download</a>
+                </div>
+                {% endif %}
+                <div id="unsupportedFormatMessage" class="unsupported-format-message" hidden>
+                    <p class="unsupported-title">⚠️ This format cannot play in the browser. Use an external player below.</p>
+                    <p class="unsupported-reason" aria-live="polite"></p>
+                </div>
             </div>
         </section>
 
-        <!-- Command Bar -->
         <nav class="command-bar">
             <div class="command-glass">
-                <a href="{{ src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
+                <a href="{{ download_src|safe }}" download="{{ file_name }}" class="cmd-btn primary" id="downloadBtn">
                     <svg viewBox="0 0 24 24">
                         <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
                     </svg>
@@ -135,7 +209,7 @@
                 <div class="cmd-divider"></div>
 
                 <button class="cmd-btn drawer-trigger" id="playersToggle" aria-expanded="false"
-                    aria-controls="playersDrawer" aria-label="Open in external player">
+                    aria-controls="drawerPanel" aria-label="Open in external player">
                     <svg viewBox="0 0 24 24">
                         <path
                             d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM9.5 7.5v9l7-4.5-7-4.5z" />
@@ -148,148 +222,106 @@
             </div>
         </nav>
 
-        <!-- External Players Drawer -->
         <aside class="drawer" id="playersDrawer">
             <div class="drawer-panel" id="drawerPanel" role="region" aria-labelledby="playersToggle">
-                <!-- Android -->
                 <div class="player-group" id="androidGroup">
                     <div class="group-label">Android</div>
                     <div class="player-grid">
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.videolan.vlc;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=org.videolan.vlc;end" data-player="android-vlc"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:30" aria-hidden="true">VL</span>
                             VLC
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.ad;S.title={{ file_name | urlencode }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=com.mxtech.videoplayer.ad;S.title={{ file_name | urlencode }};end" data-player="android-mx"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:265" aria-hidden="true">MX</span>
                             MX Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.mxtech.videoplayer.pro;S.title={{ file_name | urlencode }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=com.mxtech.videoplayer.pro;S.title={{ file_name | urlencode }};end" data-player="android-mx-pro"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:45" aria-hidden="true">MX</span>
                             MX Player Pro
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.young.simple.player;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=com.young.simple.player;end" data-player="android-splayer"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:200" aria-hidden="true">SP</span>
                             Splayer
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=dev.anilbeesetti.nextplayer;S.title={{ file_name | urlencode }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=dev.anilbeesetti.nextplayer;S.title={{ file_name | urlencode }};end" data-player="android-next"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:160" aria-hidden="true">NP</span>
                             Next Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=org.courville.nova;S.title={{ file_name | urlencode }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=org.courville.nova;S.title={{ file_name | urlencode }};end" data-player="android-nova"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:320" aria-hidden="true">NV</span>
                             Nova Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=is.xyz.mpv;S.title={{ file_name | urlencode }};end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=is.xyz.mpv;S.title={{ file_name | urlencode }};end" data-player="android-mpv"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:100" aria-hidden="true">MP</span>
                             MPV-Android
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.brouken.player;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=com.brouken.player;end" data-player="android-just"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:15" aria-hidden="true">JP</span>
                             Just Player
                         </a>
-                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type=video/*;package=com.newin.nplayer.pro;end"
+                        <a href="intent:{{ src|safe }}#Intent;action=android.intent.action.VIEW;type={{ mime_type }};package=com.newin.nplayer.pro;end" data-player="android-nplayer"
                             class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                            <span class="player-icon" style="--icon-hue:230" aria-hidden="true">nP</span>
                             nPlayer
                         </a>
                     </div>
                 </div>
 
-                <!-- iOS -->
                 <div class="player-group" id="iosGroup">
                     <div class="group-label">iOS / iPadOS</div>
                     <div class="player-grid">
-                        <a href="vlc-x-callback://x-callback-url/stream?url={{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="vlc-x-callback://x-callback-url/stream?url={{ src|safe }}" data-player="ios-vlc" class="player-link">
+                            <span class="player-icon" style="--icon-hue:30" aria-hidden="true">VL</span>
                             VLC
                         </a>
-                        <a href="infuse://x-callback-url/play?url={{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="infuse://x-callback-url/play?url={{ src|safe }}" data-player="ios-infuse" class="player-link">
+                            <span class="player-icon" style="--icon-hue:280" aria-hidden="true">IN</span>
                             Infuse
                         </a>
-                        <a href="nplayer://weblink?url={{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="nplayer://weblink?url={{ src|safe }}" data-player="ios-nplayer" class="player-link">
+                            <span class="player-icon" style="--icon-hue:230" aria-hidden="true">nP</span>
                             nPlayer
                         </a>
-                        <a href="outplayer://{{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="outplayer://{{ src|safe }}" data-player="ios-outplayer" class="player-link">
+                            <span class="player-icon" style="--icon-hue:190" aria-hidden="true">OU</span>
                             Outplayer
                         </a>
-                        <a href="oplayer://{{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="oplayer://{{ src|safe }}" data-player="ios-oplayer" class="player-link">
+                            <span class="player-icon" style="--icon-hue:140" aria-hidden="true">OP</span>
                             OPlayer
                         </a>
                     </div>
                 </div>
 
-                <!-- Desktop -->
                 <div class="player-group" id="desktopGroup">
                     <div class="group-label">Desktop</div>
                     <div class="player-grid">
-                        <a href="vlc://{{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="vlc://{{ src|safe }}" data-player="desktop-vlc" class="player-link">
+                            <span class="player-icon" style="--icon-hue:30" aria-hidden="true">VL</span>
                             VLC
                         </a>
-                        <a href="potplayer://{{ src|safe }}" class="player-link" data-os="windows">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="potplayer://{{ src|safe }}" data-player="desktop-potplayer" class="player-link" data-os="windows">
+                            <span class="player-icon" style="--icon-hue:5" aria-hidden="true">PP</span>
                             PotPlayer
                         </a>
-                        <a href="iina://weblink?url={{ src|safe }}" class="player-link" data-os="mac">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="iina://weblink?url={{ src|safe }}" data-player="desktop-iina" class="player-link" data-os="mac">
+                            <span class="player-icon" style="--icon-hue:210" aria-hidden="true">II</span>
                             IINA
                         </a>
-                        <a href="mpv://{{ src|safe }}" class="player-link">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="mpv://{{ src|safe }}" data-player="desktop-mpv" class="player-link">
+                            <span class="player-icon" style="--icon-hue:100" aria-hidden="true">MP</span>
                             MPV
                         </a>
-                        <a href="kmplayer://{{ src|safe }}" class="player-link" data-os="windows">
-                            <svg viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" />
-                            </svg>
+                        <a href="kmplayer://{{ src|safe }}" data-player="desktop-kmplayer" class="player-link" data-os="windows">
+                            <span class="player-icon" style="--icon-hue:55" aria-hidden="true">KM</span>
                             KMPlayer
                         </a>
                     </div>
@@ -297,9 +329,7 @@
             </div>
         </aside>
 
-        <!-- Footer Group -->
         <footer class="footer-group">
-            <!-- Keyboard Hints -->
             <div class="keyboard-hints" id="keyboardHints">
                 <div class="hints-row">
                     <div class="hint">
@@ -329,7 +359,6 @@
                 </div>
             </div>
 
-            <!-- Copyright -->
             <div class="copyright-footer">
                 <span>&copy; <span id="copyrightYear"></span> Thunder</span>
                 <span class="footer-separator">•</span>
@@ -343,17 +372,35 @@
                 </a>
             </div>
         </footer>
+
+        <div class="watermark" aria-hidden="true">Thunder</div>
     </main>
 
-    <!-- Toast Stack -->
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <!-- Config for external script (template injection happens here) -->
     <script>
-        window.__CINEMA_CONFIG__ = { src: {{ src | tojson }} };
+        window.__CINEMA_CONFIG__ = {
+            src: {{ src | tojson }},
+            mimeType: {{ mime_type | tojson }},
+            fileName: {{ file_name | tojson }},
+            isVideo: {{ (kind == 'video') | tojson }},
+            isAudio: {{ (kind == 'audio') | tojson }}
+        };
     </script>
-    <!-- Main Script (CDN-hosted) -->
-    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Obsidian%20Ember/script.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.js"
+        integrity="sha384-oHqpcdzrrFLizcr4kbAVv5G2FxKznDJrx5UOu1iHGZfgNRokonIa0t236CJBWSzV" crossorigin="anonymous" defer></script>
+    <!-- L7 fallback: copy-link without the CDN script -->
+    <script>
+        (function () {
+            var btn = document.getElementById('copyBtn');
+            if (btn && !window.__CINEMA_BOUND__) btn.addEventListener('click', function () {
+                var src = {{ src | tojson }};
+                if (navigator.clipboard) navigator.clipboard.writeText(src);
+            });
+            document.body.classList.add('fallback-ready');
+        })();
+    </script>
 </body>
 
 </html>

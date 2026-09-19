@@ -31,7 +31,6 @@
   - [Token System](#token-system)
   - [URL Shortening](#url-shortening)
   - [Rate Limiting System](#rate-limiting-system)
-  - [Network Speed Testing](#network-speed-testing)
 - [Deployment Guide](#deployment-guide)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -94,7 +93,7 @@ User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct 
 - 🔐 **Token Authentication** - Secure user access with a time-limited token system.
 - 🛡️ **Admin Controls** - Full suite of commands for user and bot management.
 - 👤 **User Authentication** - Require users to join a specific channel before they can use the bot.
-- ✅ **Channel/Group Support** - Fully functional in private chats, groups, and channels.
+- ✅ **Channel/Group Support** - Fully functional in private chats, groups, and channels (channels require `CHANNEL=True` plus the bot as channel admin; channel posts are ignored under `PRIVATE_MODE` or for banned channels).
 
 #### Customization
 
@@ -106,6 +105,11 @@ User Uploads File → Telegram Bot → Forwards to Channel → Generates Direct 
 ## Configuration
 
 Copy `config_sample.env` to `config.env` and fill in your values.
+
+> **Tip:** for machine-local overrides, create a `config.env.local`. It is
+> loaded after `config.env` and its values win (precedence: real
+> environment > `config.env.local` > `config.env`). Keep it out of version
+> control for machine-specific tweaks.
 
 ### Essential Configuration
 
@@ -124,36 +128,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 
 ### Optional Configuration
 
-<details>
-<summary>Optional Configuration Details</summary>
-
-| Variable | Description | Default |
-| :--- | :--- | :--- |
-| `MULTI_TOKEN1` | Additional bot token 1 (use MULTI_TOKEN1, MULTI_TOKEN2, etc.) | *(empty)* |
-| `FORCE_CHANNEL_ID` | Required channel join | *(empty)* |
-| `MAX_BATCH_FILES` | Maximum files in batch processing | `50` |
-| `CHANNEL` | Allow processing messages from channels | `False` |
-| `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
-| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
-| `WORKERS` | Async workers | `8` |
-| `NAME` | Bot name | `ThunderF2L` |
-| `BIND_ADDRESS` | Bind address | `0.0.0.0` |
-| `PING_INTERVAL` | Ping interval (seconds) | `840` |
-| `TOKEN_ENABLED` | Enable tokens | `False` |
-| `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
-| `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
-| `TOKEN_TTL_HOURS` | Token validity duration in hours | `24` |
-| `URL_SHORTENER_API_KEY` | Shortener API key | *(empty)* |
-| `URL_SHORTENER_SITE` | Shortener service | *(empty)* |
-| `SET_COMMANDS` | Auto-set bot commands | `True` |
-| `RATE_LIMIT_ENABLED` | Enable rate limiting | `False` |
-| `MAX_FILES_PER_PERIOD` | Files per window | `2` |
-| `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
-| `MAX_QUEUE_SIZE` | Queue size | `100` |
-| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
-| `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
-
-</details>
+Essential knobs are in the table above; everything else with safe defaults is documented once in config_sample.env (single source — do not duplicate values here).
 
 ## Usage and Commands
 
@@ -172,7 +147,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | Command | Description |
 | :--- | :--- |
 | `/start` | Start the bot and get a welcome message. Also used for token activation. |
-| `/link` | Generates a link. For batches, **reply to the first file** of a group and specify the count. **Example:** `/link 5` will process that file and the next four. |
+| `/link` | Generates a link. In groups the bot must be an admin. For batches, **reply to the first file** of a group and specify the count. **Example:** `/link 5` will process that file and the next four. |
 | `/dc` | Get the data center (DC) of a user or file. Use `/dc id`, or reply to a file or user. |
 | `/ping` | Check if the bot is online and measure response time. |
 | `/about` | Get information about the bot. |
@@ -189,8 +164,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `/unban` | Unban a user or channel. |
 | `/log` | Send bot logs. |
 | `/restart` | Restart the bot. |
-| `/shell` | Execute a shell command. |
-| `/speedtest` | Run network speed test and display comprehensive results. |
+| `/shell` | Execute a shell command (requires ENABLE_SHELL=True). |
 | `/users` | Show total number of users. |
 | `/authorize` | Permanently authorize a user to use the bot (bypasses token system). |
 | `/deauthorize` | Remove permanent authorization from a user. |
@@ -218,7 +192,6 @@ listauth - [Admin] List authorized
 log - [Admin] Send bot logs
 restart - [Admin] Restart the bot
 shell - [Admin] Execute shell command
-speedtest - [Admin] Run network speed test
 ```
 
 </details>
@@ -233,6 +206,12 @@ Enable controlled access with tokens:
 2. Users receive automatic tokens on first use.
 3. Admins can grant permanent authorization with `/authorize` to bypass tokens.
 4. Tokens include activation links for secure access.
+
+> **Note**: with `TOKEN_ENABLED=True` (or `PRIVATE_MODE=True`), messages
+> without an attributable sender — e.g. channel posts or anonymous-admin
+> messages in the bot's own channel — are rejected by design. Interact with
+> the bot from a personal account so your user ID can be checked against
+> the token/ban gates.
 
 ### URL Shortening
 
@@ -267,16 +246,6 @@ Thunder implements a sophisticated multi-tier rate limiting system designed for 
 - **Queue Size Limits**: Configurable maximum queue size.
 - **Flood Protection**: Built-in protection against Telegram flood waits.
 
-### Network Speed Testing
-
-Monitor server performance with built-in speed testing:
-
-```bash
-/speedtest
-```
-
-Features include download/upload speeds, latency measurements, and shareable result images for performance monitoring.
-
 ## Deployment Guide
 
 This section covers the complete setup process for deploying Thunder, from prerequisites to production deployment.
@@ -307,7 +276,9 @@ nano config.env  # Edit your settings
 
 # 3. Build and run
 docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 thunder
+# config.env is excluded from the build context; mount it at runtime
+docker run -d --name thunder -p 8080:8080 \
+  -v $(pwd)/config.env:/app/config.env:ro thunder
 ```
 
 <details>
@@ -323,7 +294,7 @@ python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt  # direct pins; Docker uses the hash-pinned requirements.lock
 
 # 4. Configure
 cp config_sample.env config.env
@@ -384,7 +355,7 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```bash
    heroku ps:scale web=1
    ```
-7. Set `UPSTREAM_REPO` for auto-updates on dyno restart:
+7. Set `UPSTREAM_REPO` for auto-updates on dyno restart (requires a git checkout — Docker images update by pulling a new image instead):
    ```bash
    heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
    ```
@@ -498,8 +469,8 @@ Your reverse proxy is now securely streaming files behind Cloudflare!
 **Q: Why isn't my bot responding after setup?**
 A: This is usually a configuration issue. Please check the following:
 
-1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) are filled in correctly.
-2. **Use `config.env` Only**: Do not edit `vars.py` or `config_sample.env`. The bot is designed to only read your settings from `config.env`.
+1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `OWNER_ID`, `DATABASE_URL`) are filled in correctly.
+2. **Use `config.env` (plus optional `config.env.local` overrides)**: Do not edit `vars.py` or `config_sample.env`. The bot reads your settings from `config.env` and, if present, `config.env.local` (local layer wins).
 3. **Check Logs**: Review the console logs on your server or hosting platform (Koyeb, Render, Heroku) for any startup errors.
 
 **Q: What do I use for the `FQDN` variable?**
@@ -550,13 +521,7 @@ A: Yes. Mixing clients from different accounts and data centers (like DC1, DC4, 
 
 ### Contributing
 
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to the branch (`git push origin feature/amazing-feature`).
-5. Open a Pull Request.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow — including the local quality gates (`make format lint test`) that CI enforces on every PR.
 
 ## License
 

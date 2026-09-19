@@ -1,0 +1,48 @@
+{
+  "name": "Thunder FileToLink",
+  "description": "Telegram files to direct HTTP links.",
+  "repository": "https://github.com/fyaz05/FileToLink",
+  "stack": "container",
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "image": "fyaz05/thunder",
+  "env": {
+    "API_ID": {
+      "description": "Telegram API ID (my.telegram.org).",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Telegram API hash.",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Bot token (@BotFather).",
+      "required": true
+    },
+    "BIN_CHANNEL": {
+      "description": "Storage channel ID (bot must be admin).",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Owner user ID (boot refuses without it).",
+      "required": true
+    },
+    "DATABASE_URL": {
+      "description": "MongoDB connection string (no Heroku addon; use external).",
+      "required": true
+    },
+    "FQDN": {
+      "description": "Public domain for generated links.",
+      "required": false
+    },
+    "HAS_SSL": {
+      "description": "HTTPS enabled.",
+      "value": "True",
+      "required": false
+    }
+  }
+}

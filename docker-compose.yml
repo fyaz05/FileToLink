@@ -1,0 +1,25 @@
+# Local dev stack: app + MongoDB for manual testing.
+# Unit/integration tiers use testcontainers instead; this file is for humans.
+# Needs config.env next to this file (copy config_sample.env first).
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      - "8080:8080"
+    env_file:
+      - config.env
+    environment:
+      DATABASE_URL: mongodb://mongo:27017/thunder
+      # BIND_ADDRESS / PORT come from config.env; keep PORT=8080 here.
+
+volumes:
+  mongo-data:
