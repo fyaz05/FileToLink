@@ -279,6 +279,7 @@ docker build -t thunder .
 # config.env is excluded from the build context; mount it at runtime
 docker run -d --name thunder -p 8080:8080 \
   -v $(pwd)/config.env:/app/config.env:ro thunder
+# Local dev with MongoDB instead: docker compose up --build
 ```
 
 <details>
@@ -318,6 +319,9 @@ After deployment, to add any additional environment variables, use the Koyeb das
 
 ### Deploy to Render
 
+Blueprint (`render.yaml` in the repo root — auto-detected on repo connect),
+or manually:
+
 1. Open [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
 2. Choose **Existing Image**: `fyaz05/thunder:latest`
 3. Add your environment variables
@@ -338,26 +342,26 @@ After deployment, to add any additional environment variables, use the Koyeb das
    heroku create your-app-name --region eu
    heroku stack:set container
    ```
-3. Set your config vars:
+3. Set your config vars (never set `PORT` — Heroku assigns it dynamically and
+   the app reads `$PORT` automatically):
    ```bash
    heroku config:set API_ID="your_id" API_HASH="your_hash" BOT_TOKEN="your_token" \
      BIN_CHANNEL="-100xxx" OWNER_ID="your_id" FQDN="your-app-name.herokuapp.com" \
-     HAS_SSL="True" NO_PORT="True" PORT="8080"
+     HAS_SSL="True" NO_PORT="True"
    ```
 4. Set `DATABASE_URL` via the Heroku Dashboard or API (ampersand in MongoDB URL causes shell issues).
-5. Deploy via source upload (Heroku does not support direct git push with API key auth):
+5. Deploy by pushing the branch (container stack builds `Dockerfile` via `heroku.yml`):
    ```bash
-   # Create source tarball
-   tar -czf source.tar.gz --exclude='.git' --exclude='__pycache__' .
-   # Upload via Heroku Builds API — see devcenter.heroku.com/articles/build-and-release-using-the-api
+   git push heroku main --force
    ```
 6. Scale the dyno:
    ```bash
    heroku ps:scale web=1
    ```
-7. Set `UPSTREAM_REPO` for auto-updates on dyno restart (requires a git checkout — Docker images update by pulling a new image instead):
+7. Redeploy to update (pull a new image / push again) — `UPSTREAM_REPO` has no
+   effect on Docker/Heroku images (no git inside), so leave it unset:
    ```bash
-   heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
+   git push heroku main --force
    ```
 
 > **Note:** Heroku provides HTTPS automatically. Set `FQDN` to `your-app-name.herokuapp.com` and `HAS_SSL` to `True`.

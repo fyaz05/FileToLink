@@ -9,7 +9,6 @@
       "size": "basic"
     }
   },
-  "image": "fyaz05/thunder",
   "env": {
     "API_ID": {
       "description": "Telegram API ID (my.telegram.org).",

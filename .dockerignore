@@ -10,8 +10,9 @@ __pycache__
 .ruff_cache
 .mypy_cache
 *.session*
-logs/
+**/logs/
 tests/
+docs/
 htmlcov/
 .coverage
 README.md
@@ -20,6 +21,9 @@ SECURITY.md
 Makefile
 config.env
 config.env.local
+config.env.bak
+config.env.tmp
+*.tmp
 AGENTS.md
 uv.lock
 requirements.txt
