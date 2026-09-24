@@ -1,0 +1,25 @@
+# Render Blueprint: Docker web service. Set the secrets below in the dashboard.
+# No managed MongoDB on Render — point DATABASE_URL at an external cluster.
+services:
+  - type: web
+    name: thunder-filetolink
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: BOT_TOKEN
+        sync: false
+      - key: BIN_CHANNEL
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: FQDN
+        sync: false
+      - key: HAS_SSL
+        value: true

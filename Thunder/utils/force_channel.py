@@ -1,89 +1,136 @@
-# Thunder/utils/force_channel.py
-
-import asyncio
+import html
+import time
 
 from pyrogram import Client
-from pyrogram.errors import FloodWait, UserNotParticipant
+from pyrogram.enums import ParseMode
+from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from Thunder.utils.flag_cache import FlagCache
 from Thunder.utils.logger import logger
-from Thunder.utils.messages import MSG_COMMUNITY_CHANNEL
+from Thunder.utils.messages import (
+    MSG_COMMUNITY_CHANNEL,
+    MSG_FORCE_JOIN_BUTTON,
+    MSG_FORCE_SUB_CHECK_FAILED,
+    MSG_FORCE_SUB_REQUIRED,
+)
+from Thunder.utils.safe_call import reply_safe, tg_call
 from Thunder.vars import Var
 
 _force_link = None
 _force_title = None
+_force_resolved = False
+_resolved_at = 0.0
+_RESOLVED_TTL_SECONDS = 300.0
+_negative_until = 0.0
+_NEGATIVE_TTL_SECONDS = 60.0
+
+# Membership cache: one get_chat_member RPC per gated message was the
+# last uncached hot-path read.  Short symmetric TTL bounds the RPC volume;
+# either direction is at most 60s stale (a join waits, a leave lingers) --
+# asymmetric caching would only move the fail-open window, not close it.
+_membership_cache = FlagCache(ttl_seconds=60, max_items=4096, name="force_member")
+
+
+async def _is_member(client: Client, user_id: int) -> bool:
+    try:
+        member = await tg_call(
+            client.get_chat_member,
+            Var.FORCE_CHANNEL_ID,
+            user_id,
+            retries=1,
+        )
+        return member is not None
+    except UserNotParticipant:
+        return False
+    # any other error propagates: the gate stays fail-closed
+
 
 async def get_force_info(bot: Client):
-    global _force_link, _force_title
-    
+    global _force_link, _force_title, _force_resolved, _resolved_at, _negative_until
+
     if not Var.FORCE_CHANNEL_ID:
         return None, None
-    
-    if _force_link is not None and _force_title is not None:
+
+    # positive cache with a TTL: invite links/titles can rotate, so a
+    # resolved-once entry would serve stale join buttons forever
+    if _force_resolved and time.monotonic() - _resolved_at <= _RESOLVED_TTL_SECONDS:
         return _force_link, _force_title
-    
+    if time.monotonic() < _negative_until:
+        return None, None
+
     try:
-        try:
-            chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            chat = await bot.get_chat(Var.FORCE_CHANNEL_ID)
+        chat = await tg_call(bot.get_chat, Var.FORCE_CHANNEL_ID, retries=1)
         if chat:
-            _force_link = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
+            # numeric channel id: get_chat always resolves a full Chat
+            # (ChatPreview only comes from link resolution), hence the ignores
+            _force_link = chat.invite_link or (  # type: ignore[union-attr]
+                f"https://t.me/{chat.username}" if chat.username else None  # type: ignore[union-attr]
+            )
             _force_title = chat.title or "Channel"
+        # cache even the no-link outcome, or it re-resolves per message
+        _force_resolved = True
+        _resolved_at = time.monotonic()
         return _force_link, _force_title
     except Exception as e:
+        # transient RPC failure: short negative cache so the gate path does
+        # not hammer get_chat on every message during a Telegram brownout
+        _negative_until = time.monotonic() + _NEGATIVE_TTL_SECONDS
         logger.error(f"Force channel error: {e}", exc_info=True)
         return None, None
+
 
 async def force_channel_check(client: Client, message: Message):
     if not Var.FORCE_CHANNEL_ID:
         return True
-    
-    if message.from_user is None:
+
+    if message.from_user is not None and message.from_user.id == Var.OWNER_ID:
+        # owner bypasses everything, including force-sub
         return True
 
-    try:
-        while True:
-            try:
-                member = await client.get_chat_member(Var.FORCE_CHANNEL_ID, message.from_user.id)
-                if member is None:
-                    logger.error(f"Failed to get chat member for {message.from_user.id} in force channel {Var.FORCE_CHANNEL_ID} after retries.")
-                    return False
-                return True
-            except FloodWait as e:
-                logger.debug(f"FloodWait in force_channel_check, sleeping for {e.value}s")
-                await asyncio.sleep(e.value)
-    except UserNotParticipant:
-        link, title = await get_force_info(client)
-        if link and title:
-            try:
-                await message.reply_text(
-                    MSG_COMMUNITY_CHANNEL.format(channel_title=title),
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Join", url=link)
-                    ]])
-                )
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await message.reply_text(
-                    MSG_COMMUNITY_CHANNEL.format(channel_title=title),
-                    reply_markup=InlineKeyboardMarkup([[
-                        InlineKeyboardButton("Join", url=link)
-                    ]])
-                )
-        else:
-            try:
-                await message.reply_text("You must join the channel to use this bot.")
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await message.reply_text("You must join the channel to use this bot.")
+    if message.from_user is None:
+        # fail-closed: channel posts / anonymous admins have no verifiable
+        # user id, so membership cannot be checked -- deny like the token
+        # gate's MSG_ERROR_ANONYMOUS_SENDER path (callers deny on False)
+        logger.debug("Denied unattributable sender (force-sub, no from_user).")
         return False
+
+    try:
+        is_member = await _membership_cache.get_or_load(
+            (Var.FORCE_CHANNEL_ID, message.from_user.id),
+            lambda: _is_member(client, message.from_user.id),
+        )
     except Exception as e:
         logger.error(f"Error checking force channel: {e}", exc_info=True)
         try:
-            await message.reply_text("An unexpected error occurred while checking channel membership. Please try again.")
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await message.reply_text("An unexpected error occurred while checking channel membership. Please try again.")
+            await reply_safe(message, MSG_FORCE_SUB_CHECK_FAILED)
+        except Exception as inner_e:
+            logger.warning(f"Could not send force-sub error notice: {inner_e}")
         return False
+
+    if is_member:
+        return True
+
+    link, title = await get_force_info(client)
+    if link and title:
+        try:
+            await reply_safe(
+                message,
+                MSG_COMMUNITY_CHANNEL.format(
+                    # escaped twin of the /help panel line (common.py);
+                    # HTML parse mode skips the markdown pre-pass
+                    channel_title=html.escape(title or "Channel")
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(MSG_FORCE_JOIN_BUTTON, url=link)]]
+                ),
+            )
+        except Exception as e:
+            logger.warning(f"Could not send force-sub prompt: {e}")
+    else:
+        try:
+            await reply_safe(message, MSG_FORCE_SUB_REQUIRED)
+        except Exception as e:
+            logger.warning(f"Could not send force-sub notice: {e}")
+    return False

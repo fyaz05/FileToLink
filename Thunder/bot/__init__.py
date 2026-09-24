@@ -1,6 +1,7 @@
 # Thunder/bot/__init__.py
 
 from pyrogram import Client
+
 from Thunder.vars import Var
 
 StreamBot = Client(
@@ -13,5 +14,5 @@ StreamBot = Client(
     max_concurrent_transmissions=1000,
 )
 
-multi_clients = {}
-work_loads = {}
+multi_clients: dict[int, Client] = {}
+work_loads: dict[int, int] = {}
