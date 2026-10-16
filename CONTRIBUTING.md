@@ -9,6 +9,10 @@ cp config_sample.env config.env  # fill in your values
 pre-commit install  # optional: same ruff hooks CI runs, before each commit
 ```
 
+Works on Windows too: `uvloop`/`tgcrypto` are marked POSIX-only, so a Windows
+dev host gets the full toolchain without the MTProto speedups. `make` recipes
+themselves are POSIX shell (use WSL/Git Bash for those).
+
 ## Workflow
 
 1. Branch from `main` (`feat/...`, `fix/...`, `refactor/...`).

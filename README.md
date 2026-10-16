@@ -123,10 +123,10 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `BIN_CHANNEL` | Storage channel ID | `-1001234567890` |
 | `OWNER_ID` | Owner user ID | `12345678` |
 | `DATABASE_URL` | MongoDB connection | `mongodb+srv://...` |
-| `FQDN` | Domain/IP address | `f2l.thunder.com` |
-| `HAS_SSL` | HTTPS enabled | `True` or `False` |
-| `PORT` | Server port | `8080` |
-| `NO_PORT` | Hide port in URLs | `True` or `False` |
+
+Those six are the only variables the bot refuses to boot without. PaaS
+companions — `FQDN`, `HAS_SSL`, `PORT`, `NO_PORT` — matter only when the
+platform proxies the app; the bot infers them and logs what it chose.
 
 ### Optional Configuration
 
@@ -298,6 +298,8 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. Install dependencies
 pip install -r requirements.txt  # direct pins; Docker uses the hash-pinned requirements.lock
+# uvloop/tgcrypto are marked POSIX-only, so this also works on Windows
+# (the MTProto speedups are simply skipped there)
 
 # 4. Configure
 cp config_sample.env config.env
@@ -321,11 +323,12 @@ After deployment, to add any additional environment variables, use the Koyeb das
 
 ### Deploy to Render
 
-Blueprint (`render.yaml` in the repo root — auto-detected on repo connect),
-or manually:
+`render.yaml` builds from this repository's `Dockerfile` (`runtime: docker`),
+so Render builds the image rather than pulling `fyaz05/thunder:latest`:
 
 1. Open [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
-2. Choose **Existing Image**: `fyaz05/thunder:latest`
+2. Connect the repository — the blueprint is auto-detected, or pick
+   **Existing Image**: `fyaz05/thunder:latest` to run the published build
 3. Add your environment variables
 4. Click **Deploy**
 
@@ -494,7 +497,7 @@ A: For links to work on a VPS, the URL must include the port number (e.g., `http
 **Q: Why are my links showing a "Resource Not Found" error or not working?**
 A: This error means the bot can't access the file. Check these three things:
 
-1. **Invalid Token**: Your `BOT_TOKEN` or one of the `MULTI_TOKEN`s might be wrong. Double-check them with @BotFather.
+1. **Invalid Token**: Your `BOT_TOKEN` or one of the `MULTI_TOKEN1..N` values might be wrong. Double-check them with @BotFather.
 2. **Missing Admin Rights**: The bot and **all** your client accounts must be **administrators** in the `BIN_CHANNEL`.
 3. **File Deleted**: The link will break if the file was deleted from your `BIN_CHANNEL`.
 
@@ -511,7 +514,7 @@ A: This is likely a **Telegram Flood Wait**. To prevent spam, Telegram temporari
 **Q: How can I fix slow download and streaming speeds?**
 A: If your speeds are slow, here’s how to fix it:
 
-- **Add More Clients**: This is the best solution. Add `MULTI_TOKEN`s to your `config.env` to distribute the workload and increase throughput.
+- **Add More Clients**: This is the best solution. Add `MULTI_TOKEN1`, `MULTI_TOKEN2`, ... to your `config.env` to distribute the workload and increase throughput.
 - **Use DC4 Accounts**: For top performance, use Telegram accounts from **Data Center 4 (DC4)**, as they often have the fastest connection. Use `/dc` to check an account's data center.
 - **Upgrade Your Server**: A server with a slow network will bottleneck your speeds. Consider upgrading your VPS plan.
 
@@ -532,6 +535,12 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full w
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for details.
+
+The published Docker image links against [Pyrofork](https://github.com/Mayuri-Chan/pyrofork)
+and `tgcrypto`, both **LGPL-3.0-or-later**. Apache-2.0 is compatible with
+importing them, but redistributing the image as a binary requires shipping
+those components' source and permitting relinking. Upstream Pyrofork was
+archived in September 2026, so a maintained fork is the planned exit.
 
 ## Acknowledgments
 

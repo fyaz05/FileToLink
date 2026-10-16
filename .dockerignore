@@ -27,3 +27,11 @@ config.env.tmp
 AGENTS.md
 uv.lock
 requirements.txt
+# build/infra files the runtime image never reads
+pyproject.toml
+scripts/
+config_sample.env
+render.yaml
+app.json
+heroku.yml
+docker-compose.yml
