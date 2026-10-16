@@ -335,8 +335,9 @@ class RateLimiter:
             if have_priority and have_regular:
                 # Fairness: alternate while both tiers are populated, so a
                 # continuous owner/authorized stream cannot starve regular
-                # users indefinitely. The cost is bounded: at worst one
-                # deferred regular item is rotated and re-parked (H6a).
+                # users indefinitely. The cost is bounded on both sides -- if
+                # the item we hand over is deferred it is rotated straight back
+                # and re-parked, costing one rotation (H6a), never a lost item.
                 serve_priority = not self._prefer_regular
                 self._prefer_regular = not self._prefer_regular
             else:
