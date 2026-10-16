@@ -33,25 +33,31 @@ MAX_FLOODWAIT_SLEEP_SECONDS = 30.0
 # ride out long waits instead of hard-failing; beyond it, surface to caller.
 MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS = 600.0
 
-# Call shapes allowed to run unbounded by default (large media transfers); matched by name.
-_UNBOUNDED_SHAPES = {
-    "copy",
-    "copy_message",
-    "send_document",
-    "send_video",
-    "send_audio",
-    "send_photo",
-    "send_animation",
-    "send_voice",
-    "send_video_note",
-    "reply_document",
-    "reply_video",
-    "reply_photo",
-    "reply_audio",
-    "stream_media",
-    "download_media",
-    "send_cached_media",
-}
+# Media shapes allowed to run unbounded (large transfers legitimately take
+# minutes, and H4a's lightweight budget would abort them mid-upload).
+#
+# ``Message.copy`` is the only one routed through tg_call today: the ingest
+# forward (bot_utils/plugins fwd_media) and the broadcast copy both call it.
+# Everything else that moves media -- stream_media, download_media, the
+# send_* / reply_* family -- is called directly, not via tg_call.
+#
+# A new media call site must either be added here or pass ``timeout=0`` to
+# opt out of the budget explicitly; silently inheriting the lightweight budget
+# is a production upload failure.
+UNBOUNDED_SHAPES = frozenset({"copy"})
+
+
+def _call_name(fn: Callable[..., Awaitable[T]]) -> str:
+    """Name used to pick a budget.
+
+    ``functools.partial`` hides the wrapped callable behind ``func``; without
+    this a partial-wrapped media call would look unnamed and silently inherit
+    the lightweight budget.
+    """
+    wrapped = getattr(fn, "func", None)  # functools.partial
+    if wrapped is not None:
+        fn = wrapped
+    return getattr(fn, "__name__", "")
 
 
 _env_timeout_cache: float | None = None
@@ -71,7 +77,7 @@ def _env_timeout() -> float:
 
 
 def _default_timeout(fn: Callable[..., Awaitable[T]]) -> float | None:
-    if getattr(fn, "__name__", "") in _UNBOUNDED_SHAPES:
+    if _call_name(fn) in UNBOUNDED_SHAPES:
         return None
     return _env_timeout()
 
@@ -86,11 +92,12 @@ async def tg_call(
 ) -> T:
     """Call ``fn(*args, **kwargs)`` sleeping through ``FloodWait``.
 
-    ``timeout`` forces a wall-clock budget (``None`` = auto: unbounded for
-    file-transfer shapes, :data:`DEFAULT_RPC_TIMEOUT_SECONDS` otherwise;
-    ``0`` or negative disables the budget entirely). ``max_flood_sleep``
-    overrides the shape-based sleep cap (e.g. fan-out callers that must
-    fail-count fast instead of riding out a long throttle).
+    ``timeout`` forces a wall-clock budget (``None`` = auto: unbounded for the
+    :data:`UNBOUNDED_SHAPES` media call, :data:`DEFAULT_RPC_TIMEOUT_SECONDS`
+    otherwise; ``0`` or negative disables the budget entirely, which is how a
+    new media call site opts out explicitly). ``max_flood_sleep`` overrides the
+    shape-based sleep cap (e.g. fan-out callers that must fail-count fast
+    instead of riding out a long throttle).
     """
     attempt = 0
     while True:
@@ -109,12 +116,12 @@ async def tg_call(
             else:
                 cap = (
                     MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS
-                    if getattr(fn, "__name__", "") in _UNBOUNDED_SHAPES
+                    if _call_name(fn) in UNBOUNDED_SHAPES
                     else MAX_FLOODWAIT_SLEEP_SECONDS
                 )
             sleep_for = min(e.value, cap)
             logger.debug(
-                f"FloodWait in {getattr(fn, '__name__', fn)}, "
+                f"FloodWait in {_call_name(fn) or fn}, "
                 f"sleeping {sleep_for}s (asked {e.value}s, attempt {attempt}/{retries})"
             )
             await asyncio.sleep(sleep_for)
@@ -149,6 +156,7 @@ __all__ = [
     "edit_safe",
     "delete_safe",
     "answer_safe",
+    "UNBOUNDED_SHAPES",
     "DEFAULT_RPC_TIMEOUT_SECONDS",
     "MAX_FLOODWAIT_SLEEP_SECONDS",
     "MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS",

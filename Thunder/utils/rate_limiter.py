@@ -82,6 +82,8 @@ class RateLimiter:
     def __init__(self):
         self.request_queue: deque[dict] = deque()
         self.priority_queue: deque[dict] = deque()
+        # fairness toggle: see _process_one. Not persisted, not swept -- one bool.
+        self._prefer_regular = False
 
         self.request_event: asyncio.Event = asyncio.Event()
         self.request_lock: asyncio.Lock = asyncio.Lock()
@@ -328,9 +330,22 @@ class RateLimiter:
         """Pop and process a single request.  Returns True when something was
         handled (so the worker loop does not spin on an empty event)."""
         async with self.request_lock:
-            if self.priority_queue:
+            have_priority = bool(self.priority_queue)
+            have_regular = bool(self.request_queue)
+            if have_priority and have_regular:
+                # Fairness: alternate while both tiers are populated, so a
+                # continuous owner/authorized stream cannot starve regular
+                # users indefinitely. The cost is bounded: at worst one
+                # deferred regular item is rotated and re-parked (H6a).
+                serve_priority = not self._prefer_regular
+                self._prefer_regular = not self._prefer_regular
+            else:
+                serve_priority = have_priority
+                self._prefer_regular = False
+
+            if serve_priority:
                 queue, queue_type = self.priority_queue, "priority"
-            elif self.request_queue:
+            elif have_regular:
                 queue, queue_type = self.request_queue, "regular"
             else:
                 self.request_event.clear()

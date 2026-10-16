@@ -110,6 +110,7 @@ from Thunder.vars import Var                      # all env config
 - Import order: stdlib → third-party → local; all I/O async (`asyncio.to_thread` for blocking)
 - **Never `try/except FloodWait`**: use `tg_call(...)` / `reply_safe` / `send_safe` / `edit_safe` / `delete_safe` / `answer_safe`. Allowed inline: `custom_dl.py` streaming/resume, `rate_limiter.py` worker-requeue, `broadcast.py` classify-only catch, `safe_call.py` itself, the server 503 ladder, `rate_limiter.py` notification catch-and-log.
 - Budgets: Mongo `timeoutMS=5000`, TG RPC `TG_RPC_TIMEOUT_SECONDS` (transfers unbounded), shortener/keepalive 10 s
+- A new media call site through `tg_call` must be added to `UNBOUNDED_SHAPES` (today only `Message.copy`) or pass `timeout=0`; the shape set is pinned by `test_safe_call_budgets.py`
 - `html.escape()` all user strings in HTML (M7); fail-closed deny with `MSG_ERROR_TEMP` (H7)
 - Owner handlers: `filters.user(Var.OWNER_ID)`; PascalCase / snake_case / UPPER_SNAKE_CASE
 
