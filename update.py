@@ -42,12 +42,17 @@ def _recover_config_backup() -> None:
         return
     restore = not os.path.exists("config.env")
     if not restore and os.path.isdir(".git") and shutil.which("git") is not None:
-        tracked = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "config.env"],
-            capture_output=True,
-            timeout=10,
-        )
-        restore = tracked.returncode == 0
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "config.env"],
+                capture_output=True,
+                timeout=10,
+            )
+            restore = tracked.returncode == 0
+        except (subprocess.SubprocessError, OSError) as e:
+            # a hung or unavailable git must not abort the boot: skip the
+            # restore rather than guessing which config.env is authoritative
+            logger.warning(f"Could not determine whether config.env is tracked: {e}")
     if restore:
         try:
             os.replace(_CONFIG_BACKUP, "config.env")

@@ -21,7 +21,10 @@ PUBLIC_HASH_LENGTH = 32
 LEGACY_PUBLIC_HASH_LENGTH = 20
 _CACHE_TTL_SECONDS = 600
 _CACHE_MAX_ITEMS = 4096
-_INGEST_CLAIM_TTL_SECONDS = 60
+# No heartbeat while copy_media runs, so this must outlast the slowest copy:
+# a claim that expires mid-upload is stolen and both workers copy the file.
+# The owner token still protects the release, just not the duplicate copy.
+_INGEST_CLAIM_TTL_SECONDS = 900
 _INGEST_CLAIM_WAIT_SECONDS = 15
 _INGEST_CLAIM_POLL_SECONDS = 0.5
 _MAX_INGEST_RETRIES = 10

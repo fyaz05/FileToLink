@@ -16,11 +16,16 @@ def _health_url() -> str:
     status code.
     """
     fqdn = (os.getenv("KEEPALIVE_HOST") or "").strip()
-    if fqdn and "://" in fqdn:
+    if fqdn:
+        if "://" not in fqdn:
+            # host-only value: PaaS platforms serve https on 443, so assume
+            # https rather than rebuilding an http://host:PORT URL that cannot
+            # connect from outside. Include a scheme to override the default.
+            fqdn = f"https://{fqdn}"
         # full public URL for PaaS anti-sleep: external traffic keeps free
         # tiers awake, so use it verbatim instead of rebuilding loopback
         return f"{fqdn.rstrip('/')}/health"
-    fqdn = fqdn or Var.BIND_ADDRESS
+    fqdn = Var.BIND_ADDRESS
     if fqdn in ("0.0.0.0", "::"):  # nosec B104 -- string check mapping bind-all to loopback
         fqdn = "127.0.0.1"
     # loopback unless KEEPALIVE_HOST overrides
