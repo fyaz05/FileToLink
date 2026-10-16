@@ -39,9 +39,15 @@ async def test_step_budget_uses_whatever_is_left():
 
 @pytest.mark.unit
 async def test_total_teardown_fits_the_compose_grace_period():
-    """Worst case is the shared budget plus one floor per teardown step; that
-    bound has to stay under docker-compose's stop_grace_period (60 s)."""
-    steps = 5  # rate limiter, touch buffer, shortener, clients, database
+    """Worst case is the shared budget plus one floor per teardown step. The
+    step count is read out of shutdown_services itself, so adding a sixth step
+    cannot silently invalidate the bound this test claims to protect."""
+    import inspect
+
+    body = inspect.getsource(main_mod.shutdown_services)
+    steps = body.count("_safe_teardown_step(")
+
+    assert steps >= 1, "shutdown_services runs no teardown steps?"
     worst_case = main_mod._SHUTDOWN_BUDGET_SECONDS + steps * main_mod._TEARDOWN_FLOOR_SECONDS
     assert worst_case < 60.0, f"shutdown can outlive the container grace period ({worst_case}s)"
 

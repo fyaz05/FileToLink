@@ -108,6 +108,16 @@ async def validate_request_common(client: Client, message: Message) -> bool | No
     return shortener_val
 
 
+def _batch_chunk_text(chunk: list[str]) -> str:
+    """Render one batch-links chunk.
+
+    Links can come from the shortener, so each is escaped before it lands
+    inside the <code> block.
+    """
+    body = "\n".join(html.escape(link) for link in chunk)
+    return MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n<code>{body}</code>"
+
+
 async def send_channel_links(
     links: dict[str, Any],
     source_info: str,
@@ -642,11 +652,7 @@ async def process_batch(
     ]
     dm_failed_chunks = 0
     for idx, chunk in enumerate(chunks):
-        # links can come from the shortener: escape before they land in markup
-        chunk_text = (
-            MSG_BATCH_LINKS_READY.format(count=len(chunk))
-            + f"\n\n<code>{chr(10).join(html.escape(link) for link in chunk)}</code>"
-        )
+        chunk_text = _batch_chunk_text(chunk)
         try:
             await reply_safe(
                 msg, chunk_text, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML

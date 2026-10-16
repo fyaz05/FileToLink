@@ -61,6 +61,30 @@ async def test_acquire_release_cycle():
 
 
 @pytest.mark.unit
+def test_retry_budget_covers_the_claim_ttl():
+    """A crashed worker's claim blocks the file for the whole TTL, and the
+    waiter only exits early once the claim is actually gone. If the retry
+    budget is shorter than the TTL, a client gives up with "max ingest retries
+    exhausted" while a stale claim still holds the file.
+    """
+    from Thunder.utils import canonical_files as cf
+
+    patience = cf._MAX_INGEST_RETRIES * cf._INGEST_CLAIM_WAIT_SECONDS
+    assert patience >= cf._INGEST_CLAIM_TTL_SECONDS, (
+        f"retry budget {patience}s is shorter than the claim TTL {cf._INGEST_CLAIM_TTL_SECONDS}s"
+    )
+
+
+@pytest.mark.unit
+def test_claim_ttl_outlives_a_slow_copy():
+    """The claim must outlast a plausible large copy, or a second worker steals
+    it mid-upload and both copy the file."""
+    from Thunder.utils import canonical_files as cf
+
+    assert cf._INGEST_CLAIM_TTL_SECONDS >= 300, "a multi-GB copy can outrun this TTL"
+
+
+@pytest.mark.unit
 async def test_expired_claim_is_stolen():
     db = _make_claim_db()
     owner = await db.acquire_file_ingest_claim("file-2", ttl_seconds=-1)  # already expired

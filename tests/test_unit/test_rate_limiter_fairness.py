@@ -83,19 +83,25 @@ async def test_regular_only_is_drained_completely(monkeypatch):
 
 @pytest.mark.unit
 async def test_a_continuous_priority_stream_cannot_starve_regulars(monkeypatch):
-    """Ten priority requests per regular request: every one of them still runs
-    instead of sitting in the queue forever."""
+    """A priority item is refilled before every pop, so priority is *never*
+    empty -- which is exactly the condition under which the old
+    priority-first drain starved regulars indefinitely. Every regular request
+    must still run."""
     ran: list[int] = []
     rl = _arm(monkeypatch, ran)
-    _fill(rl, UID_PRIO, 10, ran, queue="priority")
-    _fill(rl, UID_REG, 10, ran, queue="regular")
+    _fill(rl, UID_PRIO, 3, ran, queue="priority")
+    _fill(rl, UID_REG, 3, ran, queue="regular")
 
-    for _ in range(20):
+    served_regular = 0
+    for _ in range(12):
         assert await rl._process_one() is True
+        if ran and ran[-1] == UID_REG:
+            served_regular += 1
+        # keep the priority queue permanently non-empty
+        rl.priority_queue.append(_item(UID_PRIO, ran))
 
-    assert not rl.request_queue, "regular requests starved by the priority tier"
-    assert not rl.priority_queue
-    assert ran.count(UID_REG) == 10
+    assert served_regular == 3, f"regular requests starved ({served_regular}/3 served)"
+    assert not rl.request_queue
 
 
 @pytest.mark.unit

@@ -15,8 +15,9 @@ services:
       - mongo
     ports:
       - "8080:8080"
-    # SIGKILL before shutdown finishes skips the touch flush, so give the
-    # 45 s budget in Thunder/__main__.py room to complete
+    # SIGKILL before shutdown finishes skips the touch flush. The app bounds
+    # teardown at _SHUTDOWN_BUDGET_SECONDS plus a floor per teardown step
+    # (50 s worst case in Thunder/__main__.py); give that room to complete.
     stop_grace_period: 60s
     volumes:
       # /log tails this file; without a volume it dies with the container

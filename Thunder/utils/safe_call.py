@@ -36,15 +36,17 @@ MAX_FLOODWAIT_SLEEP_MEDIA_SECONDS = 600.0
 # Media shapes allowed to run unbounded (large transfers legitimately take
 # minutes, and H4a's lightweight budget would abort them mid-upload).
 #
-# ``Message.copy`` is the only one routed through tg_call today: the ingest
-# forward (bot_utils/plugins fwd_media) and the broadcast copy both call it.
-# Everything else that moves media -- stream_media, download_media, the
-# send_* / reply_* family -- is called directly, not via tg_call.
+# Both entries are load-bearing and correspond to real call sites:
+#   * Message.copy      -- the ingest forward (plugins fwd_media) and the
+#                          broadcast copy
+#   * Message.reply_document -- /log (a 5 MiB tail) and /shell output
 #
-# A new media call site must either be added here or pass ``timeout=0`` to
-# opt out of the budget explicitly; silently inheriting the lightweight budget
-# is a production upload failure.
-UNBOUNDED_SHAPES = frozenset({"copy"})
+# Everything else that moves media -- stream_media, download_media, the
+# send_* family -- is called directly, not via tg_call, so it has no budget
+# to inherit. A new media call site must be added here or pass ``timeout=0``;
+# silently inheriting the lightweight budget is a production upload failure.
+# test_safe_call_budgets pins this set.
+UNBOUNDED_SHAPES = frozenset({"copy", "reply_document"})
 
 
 def _call_name(fn: Callable[..., Awaitable[T]]) -> str:

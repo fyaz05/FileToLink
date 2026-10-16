@@ -25,7 +25,12 @@ _CACHE_MAX_ITEMS = 4096
 # a claim that expires mid-upload is stolen and both workers copy the file.
 # The owner token still protects the release, just not the duplicate copy.
 _INGEST_CLAIM_TTL_SECONDS = 900
-_INGEST_CLAIM_WAIT_SECONDS = 15
+# A crashed worker's claim blocks the file for the whole TTL, and
+# _wait_for_other_worker_canonical_record only exits early once the claim is
+# actually gone -- so the retry budget has to cover the TTL, or a client gives
+# up with "max ingest retries exhausted" while a stale claim is still holding
+# the file. Pinned by test_canonical_claim.
+_INGEST_CLAIM_WAIT_SECONDS = 90
 _INGEST_CLAIM_POLL_SECONDS = 0.5
 _MAX_INGEST_RETRIES = 10
 _CACHE_PRUNE_INTERVAL = 50
@@ -179,21 +184,17 @@ async def forget_stale_record(record: dict[str, Any]) -> bool:
 
 
 async def _flush_pending_touches() -> None:
-    global _flush_task, _dropped_touches
+    global _flush_task
     cancelled = False
-    flushed = False
     try:
         await asyncio.sleep(_FLUSH_DELAY_SECONDS)
         await _bulk_flush()
-        flushed = True
     except asyncio.CancelledError:
+        # _bulk_flush re-queued its own snapshot before letting this through, so
+        # there is nothing to retry here -- drain_background_touch_tasks picks
+        # the buffer up on the way out.
         cancelled = True
     finally:
-        if not flushed and not cancelled and _pending_touches:
-            try:
-                await _bulk_flush()
-            except Exception as e:
-                logger.error(f"Touch flush failed on cancel path: {e}", exc_info=True)
         _flush_task = None
         if _pending_touches and not cancelled:
             # touches added during this flush escaped its snapshot; re-arm
@@ -293,11 +294,12 @@ async def drain_background_touch_tasks() -> None:
 
     try:
         # fresh task + shield: shutdown runs this drain under a bounded timeout,
-        # and a timeout must not abandon the write half-way. Deltas stay in the
-        # buffer regardless -- this only keeps them from being skipped silently.
+        # and a timeout must not abandon the write half-way. The buffer already
+        # holds a copy of everything, so losing this race costs an under-count,
+        # not a dropped delta.
         await asyncio.shield(asyncio.ensure_future(_bulk_flush()))
     except asyncio.CancelledError:
-        logger.warning("Touch drain cancelled mid-flush; deltas stay buffered.")
+        logger.warning("Touch drain cancelled; the in-flight flush is still running.")
     except Exception as e:
         logger.error(f"Failed to flush touch buffer at shutdown: {e}", exc_info=True)
 

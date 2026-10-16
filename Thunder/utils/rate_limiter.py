@@ -653,9 +653,11 @@ async def handle_rate_limited_request(
         logger.warning(f"Queue full, request for user {user_id} rejected.")
         if not is_channel:
             # edit the notice we already sent: a second message left the stale
-            # "In Queue" status on screen permanently
+            # "In Queue" status on screen permanently. The wait estimate must
+            # come from user_id -- notification_msg was sent BY the bot, so
+            # its from_user is the bot, not the requester.
             if notification_msg is not None:
-                await replace_queue_notification(bot, notification_msg, file_identifier)
+                await replace_queue_notification(bot, notification_msg, file_identifier, user_id)
             else:
                 await send_queue_full_message(bot, message, file_identifier)
     except Exception as e:
@@ -720,17 +722,21 @@ async def send_queue_full_message(bot: Client, message: Message, file_identifier
 
 
 async def replace_queue_notification(
-    bot: Client, notification_msg: Message, file_identifier: str | None
+    bot: Client,
+    notification_msg: Message,
+    file_identifier: str | None,
+    user_id: int,
 ) -> None:
     """Swap the "In Queue" notice for the queue-full one, in place.
 
     Sending a second message left the first one saying "In Queue" forever, so
     the user never learned the request had been rejected.
+
+    ``user_id`` is passed explicitly: ``notification_msg`` was sent by the bot,
+    so reading ``from_user`` off it would estimate the wait for the bot's own
+    (empty) window and always say "less than a minute".
     """
-    user_id = notification_msg.from_user.id if notification_msg.from_user else None
-    wait_seconds = (
-        await rate_limiter.estimate_wait_time(user_id, file_identifier) if user_id else 0.0
-    )
+    wait_seconds = await rate_limiter.estimate_wait_time(user_id, file_identifier)
     wait_estimate = max(1, math.ceil(wait_seconds / 60))
     await edit_safe(
         notification_msg,

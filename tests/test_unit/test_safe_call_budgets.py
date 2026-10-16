@@ -18,11 +18,27 @@ from Thunder.utils.safe_call import UNBOUNDED_SHAPES, tg_call
 
 
 @pytest.mark.unit
-def test_unbounded_set_is_exactly_the_media_call_sites():
-    """Message.copy is the only media shape routed through tg_call (the ingest
-    forward and the broadcast copy). Everything else that moves media is called
-    directly, so a wider set would advertise coverage that does not exist."""
-    assert frozenset({"copy"}) == UNBOUNDED_SHAPES
+def test_every_media_call_site_is_unbounded():
+    """The real contract is not the set's contents but that no media call site
+    is missing from it. The call sites are read out of the source rather than
+    restating a literal: /log ships a 5 MiB tail and /shell ships arbitrary
+    output, and a 30 s budget on either is a production failure."""
+    import pathlib
+    import re
+
+    import Thunder
+
+    root = pathlib.Path(Thunder.__file__).parent
+    media_shapes = re.compile(
+        r"tg_call\(\s*[\w.]*?(copy|reply_document|send_document|send_video|send_audio"
+        r"|send_photo|send_cached_media|stream_media|download_media)\b"
+    )
+    found: set[str] = set()
+    for path in root.rglob("*.py"):
+        found |= {m.group(1) for m in media_shapes.finditer(path.read_text(encoding="utf-8"))}
+
+    assert found, "scan found no media call sites -- the pattern is stale"
+    assert found <= UNBOUNDED_SHAPES, f"media calls without a budget: {found - UNBOUNDED_SHAPES}"
 
 
 @pytest.mark.unit
@@ -34,14 +50,14 @@ def test_lightweight_shapes_get_the_env_budget():
 
 
 @pytest.mark.unit
-def test_media_shape_gets_no_wall_clock_budget():
-    """A 30s budget on a multi-GB upload is a production failure, so the media
-    shape must resolve to None (unbounded)."""
+def test_reply_document_is_unbounded():
+    """/log tails up to 5 MiB and /shell ships arbitrary output; both go out
+    through reply_document, which must not inherit the 30 s budget."""
 
-    async def copy(*args, **kwargs):
+    async def reply_document(*args, **kwargs):
         return None
 
-    assert safe_call._default_timeout(copy) is None
+    assert safe_call._default_timeout(reply_document) is None
 
 
 @pytest.mark.unit
