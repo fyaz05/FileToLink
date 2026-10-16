@@ -51,6 +51,7 @@ from Thunder.utils.messages import (
     MSG_ERROR_GENERIC,
     MSG_INVALID_BROADCAST_CMD,
     MSG_INVALID_USER_ID,
+    MSG_LISTAUTH_PARTIAL,
     MSG_LOG_FILE_CAPTION_SIZED,
     MSG_LOG_FILE_EMPTY,
     MSG_LOG_FILE_MISSING,
@@ -386,6 +387,7 @@ async def list_authorized_command(client: Client, message: Message):
     # long auth lists exceed Telegram's 4096 cap: page on line breaks, measured
     # in UTF-16 units because that is what the cap counts
     pages = paginate_lines(text, _PAGE_BUDGET_UNITS)
+    failed_pages = 0
     for idx, page in enumerate(pages):
         try:
             await reply(
@@ -397,12 +399,22 @@ async def list_authorized_command(client: Client, message: Message):
                 ),
             )
         except Exception as e:
-            # one failed page must not silently drop the rest of the list
+            # continue, not break: each page is independently sized, so one
+            # rejected page says nothing about the next. `break` here silently
+            # truncated the list on an audit command and the owner had no way
+            # to tell the list had ended early.
             logger.error(f"Failed to send /listauth page: {e}", exc_info=True)
-            break
+            failed_pages += 1
         # pace only *between* pages: a burst of replies is what trips FloodWait
         if idx + 1 < len(pages):
             await asyncio.sleep(_PAGE_SEND_DELAY_SECONDS)
+
+    if failed_pages:
+        await reply(
+            message,
+            text=MSG_LISTAUTH_PARTIAL.format(failed_pages=failed_pages, total_pages=len(pages)),
+            parse_mode=ParseMode.HTML,
+        )
 
 
 @StreamBot.on_message(filters.command("ban") & owner_filter)

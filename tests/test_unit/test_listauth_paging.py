@@ -122,8 +122,117 @@ async def test_listauth_sends_every_page_over_the_cap(monkeypatch):
 
 
 @pytest.mark.unit
+async def test_one_failed_page_does_not_truncate_the_list(monkeypatch):
+    """The Blocking finding: the loop had `break` under a comment saying the
+    opposite, so one rejected page silently truncated an audit command with no
+    marker that the list had ended early."""
+    users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
+    monkeypatch.setattr(admin, "list_allowed", _async_return(users))
+    monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
+    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+
+    sent: list[str] = []
+    state = {"n": 0}
+
+    async def fail_second(message, text=None, **kwargs):
+        state["n"] += 1
+        sent.append(text)
+        if state["n"] == 2:
+            raise RuntimeError("MESSAGE_TOO_LONG")
+
+    monkeypatch.setattr(admin, "reply", fail_second)
+
+    await admin.list_authorized_command(client=None, message=None)
+
+    delivered = "".join(s for s in sent if "Partial list" not in s)
+    missing = [
+        u["user_id"] for u in users if f"User ID: <code>{u['user_id']}</code>" not in delivered
+    ]
+    assert not missing, (
+        f"{len(missing)} authorized users never reached the owner "
+        f"(first missing: {missing[:5]}) -- the loop stopped at the failed page"
+    )
+
+
+@pytest.mark.unit
+async def test_a_partial_list_is_reported(monkeypatch):
+    """Silence is the bug. The owner has to be able to tell the list was cut."""
+    users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
+    monkeypatch.setattr(admin, "list_allowed", _async_return(users))
+    monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
+    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+
+    sent: list[str] = []
+    state = {"n": 0}
+
+    async def flaky(message, text=None, **kwargs):
+        state["n"] += 1
+        if state["n"] == 2:
+            raise RuntimeError("transient")
+        sent.append(text)
+
+    monkeypatch.setattr(admin, "reply", flaky)
+
+    await admin.list_authorized_command(client=None, message=None)
+
+    assert any("Partial list" in s for s in sent), (
+        "a page failed and the owner was never told the list was incomplete"
+    )
+
+
+@pytest.mark.unit
+async def test_a_complete_list_reports_nothing(monkeypatch):
+    """The notice must not fire on the happy path."""
+    users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
+    monkeypatch.setattr(admin, "list_allowed", _async_return(users))
+    monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
+    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+
+    sent: list[str] = []
+
+    async def ok(message, text=None, **kwargs):
+        sent.append(text)
+
+    monkeypatch.setattr(admin, "reply", ok)
+
+    await admin.list_authorized_command(client=None, message=None)
+
+    assert len(sent) > 1, "expected several pages"
+    assert not any("Partial list" in s for s in sent), "warned about nothing"
+
+
+@pytest.mark.unit
+async def test_every_record_appears_exactly_once(monkeypatch):
+    """'At least once' would pass a handler that emitted every record twice."""
+    users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
+    monkeypatch.setattr(admin, "list_allowed", _async_return(users))
+    monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
+    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+
+    sent: list[str] = []
+
+    async def ok(message, text=None, **kwargs):
+        sent.append(text)
+
+    monkeypatch.setattr(admin, "reply", ok)
+
+    await admin.list_authorized_command(client=None, message=None)
+
+    joined = "".join(sent)
+    for user in users:
+        marker = f"User ID: <code>{user['user_id']}</code>"
+        assert joined.count(marker) == 1, (
+            f"{marker} appears {joined.count(marker)} times, expected exactly 1"
+        )
+
+
+@pytest.mark.unit
 def test_page_delay_is_set_for_multi_page_lists():
     assert admin._PAGE_SEND_DELAY_SECONDS > 0
+
+
+async def _no_sleep(_s):
+    return None
 
 
 @pytest.mark.unit

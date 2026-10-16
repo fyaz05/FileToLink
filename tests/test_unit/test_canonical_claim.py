@@ -23,32 +23,70 @@ from Thunder.utils.database import Database
 
 
 class _FakeLocksCol:
-    """Minimal stand-in for file_ingest_locks_col: insert_one + find_one_and_update."""
+    """Stand-in for file_ingest_locks_col that HONOURS the filter it is given.
+
+    The previous version re-derived liveness from its own clock and ignored the
+    query entirely, so `acquire_file_ingest_claim`'s $or could be reduced to
+    `{"_id": ...}` -- stealing live claims, i.e. two workers copying the same
+    file -- and every test stayed green. The predicate IS the security property,
+    so the fake must evaluate it the way Mongo does.
+    """
 
     def __init__(self):
         self.store: dict[str, dict] = {}
+        self.seen_filters: list[dict] = []
 
     async def insert_one(self, doc: dict):
         if doc["_id"] in self.store:
             raise DuplicateKeyError("dup")
         self.store[doc["_id"]] = dict(doc)
 
-    async def find_one_and_update(self, flt: dict, update: dict, **_kwargs):
+    def _matches(self, current: dict, flt: dict) -> bool:
         from datetime import datetime
 
-        current = self.store.get(flt["_id"])
-        if current is None:
+        for key, want in flt.items():
+            if key == "$or":
+                if not any(self._matches(current, clause) for clause in want):
+                    return False
+            elif key == "$and":
+                if not all(self._matches(current, clause) for clause in want):
+                    return False
+            elif isinstance(want, dict):
+                # field-level operators: {"expires_at": {"$lte": now}}
+                for op, operand in want.items():
+                    got = current.get(key)
+                    if op == "$lte":
+                        if got is None or got > datetime.now(got.tzinfo):
+                            return False
+                        if isinstance(operand, datetime) and got > operand:
+                            return False
+                    elif op == "$gt":
+                        if got is None or got <= datetime.now(got.tzinfo):
+                            return False
+                        if isinstance(operand, datetime) and got <= operand:
+                            return False
+                    elif op == "$exists":
+                        if (key in current) is not bool(operand):
+                            return False
+                    else:
+                        return False  # an operator this fake cannot model
+            elif current.get(key) != want:
+                return False
+        return True
+
+    async def find_one_and_update(self, flt: dict, update: dict, **_kwargs):
+        self.seen_filters.append(dict(flt))
+        current = self.store.get(flt.get("_id"))
+        if current is None or not self._matches(current, flt):
             return None
-        expires_at = current.get("expires_at")
-        if expires_at is not None and expires_at > datetime.now(expires_at.tzinfo):
-            return None  # live claim held by someone else
         old = dict(current)
         current.update(update["$set"])
         return old
 
     async def delete_one(self, flt: dict):
-        current = self.store.get(flt["_id"])
-        if current is not None and current.get("owner") == flt.get("owner"):
+        self.seen_filters.append(dict(flt))
+        current = self.store.get(flt.get("_id"))
+        if current is not None and self._matches(current, flt):
             del self.store[flt["_id"]]
             return SimpleNamespace(deleted_count=1)
         return SimpleNamespace(deleted_count=0)
@@ -83,6 +121,52 @@ async def test_expired_claim_is_stolen():
     # the old owner's release must not delete the new worker's claim
     assert await db.release_file_ingest_claim("file-2", owner) is False
     assert await db.release_file_ingest_claim("file-2", thief) is True
+
+
+@pytest.mark.unit
+async def test_the_steal_is_gated_on_expiry_in_the_query_itself():
+    """The $or is the security property: without it a second worker takes a
+    LIVE claim and both copy the file. Pin the filter, not just the outcome --
+    the previous fake re-derived liveness from its own clock, so deleting the
+    $or left every test green."""
+    db = _make_claim_db()
+    assert await db.acquire_file_ingest_claim("file-3", ttl_seconds=900), "setup: no claim"
+
+    db.file_ingest_locks_col.seen_filters.clear()
+    assert await db.acquire_file_ingest_claim("file-3") is None, "a live claim was stolen"
+
+    steal_filters = [
+        f
+        for f in db.file_ingest_locks_col.seen_filters
+        if "$or" in f or any("$lte" in clause for clause in f.get("$or", []))
+    ]
+    assert steal_filters, (
+        "acquire_file_ingest_claim did not query with an expiry condition -- "
+        "a live claim can be taken and two workers copy the same file"
+    )
+    for flt in db.file_ingest_locks_col.seen_filters:
+        assert flt.get("_id") == "file-3", "the claim is scoped by file"
+
+
+@pytest.mark.unit
+async def test_release_is_owner_scoped_in_the_query():
+    """A stale owner's release must not delete the thief's claim. Pin it in the
+    filter, not only in the observed result."""
+    db = _make_claim_db()
+    owner = await db.acquire_file_ingest_claim("file-4", ttl_seconds=-1)
+    thief = await db.acquire_file_ingest_claim("file-4")
+
+    db.file_ingest_locks_col.seen_filters.clear()
+    await db.release_file_ingest_claim("file-4", owner)
+    assert db.file_ingest_locks_col.seen_filters, "release sent no filter"
+
+    delete_filters = [
+        f
+        for f in db.file_ingest_locks_col.seen_filters
+        if f.get("_id") == "file-4" and f.get("owner") == owner
+    ]
+    assert delete_filters, "the release filter is not owner-scoped"
+    assert await db.release_file_ingest_claim("file-4", thief) is True
 
 
 # --- the timing contract ---------------------------------------------------

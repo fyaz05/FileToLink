@@ -150,6 +150,11 @@ MSG_AUTH_USER_INFO = """{i}. 👤: {display_name}
    • Authorized by: <code>{authorized_by}</code>
    • Date: <code>{auth_time}</code>\n\n"""
 MSG_ADMIN_AUTH_LIST_HEADER = "🔐 <b>Authorized Users List</b>\n\n"
+MSG_LISTAUTH_PARTIAL = (
+    "⚠️ <b>Partial list</b>\n\n"
+    "> {failed_pages} of {total_pages} page(s) could not be sent.\n"
+    "> The list above is incomplete — re-run /listauth."
+)
 MSG_ADMIN_AUTH_OWNER_FOOTER = (
     "\n👑 <b>Owner:</b> <code>{owner_id}</code> <i>(implicit, all access)</i>"
 )
