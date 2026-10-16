@@ -9,7 +9,7 @@ URLs are capability links — anyone with the URL can download.
 |---|---|---|
 | `GET`, `HEAD` | `/health` | Liveness, dependency-free (`{"status":"ok"}`, `no-store`) |
 | `GET`, `HEAD` | `/` | Redirect to the project repo |
-| `GET`, `HEAD` | `/status` | Telemetry (`Cache-Control: no-store`): version, uptime, bot username, client count, per-client inflight + DC |
+| `GET`, `HEAD` | `/status` | Telemetry (`Cache-Control: no-store`, CORS-readable): `{server: {status, version, uptime}, telegram_bot: {username, active_clients, dc_id}, resources: {total_workload, workload_distribution, touch_buffer}}` |
 | `GET` | `/activate/{token}` | Redirects to `https://t.me/<bot>?start=<token>`; never consumes (burn happens in `/start`) |
 | `GET`, `HEAD` | `/watch/f/{hash}/{name}` | Player page (20- or 32-hex hash, side-by-side forever) |
 | `GET`, `HEAD` | `/watch/{path}` | Player page (legacy links, name optional; `ENABLE_LEGACY_LINKS=False` → `410`) |
@@ -31,8 +31,9 @@ URLs are capability links — anyone with the URL can download.
 
 `Range: bytes=<start>-<end>` → `206` + `Content-Range`. Oversized ends clamp;
 suffix ranges (`bytes=-N`) serve the tail; full-file `0-(size-1)` normalizes to
-`200` without `Content-Range`. Garbage/multi-range → `400` (deliberate, stricter
-than RFC 9110's ignore); unsatisfiable → `416` + `Content-Range: bytes */<size>`.
+`200` without `Content-Range` (RFC 9110 lets a server ignore a ranges-specifier it
+cannot satisfy, and a `400` would make some players and proxies abandon the
+transfer). Unparseable → `400`; unsatisfiable → `416` + `Content-Range: bytes */<size>`.
 
 ## Errors
 
@@ -55,8 +56,9 @@ truncate the body (headers already sent) — resume with `Range`.
 
 - Bytes: `Cache-Control: public, max-age=31536000` + `Accept-Ranges: bytes`.
   Every error is `no-store` so caches never pin a failure.
-- `Access-Control-Allow-Origin: *` (allowed: `Range, Content-Type, *`;
-  `Content-Length, Content-Range, Content-Disposition` exposed).
+- `Access-Control-Allow-Origin: *` (allowed request headers: `Range, Content-Type`;
+  methods: `GET, HEAD, OPTIONS`; exposed response headers: `Content-Length,
+  Content-Range, Content-Disposition`).
   No credentials — the link itself is the secret.
 - Player pages: `<meta name="robots" content="noindex, nofollow">` +
   `X-Robots-Tag: noindex, nofollow`.

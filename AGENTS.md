@@ -150,8 +150,13 @@ from Thunder.vars import Var                      # all env config
 
 ## Rate Limiting
 
-- Two-tier deque (`priority_queue` first); queue/wait-estimate UX is protected.
-- Charge-at-exec (H6b); FloodWait requeues (max 5); RPS breaker burst 2×, dry requeues (H6c); bounded + swept 5 min (H6a).
+- Two-tier deque; **strict alternation** while both tiers are populated, so a
+  continuous owner/authorized stream cannot starve regular users (and vice
+  versa). A deferred hand-over costs one rotation, never a lost item.
+- Queue/wait-estimate UX is protected.
+- Charge-at-exec (H6b); FloodWait requeues (max 5); ingest contention requeues
+  (max 20, counted separately so one cannot mask the other); RPS breaker burst
+  2×, dry requeues (H6c); hard-bounded (`MAX_TRACKED_USERS`) + swept 5 min (H6a).
 
 ## URL families
 

@@ -253,3 +253,13 @@ if _config_warnings:
 
 mode_note = "PRIVATE" if Var.PRIVATE_MODE else "public"
 logger.debug(f"Gate mode: {mode_note}; legacy links: {'on' if Var.ENABLE_LEGACY_LINKS else 'off'}")
+
+# README promises the bot "infers them and logs what it chose" for the PaaS
+# companions. It inferred them fine but only ever logged at DEBUG, which is off
+# by default -- so the promise was invisible exactly when an operator needed it.
+# These four decide the public URL, so say them at INFO.
+logger.info(
+    f"Serving at {Var.URL or '(unset -- see above)'} "
+    f"(FQDN={Var.FQDN or 'unset'}, port={'none' if Var.NO_PORT else Var.PORT}, "
+    f"ssl={'on' if Var.HAS_SSL else 'off'})"
+)
