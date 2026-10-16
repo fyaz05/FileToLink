@@ -101,15 +101,11 @@ _preview_rpc_inflight = 0
 def _preview_rpc_slot():
     global _preview_rpc_inflight
     if _preview_rpc_inflight >= _PREVIEW_RPC_CONCURRENCY:
-        raise web.HTTPServiceUnavailable(
-            text="Server is busy rendering pages. Please retry shortly.",
-            headers={
-                "Retry-After": "2",
-                "Access-Control-Allow-Origin": "*",
-                "X-Content-Type-Options": "nosniff",
-                "X-Robots-Tag": "noindex, nofollow",
-            },
-        )
+        # lazy: importing any Thunder.server submodule runs the package __init__
+        # -> stream_routes -> this module
+        from Thunder.server.exceptions import unavailable
+
+        raise unavailable("Server is busy rendering pages. Please retry shortly.", retry_after="2")
     _preview_rpc_inflight += 1
     try:
         yield

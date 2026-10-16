@@ -13,6 +13,7 @@ but nothing to /watch/. These tests pin the bound.
 """
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -195,6 +196,76 @@ async def test_load_shed_is_not_logged_as_an_error(reset_admission, no_cache, mo
         rt._preview_rpc_inflight = 0
     assert not [r for r in caplog.records if r.levelname == "ERROR"], (
         "load shedding was logged as an error"
+    )
+
+
+async def test_a_shed_response_carries_no_store(reset_admission, no_cache, monkeypatch):
+    """A cached 503 outlives the condition that produced it. Every other error
+    the server emits goes through server.exceptions.unavailable; a hand-rolled
+    header set is how this one ended up without Cache-Control."""
+    rt._preview_rpc_inflight = rt._PREVIEW_RPC_CONCURRENCY
+    try:
+        with pytest.raises(web.HTTPServiceUnavailable) as excinfo:
+            await render_page(9, "abcdef")
+    finally:
+        rt._preview_rpc_inflight = 0
+
+    headers = excinfo.value.headers
+    assert headers.get("Cache-Control") == "no-store", (
+        "the shed response can be cached by a CDN or browser"
+    )
+    assert headers.get("Retry-After"), "no Retry-After, so clients will not back off"
+    assert headers.get("Access-Control-Allow-Origin") == "*", (
+        "a browser cannot read the failure reason"
+    )
+
+
+async def test_shed_headers_match_the_routes_error_headers(reset_admission, no_cache, monkeypatch):
+    """Structural: the shed and the routes must agree, so the set lives in one
+    place (server.exceptions) rather than being retyped at each call site."""
+    from Thunder.server.exceptions import ERROR_HEADERS
+
+    rt._preview_rpc_inflight = rt._PREVIEW_RPC_CONCURRENCY
+    try:
+        with pytest.raises(web.HTTPServiceUnavailable) as excinfo:
+            await render_page(9, "abcdef")
+    finally:
+        rt._preview_rpc_inflight = 0
+
+    for name, value in ERROR_HEADERS.items():
+        assert excinfo.value.headers.get(name) == value, f"shed response differs on {name}"
+
+
+async def test_the_route_ladder_does_not_log_one_line_per_shed_request(
+    reset_admission, no_cache, monkeypatch, caplog
+):
+    """The flood only moved from ERROR to WARNING. An attacker who can trigger
+    the shed can still fill the log file that /log uploads, so nothing at
+    WARNING or above may be emitted for a 5xx."""
+    from Thunder.server import stream_routes
+
+    rt._preview_rpc_inflight = rt._PREVIEW_RPC_CONCURRENCY
+    try:
+        with pytest.raises(web.HTTPException):
+            async with stream_routes._route_ladder("preview"):
+                await render_page(9, "abcdef")
+    finally:
+        rt._preview_rpc_inflight = 0
+
+    noisy = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not noisy, f"a shed request logged {len(noisy)} record(s) at WARNING or above: {noisy}"
+
+
+async def test_the_route_ladder_still_logs_client_errors(monkeypatch, caplog):
+    """4xx is a client mistake and is worth a line; only 5xx is shed."""
+    from Thunder.server import stream_routes
+
+    with pytest.raises(web.HTTPException):
+        async with stream_routes._route_ladder("preview"):
+            raise web.HTTPBadRequest(text="nope")
+
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING], (
+        "a 4xx was swallowed silently -- that is a real client mistake"
     )
 
 

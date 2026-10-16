@@ -12,7 +12,17 @@ from pyrogram.types import Message
 
 from Thunder import StartTime, __version__
 from Thunder.bot import StreamBot, multi_clients, work_loads
-from Thunder.server.exceptions import FileNotFound, InvalidHash, TelegramUnavailable
+from Thunder.server.exceptions import (
+    CORS_HEADERS as _CORS_HEADERS,
+)
+from Thunder.server.exceptions import (
+    ERROR_HEADERS,
+    RETRY_5,
+    FileNotFound,
+    InvalidHash,
+    TelegramUnavailable,
+    unavailable,
+)
 from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.canonical_files import (
     LEGACY_PUBLIC_HASH_LENGTH,
@@ -48,21 +58,17 @@ VALID_PUBLIC_HASH_REGEX = re.compile(
 VALID_DISPOSITIONS = {"inline", "attachment"}
 _ASCII_FALLBACK_RE = re.compile(r"[^A-Za-z0-9._ -]")
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-    "Access-Control-Allow-Headers": "Range, Content-Type",
-    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
-}
+CORS_HEADERS = _CORS_HEADERS
 
 # Every error response carries CORS (readable browser errors) + no-store
-# (a cached failure must never outlive the underlying problem).
-_ERROR_HEADERS = {**CORS_HEADERS, "Cache-Control": "no-store"}
-_RETRY_5 = {**_ERROR_HEADERS, "Retry-After": "5"}
+# (a cached failure must never outlive the underlying problem). Defined once in
+# server.exceptions so render_template can shed with the same headers.
+_ERROR_HEADERS = ERROR_HEADERS
+_RETRY_5 = RETRY_5
 
 
 def _unavailable(text: str) -> web.HTTPServiceUnavailable:
-    return web.HTTPServiceUnavailable(text=text, headers=_RETRY_5)
+    return unavailable(text)
 
 
 streamers: dict[int, "ByteStreamer"] = {}
@@ -245,7 +251,16 @@ async def _route_ladder(label: str):
         logger.warning(f"{label}: Telegram unavailable ({type(e).__name__})")
         raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except web.HTTPException as e:
-        logger.warning(f"HTTP exception in {label}: {e}")
+        # A 5xx here is either load shedding (_preview_rpc_slot) or an outage
+        # already logged further up, and the client already has the status and
+        # the Retry-After. Logging one line per shed request means an
+        # unauthenticated caller who can trigger the shed can fill the log
+        # file that /log uploads -- the flood just moves from ERROR to
+        # WARNING. Only 4xx is worth a line.
+        if e.status < 500:
+            logger.warning(f"HTTP exception in {label}: {e}")
+        else:
+            logger.debug(f"{label}: shedding/broken with {e.status}: {e}")
         raise
     except Exception as e:
         error_id = secrets.token_hex(6)

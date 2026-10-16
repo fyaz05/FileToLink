@@ -32,6 +32,13 @@ gates() {
 }
 
 case "${1:-}" in
+  format)
+    uv run ruff check Thunder/ update.py tests/ --fix
+    uv run ruff format Thunder/ update.py tests/ ;;
+  audit)
+    uv run pip-audit
+    uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
+    uv run vulture Thunder update.py --min-confidence 80 ;;
   gates) gates ;;
   file)
     [ $# -eq 2 ] || { echo "usage: dev.sh file <path-or-node>" >&2; exit 2; }
