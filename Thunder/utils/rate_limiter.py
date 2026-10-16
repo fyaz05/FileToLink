@@ -114,11 +114,12 @@ class RateLimiter:
             self.global_rate_limit_enabled = Var.GLOBAL_RATE_LIMIT
             self.max_global_requests_per_minute = Var.MAX_GLOBAL_REQUESTS_PER_MINUTE
             if Var.GLOBAL_RPS_LIMIT and not self.global_rate_limit_enabled:
-                # surface dead knobs -- the RPS cap only bites when the
-                # breaker is enabled (see _breaker_rate)
+                # surface partially-wired config: _breaker_rate returns
+                # GLOBAL_RPS_LIMIT ahead of the per-minute window, so the
+                # per-second cap is enforced on its own
                 logger.warning(
                     "GLOBAL_RPS_LIMIT is set but GLOBAL_RATE_LIMIT is disabled; "
-                    "the per-second cap has no effect until the global breaker is enabled."
+                    "the per-second cap is enforced, the per-minute window is not."
                 )
 
             if not self._validate_configuration():
@@ -613,6 +614,7 @@ async def handle_rate_limited_request(
         return
 
     is_channel = rl_user_id is not None and rl_user_id < 0
+    notification_msg = None
 
     if not is_channel:
         try:
@@ -635,7 +637,12 @@ async def handle_rate_limited_request(
     except QueueFullError:
         logger.warning(f"Queue full, request for user {user_id} rejected.")
         if not is_channel:
-            await send_queue_full_message(bot, message, file_identifier)
+            # edit the notice we already sent: a second message left the stale
+            # "In Queue" status on screen permanently
+            if notification_msg is not None:
+                await replace_queue_notification(bot, notification_msg, file_identifier)
+            else:
+                await send_queue_full_message(bot, message, file_identifier)
     except Exception as e:
         logger.error(f"Error adding request to queue for user {user_id}: {e}", exc_info=True)
         if not is_channel:
@@ -695,3 +702,24 @@ async def send_queue_full_message(bot: Client, message: Message, file_identifier
     user_id = message.from_user.id if message.from_user else "channel"
     logger.debug(f"Sending queue full message to user {user_id}")
     await _send_notification(bot, message, MSG_RATE_LIMIT_QUEUE_FULL, file_identifier)
+
+
+async def replace_queue_notification(
+    bot: Client, notification_msg: Message, file_identifier: str | None
+) -> None:
+    """Swap the "In Queue" notice for the queue-full one, in place.
+
+    Sending a second message left the first one saying "In Queue" forever, so
+    the user never learned the request had been rejected.
+    """
+    user_id = notification_msg.from_user.id if notification_msg.from_user else None
+    wait_seconds = (
+        await rate_limiter.estimate_wait_time(user_id, file_identifier) if user_id else 0.0
+    )
+    wait_estimate = max(1, math.ceil(wait_seconds / 60))
+    await edit_safe(
+        notification_msg,
+        MSG_RATE_LIMIT_QUEUE_FULL.format(
+            wait_estimate=wait_estimate, s="s" if wait_estimate > 1 else ""
+        ),
+    )
