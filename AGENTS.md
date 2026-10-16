@@ -12,10 +12,12 @@ bash thunder.sh            # best-effort self-update (shell-free) + python3 -m T
 
 ## Dependencies
 
-`pyproject.toml` owns 7 exact-pinned direct deps (CI fails beyond 7);
+`pyproject.toml` owns 7 exact-pinned direct packages. The CI gate counts
+*distinct* names, so a conditional platform entry for the same package
+(pyrofork with and without the `speedup` extra) does not count twice.
 `uv.lock` pins the transitive graph (regenerate with `uv lock` on change);
-`requirements.lock` is the hashed export Docker installs with `--require-hashes`.
-CI fails if either drifts:
+`requirements.lock` is the hashed export Docker installs with
+`--require-hashes`. CI fails if either drifts:
 
 ```bash
 uv sync --frozen      # reproducible env
@@ -23,6 +25,11 @@ pip install -r requirements.txt                  # human installs
 pip install --require-hashes -r requirements.lock  # what Docker ships
 # aiohttp, pyrofork[speedup], pymongo, Jinja2, python-dotenv, psutil, uvloop
 ```
+
+`uvloop` and `tgcrypto` (pulled in by `pyrofork[speedup]`) ship no Windows
+wheels, so that extra is requested only where `sys_platform != 'win32'`:
+POSIX deploys keep both speedups, Windows dev hosts can install and run the
+suite.
 
 ## Development
 
