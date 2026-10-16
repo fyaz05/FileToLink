@@ -245,6 +245,28 @@ class TestCanonicalDeliveryErrorLadder:
         assert stream_routes.work_loads == {0: 0}
 
     @pytest.mark.unit
+    @pytest.mark.parametrize("bad_size", [0, -1, -5])
+    async def test_non_positive_file_size_never_builds_a_response(self, bad_size):
+        """A corrupt record with a zero *or negative* size must raise before a
+        Response exists -- the negative case would otherwise reach
+        ``Content-Length: -1``. Exercised on the serving helper directly: at
+        route level the vault size check happens first and would mask which
+        guard fired.
+        """
+        import Thunder.server.stream_routes as stream_routes
+        from Thunder.server.exceptions import FileNotFound
+
+        request = SimpleNamespace(headers={}, query={})
+        with pytest.raises(FileNotFound):
+            await stream_routes._serve_media_response(
+                request,
+                file_info={"file_name": "x.bin", "file_size": bad_size},
+                streamer=SimpleNamespace(),
+                client_id=0,
+                media_ref=1,
+            )
+
+    @pytest.mark.unit
     async def test_medialess_vault_message_self_heals(self, monkeypatch):
         import Thunder.server.stream_routes as stream_routes
 

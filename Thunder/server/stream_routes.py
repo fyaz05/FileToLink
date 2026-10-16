@@ -51,7 +51,7 @@ _ASCII_FALLBACK_RE = re.compile(r"[^A-Za-z0-9._ -]")
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-    "Access-Control-Allow-Headers": "Range, Content-Type, *",
+    "Access-Control-Allow-Headers": "Range, Content-Type",
     "Access-Control-Expose-Headers": "Content-Length, Content-Range, Content-Disposition",
 }
 
@@ -157,12 +157,18 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if not range_header:
         return 0, file_size - 1
 
+    if "," in range_header:
+        # Valid multi-range syntax ("bytes=0-1,3-4") that this server does not
+        # implement. RFC 9110 lets a server ignore a ranges-specifier it cannot
+        # satisfy, and the caller turns a full span into a plain 200. A 400 here
+        # would claim the client's whole request is malformed, which some
+        # players and proxies act on by abandoning the transfer.
+        return 0, file_size - 1
+
     match = RANGE_REGEX.fullmatch(range_header)
     if not match:
-        # 400 (not RFC 9110's "ignore") is deliberate: structurally broken
-        # or multi-range requests are hand-crafted, and an explicit signal
-        # beats silently shipping the whole body. Constant body: the header
-        # value is attacker-controlled and must not be reflected.
+        # Genuinely unparseable input is a real client error. Constant body: the
+        # header value is attacker-controlled and must not be reflected.
         raise web.HTTPBadRequest(text="Invalid range header", headers=_ERROR_HEADERS)
 
     start_str = match.group("start")
@@ -297,7 +303,9 @@ async def _serve_media_response(
     media_ref: int | Message,
 ):
     file_size = int(file_info.get("file_size", 0) or 0)
-    if file_size == 0:
+    if file_size <= 0:
+        # <= not ==: a corrupt or legacy record carrying a negative size would
+        # otherwise produce a negative Content-Length
         raise FileNotFound("File size is reported as zero or unavailable.")
 
     range_header = request.headers.get("Range", "")
@@ -486,18 +494,23 @@ async def canonical_media_preview(request: web.Request):
             size_bytes=file_record.get("file_size") or None,
         )
 
-        response = web.Response(
-            text=rendered_page,
-            content_type="text/html",
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "X-Content-Type-Options": "nosniff",
-                # player pages are per-file dynamic; keep them unindexed
-                "X-Robots-Tag": "noindex, nofollow",
-            },
-        )
-        response.enable_compression()
-        return response
+        return _preview_response(rendered_page)
+
+
+def _preview_response(rendered_page: str) -> web.Response:
+    """Both preview routes serve the same unindexed, compressed player page."""
+    response = web.Response(
+        text=rendered_page,
+        content_type="text/html",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "X-Content-Type-Options": "nosniff",
+            # player pages are per-file dynamic; keep them unindexed
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
+    response.enable_compression()
+    return response
 
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
@@ -515,17 +528,7 @@ async def media_preview(request: web.Request):
 
         rendered_page = await render_page(message_id, secure_hash)
 
-        response = web.Response(
-            text=rendered_page,
-            content_type="text/html",
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "X-Content-Type-Options": "nosniff",
-                "X-Robots-Tag": "noindex, nofollow",
-            },
-        )
-        response.enable_compression()
-        return response
+        return _preview_response(rendered_page)
 
 
 @routes.get(r"/f/{secure_hash}/{name:.+}", allow_head=True)
@@ -540,6 +543,9 @@ async def canonical_media_delivery(request: web.Request):
         work_loads[client_id] += 1
 
         async with _admission_ladder(client_id, "canonical stream"):
+            # called for its side effect: a record without a unique id cannot be
+            # served (there is no vault file to stream), so this is the
+            # availability check for the whole route
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
 

@@ -52,8 +52,18 @@ def test_range_open_and_suffix_forms():
 
 
 @pytest.mark.unit
+def test_multi_range_is_ignored_not_rejected():
+    """Multi-range syntax is valid but unimplemented here. RFC 9110 allows a
+    server to ignore it, and the route turns a full span into a plain 200 --
+    a 400 told clients their whole request was malformed, which some players
+    and proxies act on by abandoning the transfer."""
+    for header in ("bytes=0-1,3-4", "bytes=0-499,-500", "bytes=1-2,3-4,5-6"):
+        assert parse_range_header(header, 1024) == (0, 1023)
+
+
+@pytest.mark.unit
 def test_range_garbage_is_400_and_oob_is_416():
-    for bad in ("bytes=abc", "bytes=1-2,3-4", "bytes=", "items=0-1", "bytes=-", "bytes=5"):
+    for bad in ("bytes=abc", "bytes=", "items=0-1", "bytes=-", "bytes=5"):
         with pytest.raises(web.HTTPBadRequest):
             parse_range_header(bad, 1024)
     for _ in range(100):
