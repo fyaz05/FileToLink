@@ -86,6 +86,16 @@ from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
+# Telegram counts message length in UTF-16 code units, not code points
+_PAGE_BUDGET_UNITS = 3500
+_PAGE_SEND_DELAY_SECONDS = 0.5
+
+
+def _telegram_len(text: str) -> int:
+    """Length as Telegram measures it: an emoji costs 2 units, len() counts 1."""
+    return len(text.encode("utf-16-le")) // 2
+
+
 # /log tail cap
 _LOG_TAIL_BYTES = 5 * 1024 * 1024
 
@@ -374,13 +384,15 @@ async def list_authorized_command(client: Client, message: Message):
 
     text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)
 
-    # long auth lists exceed the 4096-char message cap: page by lines
-    if len(text) <= 3500:
+    # long auth lists exceed Telegram's 4096 cap: page by lines, measured in
+    # UTF-16 code units because that is what the cap counts (an emoji costs 2,
+    # so len() alone lets an emoji-dense page over the limit)
+    if _telegram_len(text) <= _PAGE_BUDGET_UNITS:
         pages = [text]
     else:
         pages, current = [], ""
         for line in text.split("\n"):
-            if len(current) + len(line) + 1 > 3500:
+            if _telegram_len(current) + _telegram_len(line) + 1 > _PAGE_BUDGET_UNITS:
                 pages.append(current)
                 current = ""
             current += line + "\n"
@@ -388,14 +400,21 @@ async def list_authorized_command(client: Client, message: Message):
             pages.append(current)
 
     for page in pages:
-        await reply(
-            message,
-            text=page,
-            parse_mode=ParseMode.HTML,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
-            ),
-        )
+        try:
+            await reply(
+                message,
+                text=page,
+                parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel")]]
+                ),
+            )
+        except Exception as e:
+            # one failed page must not silently drop the rest of the list
+            logger.error(f"Failed to send /listauth page: {e}", exc_info=True)
+            break
+        if len(pages) > 1:
+            await asyncio.sleep(_PAGE_SEND_DELAY_SECONDS)
 
 
 @StreamBot.on_message(filters.command("ban") & owner_filter)

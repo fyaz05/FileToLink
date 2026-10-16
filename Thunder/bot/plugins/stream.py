@@ -119,8 +119,9 @@ async def send_channel_links(
     text = MSG_NEW_FILE_REQUEST.format(
         source_info=html.escape(source_info),
         id_=source_id,
-        online_link=links["online_link"],
-        stream_link=links["stream_link"],
+        # shortener output is external data: escape it or entity parsing breaks
+        online_link=html.escape(links["online_link"]),
+        stream_link=html.escape(links["stream_link"]),
     )
     try:
         if target_msg:
@@ -369,8 +370,8 @@ async def channel_receive_handler(bot: Client, msg: Message):
                         MSG_NEW_FILE_REQUEST.format(
                             source_info=html.escape(source_info),
                             id_=message.chat.id,
-                            online_link=links["online_link"],
-                            stream_link=links["stream_link"],
+                            online_link=html.escape(links["online_link"]),
+                            stream_link=html.escape(links["stream_link"]),
                         ),
                         disable_web_page_preview=True,
                         parse_mode=enums.ParseMode.HTML,
@@ -641,9 +642,10 @@ async def process_batch(
     ]
     dm_failed_chunks = 0
     for idx, chunk in enumerate(chunks):
+        # links can come from the shortener: escape before they land in markup
         chunk_text = (
             MSG_BATCH_LINKS_READY.format(count=len(chunk))
-            + f"\n\n<code>{chr(10).join(chunk)}</code>"
+            + f"\n\n<code>{chr(10).join(html.escape(link) for link in chunk)}</code>"
         )
         try:
             await reply_safe(

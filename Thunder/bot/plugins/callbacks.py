@@ -78,6 +78,11 @@ async def get_force_channel_button(client: Client):
 @StreamBot.on_callback_query(filters.regex(r"^help_command$"))
 @guard_callback
 async def help_callback(client: Client, callback_query: CallbackQuery):
+    # Intentionally ungated: these panels expose static help text, no link
+    # generation and no token use, and the gate chain has to run against the
+    # *clicker* (callback_query.message belongs to the bot) -- doing that would
+    # need a Message shim that silently swallows each gate's denial reply. The
+    # panel itself is only ever sent after /help cleared GATES_START.
     await answer_safe(callback_query)
     buttons = [[InlineKeyboardButton(MSG_BUTTON_ABOUT, callback_data="about_command")]]
     force_button = await get_force_channel_button(client)
@@ -184,6 +189,9 @@ async def cancel_broadcast(client: Client, callback_query: CallbackQuery):
     entry = broadcast_ids.get(broadcast_id)
     if entry is not None:
         entry["cancelled"] = True
+        # answer on both paths: the success branch only edited the message, so
+        # the client's button kept spinning until Telegram timed it out
+        await answer_safe(callback_query)
         try:
             await edit_safe(
                 callback_query.message, MSG_BROADCAST_CANCEL.format(broadcast_id=broadcast_id)

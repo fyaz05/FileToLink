@@ -2,7 +2,7 @@ import html
 import time
 
 from pyrogram import Client
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ChatMemberStatus, ParseMode
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -40,7 +40,19 @@ async def _is_member(client: Client, user_id: int) -> bool:
             user_id,
             retries=1,
         )
-        return member is not None
+        # get_chat_member only raises UserNotParticipant when the user is
+        # absent entirely; banned and left members come back as a ChatMember,
+        # and admitting those would let the people a channel removed from it
+        # skip the join
+        if member.status in (
+            ChatMemberStatus.OWNER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.MEMBER,
+        ):
+            return True
+        return member.status == ChatMemberStatus.RESTRICTED and bool(
+            getattr(member, "is_member", False)
+        )
     except UserNotParticipant:
         return False
     # any other error propagates: the gate stays fail-closed
