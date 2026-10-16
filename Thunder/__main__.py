@@ -273,25 +273,32 @@ async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
 
 
 # Shutdown has to finish inside the container's stop grace period: SIGKILL
-# mid-teardown skips the touch flush. Every step below is bounded by what is
-# left of ONE budget instead of its own generous timeout, so the worst case is
-# the budget rather than the sum of five timeouts. docker-compose sets
-# stop_grace_period above this.
-_SHUTDOWN_BUDGET_SECONDS = 45.0
-_TEARDOWN_STEP_SECONDS = 10.0
+# mid-teardown skips the touch flush. The graceful steps share ONE budget
+# instead of each taking its own generous timeout, but every teardown step
+# still gets a floor: a spent budget must not turn db.close() into a 0 s
+# timeout, which would record a failure that never happened and exit non-zero
+# on a perfectly healthy stop. Worst case is budget + steps * floor, which
+# docker-compose's stop_grace_period leaves room for.
+_SHUTDOWN_BUDGET_SECONDS = 40.0
+_TEARDOWN_STEP_SECONDS = 8.0
+_TEARDOWN_FLOOR_SECONDS = 2.0
 
 
 def _budget_left(deadline: float) -> float:
-    """Seconds remaining in the shutdown budget, floored at 0."""
+    """Seconds remaining in the shared shutdown budget, floored at 0."""
     return max(deadline - asyncio.get_running_loop().time(), 0.0)
+
+
+def _step_budget(deadline: float) -> float:
+    """Timeout for one shutdown step: what is left of the budget, capped per
+    step but never below the floor."""
+    return min(_TEARDOWN_STEP_SECONDS, max(_budget_left(deadline), _TEARDOWN_FLOOR_SECONDS))
 
 
 async def _safe_teardown_step(
     step, name: str, errors: list | None = None, deadline: float | None = None
 ):
-    budget = _TEARDOWN_STEP_SECONDS
-    if deadline is not None:
-        budget = min(budget, _budget_left(deadline))
+    budget = _TEARDOWN_STEP_SECONDS if deadline is None else _step_budget(deadline)
     try:
         await asyncio.wait_for(step(), timeout=budget)
     except asyncio.CancelledError as e:
@@ -340,7 +347,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     # 2. stop accepting new HTTP before draining in-flight streams
     if app_runner is not None:
         try:
-            await asyncio.wait_for(app_runner.cleanup(), timeout=min(10.0, _budget_left(deadline)))
+            await asyncio.wait_for(app_runner.cleanup(), timeout=_step_budget(deadline))
         except Exception as e:
             errors.append(("web server", e))
             logger.error(f"Error during web server cleanup: {e}")
@@ -361,7 +368,7 @@ async def shutdown_services(background_tasks, app_runner) -> None:
 
     await _safe_teardown_step(db.close, "database", errors, deadline)
     if _budget_left(deadline) <= 0:
-        logger.warning("Shutdown budget exhausted; some teardown steps were skipped.")
+        logger.warning("Shutdown budget exhausted; teardown steps ran on the floor timeout.")
     if not errors:
         print("   ✓ Database connection closed")
 
