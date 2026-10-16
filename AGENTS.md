@@ -50,16 +50,17 @@ slow. Measured on a Windows host with the dev group synced:
 | command | time | what it covers |
 |---|---|---|
 | `scripts/dev.sh gates` | 1.6 s | ruff + ruff-format + mypy, no pytest |
-| `scripts/dev.sh file <path>` | 3.9 s | one test file, or one node with `::` |
-| `scripts/dev.sh quick` | 9.0 s | the whole unit tier, no coverage |
-| `scripts/dev.sh test` | 14.3 s | the whole tier + the coverage gate |
-| `scripts/dev.sh all` | 16.0 s | gates + `test`, i.e. what CI runs |
+| `scripts/dev.sh file <path>` | 3.8 s | one test file, or one node with `::` |
+| `scripts/dev.sh quick` | 9.8 s | the whole unit tier, no coverage |
+| `scripts/dev.sh test` | 15.1 s | the whole tier + the coverage gate |
+| `scripts/dev.sh all` | 18.3 s | gates + `test`, i.e. what CI runs |
 
-Best of three on a Windows host with the dev group synced, at 451 unit tests.
+Best of three on a Windows host with the dev group synced, at 479 unit tests.
 Re-measure before trusting the absolute numbers — they drift with the test
-count, and a table nobody updates is a table nobody reads.
+count, and a table nobody updates is a table nobody reads. This table has now
+been measured at 414, 451 and 479 tests; `quick` tracked 6.8 s → 9.0 s → 9.8 s.
 
-One node costs the same as a whole file (3.9 s) because the floor is the
+One node costs the same as a whole file (3.8 s) because the floor is the
 `pyrofork` import, not the tests: there is nothing to be gained by selecting
 narrower.
 
@@ -165,6 +166,46 @@ from Thunder.vars import Var                      # all env config
 - Charge-at-exec (H6b); FloodWait requeues (max 5); ingest contention requeues
   (max 20, counted separately so one cannot mask the other); RPS breaker burst
   2×, dry requeues (H6c); hard-bounded (`MAX_TRACKED_USERS`) + swept 5 min (H6a).
+- The per-user table is bounded at **admission**, not only by the sweep: a timer
+  bounds the steady state, not what can be created between ticks. Eviction is by
+  **least-recently-active**, never dict order — keys are only inserted when
+  absent, so dict order is first-ever-seen, and evicting by it hands a currently
+  active user a fresh rate-limit window. Admission and sweep share one
+  `_evict_inactive_users` so they cannot disagree.
+- The RPS breaker reports **nothing** unless `GLOBAL_RPS_LIMIT > 0` or
+  `GLOBAL_RATE_LIMIT` is on, and both ship disabled. Any code that consults it
+  as its only pressure signal is dead on a default deployment; `stream.py`'s
+  batch pacing reads queue depth as well for exactly that reason.
+
+## Stream slots and the transfer deadline
+
+`work_loads[client_id]` is the admission counter for `/f/` and `/watch/`. One
+`_slot_release` closure per request is shared by the admission ladder, the body
+generator's `finally`, and the stall watchdog, so whichever gets there first
+releases exactly once and the counter cannot go negative (negative means
+`select_optimal_client` believes there is spare capacity, which is worse than
+the leak).
+
+A stalled reader leaves the body generator suspended at a `yield`, so its
+`finally` never runs and the slot leaks permanently. A watchdog task reclaims it
+at a **wall-clock** deadline — `size / 64 KiB/s`, floored at 120 s and capped at
+1800 s. It is a bound on the leak, not a stall detector: there is no idle check,
+so a client sustaining less than `size / 1800 s` is cut mid-transfer with
+`Content-Length` already sent and must resume with a `Range`. Prompt stall
+detection needs progress-based reaping, which is not implemented.
+
+## Shutdown budget
+
+The teardown steps share one `_SHUTDOWN_BUDGET_SECONDS` budget (10 s), with a
+per-step floor so a spent budget cannot turn `db.close()` into a 0 s timeout and
+record a failure that never happened. `cleanup_clients` is the exception: it
+stops each client individually at 10 s, so it gets **its own slice** (`shared=False`
+in `_teardown_plan`) rather than drawing on the shared pool — with a shared
+budget the grant is `min(cap, budget_left)` and scaling the cap achieves nothing.
+Worst case is `budget + shared_steps × floor + _CLIENT_STOP_MAX_SECONDS` = 28 s,
+inside the 30 s that Heroku, Render and Kubernetes allow; the import-time assert
+and `test_shutdown_budget.py` both hold it there.
+
 
 ## URL families
 
