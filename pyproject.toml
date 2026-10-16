@@ -68,7 +68,11 @@ addopts = "-m unit"
 
 [tool.coverage.run]
 source = ["Thunder"]
-omit = ["Thunder/bot/plugins/*", "Thunder/__main__.py"]
+# Only __main__ is excluded: it is the boot/teardown entry point whose runtime
+# needs a real Telegram connection. Bot plugins are deliberately NOT omitted --
+# that entry used to be dead config (no __init__.py made coverage skip them
+# anyway), hiding ~900 statements of bot surface from the gate.
+omit = ["Thunder/__main__.py"]
 
 [tool.vulture]
 min_confidence = 80

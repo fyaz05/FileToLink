@@ -24,7 +24,7 @@ coverage:
 
 audit:
 	uv run pip-audit
-	# -ll = high severity only
+	# -ll = medium severity and above (bandit counts: -l low, -ll medium, -lll high)
 	uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
 	uv run vulture Thunder update.py --min-confidence 80
 	@count=$$(grep -vE '^[[:space:]]*(#|$$)' requirements.txt \

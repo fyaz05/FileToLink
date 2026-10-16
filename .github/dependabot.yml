@@ -1,9 +1,16 @@
-# Dependabot cannot regenerate uv.lock: after each pip PR, run `uv lock` and
-# push the updated lockfile to the PR branch, or CI's `uv lock --check` fails.
+# Dependabot cannot regenerate uv.lock: after each pip PR, run
+#
+#   uv lock && uv export --frozen --no-dev --hashes -o requirements.lock
+#
+# and push both lockfiles to the PR branch, or CI's `uv lock --check` and the
+# requirements.lock export-diff gate will fail. These PRs are expected to be
+# red until that human step is done -- see the `lockfiles-stale` label.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: "/"
+    labels:
+      - lockfiles-stale
     schedule:
       interval: weekly
   - package-ecosystem: github-actions

@@ -40,7 +40,9 @@ from Thunder.utils.shortener import close_shortener
 from Thunder.utils.tokens import cleanup_expired_tokens
 from Thunder.vars import Var
 
-PLUGIN_PATH = "Thunder/bot/plugins/*.py"
+# [!_]* excludes __init__.py (the package marker) and any _helper module:
+# import_plugins loads each match as a plugin, so only handler modules belong
+PLUGIN_PATH = "Thunder/bot/plugins/[!_]*.py"
 VERSION = __version__
 
 

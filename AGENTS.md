@@ -43,6 +43,10 @@ make audit       # pip-audit + bandit + vulture + dependency-count
 ## Test tiers
 
 - **Unit** (every PR): `uv run pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35`
+  Only `Thunder/__main__.py` is omitted from the report (boot/teardown needs a
+  real connection). `bot/plugins/*` is measured: the directory carries an
+  `__init__.py` so coverage sees it, and the old omit entry was dead config
+  that hid ~900 statements of bot surface from the gate.
 - **Integration** (opt-in, Docker): `TEST_INTEGRATION=1 uv run pytest -m integration` (testcontainers MongoDB, dev group)
 - Characterization tests pin behavior; update deliberately in the behavior PR.
 

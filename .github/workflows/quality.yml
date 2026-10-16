@@ -70,7 +70,7 @@ jobs:
       - name: pip-audit (locked environment incl. transitives)
         run: uv run pip-audit
 
-      - name: Bandit (high-only severity)
+      - name: Bandit (medium-or-higher severity)
         run: uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
 
       - name: Vulture (dead-code gate)

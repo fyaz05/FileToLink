@@ -20,8 +20,13 @@ except ImportError:
 
 @pytest.fixture(scope="module")
 def mongo_container():
-    if docker_unavailable or os.getenv("TEST_INTEGRATION") != "1":
+    # Opt-in is checked first, and a missing testcontainers install is an ERROR
+    # rather than a skip: silently skipping would let CI go green with zero
+    # integration coverage if the dev group ever fails to resolve.
+    if os.getenv("TEST_INTEGRATION") != "1":
         pytest.skip("integration tier disabled (set TEST_INTEGRATION=1 with Docker)")
+    if docker_unavailable:
+        pytest.fail("TEST_INTEGRATION=1 but testcontainers is not installed")
     with MongoContainer("mongo:7") as mongo:
         yield mongo
 
