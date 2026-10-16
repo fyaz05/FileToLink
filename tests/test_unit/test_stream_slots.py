@@ -381,11 +381,46 @@ async def test_the_watchdog_does_not_release_a_slot_the_ladder_already_returned(
         "ladder had already returned, so _serve_media_response must have minted "
         "its own closure instead of reusing the one it was given"
     )
-    # the response wraps the generator in a payload; closing it tears the
-    # transfer down the way aiohttp does on a client disconnect
-    response.body.close()
+    # the response wraps the generator in a payload; close() is a COROUTINE, so
+    # calling it bare emitted "coroutine was never awaited" and did nothing
+    await response.body.close()
 
 
+async def test_serve_media_response_requires_the_release_closure():
+    """release_slot is required, not defaulted.
+
+    The parameter defaults to None and HEAD calls release_slot() BEFORE any
+    fallback could run, so a call site that omitted it was a TypeError and a
+    500 -- on the one path that most needs to work.
+
+    Checked on the signature rather than by calling it: with a default restored,
+    HEAD calls None() and raises the SAME TypeError, so the behaviour is
+    identical and only the declaration distinguishes them.
+    """
+    import inspect as _inspect
+
+    param = _inspect.signature(sr._serve_media_response).parameters["release_slot"]
+    assert param.default is _inspect.Parameter.empty, (
+        f"release_slot defaults to {param.default!r}; a caller that forgets it "
+        "gets a runtime TypeError from calling None instead of a signature error"
+    )
+
+
+@pytest.mark.unit
+async def test_omitting_the_release_closure_is_an_error_not_a_silent_path(client_slot):
+    """And the omission is not papered over: HEAD, which has no body to defer to."""
+    with pytest.raises((TypeError, AttributeError)):
+        await sr._serve_media_response(
+            types.SimpleNamespace(method="HEAD", headers={}, query={}),
+            file_info=_info(4096),
+            streamer=_StalledStreamer(),
+            client_id=0,
+            media_ref=1,
+            release_slot=None,
+        )
+
+
+@pytest.mark.unit
 async def test_both_routes_thread_the_ladder_closure_into_the_response():
     """Structural, because the property is about a call site, not arithmetic.
 
@@ -405,10 +440,46 @@ async def test_both_routes_thread_the_ladder_closure_into_the_response():
     ]
     assert len(calls) == 2, f"expected 2 call sites, found {len(calls)} -- the scan is stale"
     for call in calls:
-        kwargs = {kw.arg for kw in call.keywords}
+        kwargs = {kw.arg: kw.value for kw in call.keywords}
         assert "release_slot" in kwargs, (
-            f"line {call.lineno}: this route does not thread the ladder's "
-            "release closure into _serve_media_response"
+            f"line {call.lineno}: this route does not thread a release closure into "
+            "_serve_media_response"
+        )
+        # and it must be the LADDER's closure, not a fresh one. Passing
+        # release_slot=_slot_release(client_id) satisfies the keyword check while
+        # reintroducing exactly the double-decrement this exists to prevent: the
+        # ladder would release one closure and the watchdog another.
+        assert getattr(kwargs["release_slot"], "id", None) == "release_slot", (
+            f"line {call.lineno}: passes {ast.unparse(kwargs['release_slot'])} "
+            "instead of the ladder's closure -- a second closure means the slot "
+            "is returned twice and work_loads goes negative"
+        )
+
+    # and the name it passes must be what the ladder binds. The `as` clause is
+    # on the `async with`, not on the call itself.
+    async_withs = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncWith)
+        and any(
+            isinstance(item.context_expr, ast.Call)
+            and getattr(item.context_expr.func, "id", None) == "_admission_ladder"
+            for item in n.items
+        )
+    ]
+    assert len(async_withs) == 2, (
+        f"expected 2 `async with _admission_ladder(...)` sites, found "
+        f"{len(async_withs)} -- the scan is stale"
+    )
+    for node in async_withs:
+        bindings = [
+            getattr(item.optional_vars, "id", None)
+            for item in node.items
+            if item.optional_vars is not None
+        ]
+        assert "release_slot" in bindings, (
+            f"line {node.lineno}: the ladder binds {bindings}, not 'release_slot', "
+            "so the routes cannot be passing it through"
         )
 
 

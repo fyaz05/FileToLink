@@ -49,18 +49,19 @@ slow. Measured on a Windows host with the dev group synced:
 
 | command | time | what it covers |
 |---|---|---|
-| `scripts/dev.sh gates` | 1.6 s | ruff + ruff-format + mypy, no pytest |
-| `scripts/dev.sh file <path>` | 3.8 s | one test file, or one node with `::` |
-| `scripts/dev.sh quick` | 9.8 s | the whole unit tier, no coverage |
-| `scripts/dev.sh test` | 15.1 s | the whole tier + the coverage gate |
-| `scripts/dev.sh all` | 18.3 s | gates + `test`, i.e. what CI runs |
+| `scripts/dev.sh gates` | 1.7 s | ruff + ruff-format + mypy, no pytest |
+| `scripts/dev.sh file <path>` | 4.1 s | one test file, or one node with `::` |
+| `scripts/dev.sh quick` | 10.2 s | the whole unit tier, no coverage |
+| `scripts/dev.sh test` | 15.6 s | the whole tier + the coverage gate |
+| `scripts/dev.sh all` | 17.4 s | gates + `test`, i.e. what CI runs |
 
-Best of three on a Windows host with the dev group synced, at 479 unit tests.
+Best of three on a Windows host with the dev group synced, at 483 unit tests.
 Re-measure before trusting the absolute numbers — they drift with the test
 count, and a table nobody updates is a table nobody reads. This table has now
-been measured at 414, 451 and 479 tests; `quick` tracked 6.8 s → 9.0 s → 9.8 s.
+been measured at 414, 451, 479 and 483 tests; `quick` tracked 6.8 s → 9.0 s →
+9.8 s → 10.2 s.
 
-One node costs the same as a whole file (3.8 s) because the floor is the
+One node costs the same as a whole file (4.1 s) because the floor is the
 `pyrofork` import, not the tests: there is nothing to be gained by selecting
 narrower.
 
@@ -172,6 +173,11 @@ from Thunder.vars import Var                      # all env config
   absent, so dict order is first-ever-seen, and evicting by it hands a currently
   active user a fresh rate-limit window. Admission and sweep share one
   `_evict_inactive_users` so they cannot disagree.
+- That helper **sorts once and drops the prefix**. A `min()`-per-victim loop is
+  O(n·k) and measured at 66 s of blocking CPU for a table at 8× the cap — inside
+  the async `sweep()` the sweeper calls directly, so the whole bot freezes under
+  exactly the id-flood the bound exists to survive. `test_rate_limiter_bounds.py`
+  pins this with a clock budget, since no functional assertion can see it.
 - The RPS breaker reports **nothing** unless `GLOBAL_RPS_LIMIT > 0` or
   `GLOBAL_RATE_LIMIT` is on, and both ship disabled. Any code that consults it
   as its only pressure signal is dead on a default deployment; `stream.py`'s
@@ -196,15 +202,26 @@ detection needs progress-based reaping, which is not implemented.
 
 ## Shutdown budget
 
-The teardown steps share one `_SHUTDOWN_BUDGET_SECONDS` budget (10 s), with a
+The teardown steps share one `_SHUTDOWN_BUDGET_SECONDS` budget (8 s), with a
 per-step floor so a spent budget cannot turn `db.close()` into a 0 s timeout and
-record a failure that never happened. `cleanup_clients` is the exception: it
-stops each client individually at 10 s, so it gets **its own slice** (`shared=False`
-in `_teardown_plan`) rather than drawing on the shared pool — with a shared
-budget the grant is `min(cap, budget_left)` and scaling the cap achieves nothing.
-Worst case is `budget + shared_steps × floor + _CLIENT_STOP_MAX_SECONDS` = 28 s,
-inside the 30 s that Heroku, Render and Kubernetes allow; the import-time assert
-and `test_shutdown_budget.py` both hold it there.
+record a failure that never happened. `cleanup_clients` is the exception: it gets
+**its own slice** (`shared=False` in `_teardown_plan`) rather than drawing on the
+shared pool — with a shared budget the grant is `min(cap, budget_left)`, so a
+scaled cap achieves nothing. That slice is **flat**, not per-client: two hung
+clients would need 20 s and the rest of the teardown needs the remainder of 30 s.
+A healthy stop spends ~0.1 s per client, so 12 s is only ever approached when
+clients are genuinely stuck, and being cut there is a real failure worth
+reporting.
+
+Worst case is `budget + (shared_steps + app_runner) × floor + slice` = 27.5 s,
+inside the 30 s Heroku, Render and Kubernetes allow. Note the `_PRE_PLAN_FLOOR_STEPS`
+term: `app_runner.cleanup()` is budgeted through the same floor rule but runs
+outside `_teardown_plan`, so counting only the plan under-counts by a full floor.
+
+The four **boot-failure** handlers are bounded separately
+(`_BOOT_FAILURE_CANCEL_SECONDS + budget + steps × floor` = 22 s). They used to
+pass no deadline at all, which grants every step its full ceiling behind a
+30 s cancellation — an 82 s unwind. `test_shutdown_budget.py` holds both bounds.
 
 
 ## URL families

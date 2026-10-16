@@ -21,7 +21,7 @@ from pyrogram import idle
 from pyrogram.errors import MessageNotModified
 
 from Thunder import __version__
-from Thunder.bot import StreamBot, multi_clients, work_loads
+from Thunder.bot import StreamBot, work_loads
 from Thunder.bot.clients import (
     cleanup_clients,
     harden_session_files,
@@ -172,10 +172,12 @@ async def start_services():
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True)
         # the index-ensure task may already be scheduled -- stop it against a
-        # closing client BEFORE db.close
-        await _cancel_tasks(background_tasks, timeout=10)
-        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
-        await _safe_teardown_step(db.close, "database (boot failure)")
+        # closing client BEFORE db.close. Bounded: these paths used to allow
+        # 10-30s of cancellation plus every step's full ceiling.
+        bf = _boot_failure_deadline()
+        await _cancel_tasks(background_tasks, timeout=_BOOT_FAILURE_CANCEL_SECONDS)
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)", deadline=bf)
+        await _safe_teardown_step(db.close, "database (boot failure)", deadline=bf)
         # a failed boot must exit non-zero or container restart policies never fire.
         raise SystemExit(1) from e
 
@@ -185,10 +187,11 @@ async def start_services():
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         # index-ensure may be live already -- stop it before db.close
-        await _cancel_tasks(background_tasks, timeout=10)
-        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", cap=_client_stop_cap())
-        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
-        await _safe_teardown_step(db.close, "database (boot failure)")
+        bf = _boot_failure_deadline()
+        await _cancel_tasks(background_tasks, timeout=_BOOT_FAILURE_CANCEL_SECONDS)
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", deadline=bf)
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)", deadline=bf)
+        await _safe_teardown_step(db.close, "database (boot failure)", deadline=bf)
         raise SystemExit(1) from e
 
     await import_plugins()
@@ -201,13 +204,15 @@ async def start_services():
         print(f"   ✓ Request executor pool started ({len(executor_tasks)} workers)")
     except Exception as e:
         logger.error(f"   ✖ Failed to start request executor: {e}", exc_info=True)
-        await _cancel_tasks(background_tasks, timeout=30)
-        await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
-        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
-        await _safe_teardown_step(close_shortener, "shortener")
-        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", cap=_client_stop_cap())
-        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
-        await _safe_teardown_step(db.close, "database (boot failure)")
+        # six steps behind a 30s cancel was an 82s unwind against a 30s grace
+        bf = _boot_failure_deadline()
+        await _cancel_tasks(background_tasks, timeout=_BOOT_FAILURE_CANCEL_SECONDS)
+        await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", deadline=bf)
+        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", deadline=bf)
+        await _safe_teardown_step(close_shortener, "shortener", deadline=bf)
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", deadline=bf)
+        await _safe_teardown_step(StreamBot.stop, "bot (boot failure)", deadline=bf)
+        await _safe_teardown_step(db.close, "database (boot failure)", deadline=bf)
         raise SystemExit(1) from e
 
     print("   ▶ Starting Web Server initialization...")
@@ -235,13 +240,14 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
-        await _cancel_tasks(background_tasks, timeout=30)
+        bf = _boot_failure_deadline()
+        await _cancel_tasks(background_tasks, timeout=_BOOT_FAILURE_CANCEL_SECONDS)
         # touch buffer must flush BEFORE db.close, or _bulk_flush discards increments
-        await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
-        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
-        await _safe_teardown_step(close_shortener, "shortener")
-        await _safe_teardown_step(cleanup_clients, "clients", cap=_client_stop_cap())
-        await _safe_teardown_step(db.close, "database")
+        await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", deadline=bf)
+        await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", deadline=bf)
+        await _safe_teardown_step(close_shortener, "shortener", deadline=bf)
+        await _safe_teardown_step(cleanup_clients, "clients", deadline=bf)
+        await _safe_teardown_step(db.close, "database", deadline=bf)
         raise SystemExit(1) from e
 
     elapsed_time = time.monotonic() - start_time
@@ -293,39 +299,46 @@ async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
 #
 # docker-compose still gets 60s (stop_grace_period), which is comfortable.
 _MIN_PAAS_GRACE_SECONDS = 30.0
-# The shared budget covers ONLY the steps that are cheap in practice. It used to
+# The shared budget covers the graceful path's phases 1-3 (background-task wait,
+# app_runner.cleanup, stream drain) AND the four cheap teardown steps. It used to
 # be 20s and to cover the clients step too, which made the shared budget the
 # binding constraint there: `_safe_teardown_step` grants
-# min(ceiling, budget_left), so a 10s-per-client ceiling can never exceed the
-# remaining budget no matter how it is scaled. With 20s shared, two clients
-# needing 10s each consumed the whole pool that four other steps also draw from
-# and were cut anyway -- recorded as an error, exit 1, restart loop. The clients
-# step now has its own slice, sized below, and is NOT charged to this budget.
-_SHUTDOWN_BUDGET_SECONDS = 10.0
+# min(ceiling, budget_left), so a 10s-per-client ceiling could never exceed the
+# remaining budget no matter how it was scaled. Two clients needing 10s each
+# consumed the pool four other steps also draw from and were cut anyway --
+# recorded as an error, exit 1, restart loop. The clients step now has its own
+# slice, sized below, and is NOT charged to this budget.
+_SHUTDOWN_BUDGET_SECONDS = 8.0
 _TEARDOWN_STEP_SECONDS = 8.0
 _TEARDOWN_FLOOR_SECONDS = 1.5
-# Steps that draw from the shared budget. The clients step is deliberately not
-# in this count; see _SHUTDOWN_WORST_CASE_SECONDS.
+# Steps in _teardown_plan that draw on the shared budget. The clients step is
+# deliberately not in this count; it has its own slice.
 _TEARDOWN_STEP_COUNT = 4
 
-# cleanup_clients stops each client individually with a 10s timeout, so its cost
-# scales with the client count and a single shared cap always cuts the second
-# client. It gets its OWN slice of the shutdown window for that reason.
+# cleanup_clients stops each client individually with a 10s timeout, so a naive
+# per-client ceiling would scale with the client count. It CANNOT here: two
+# clients would need 20s, and the shared budget plus the floors need the rest of
+# the 30s. An earlier version computed min(12, n * 10), which made the scaling
+# silently decorative for every n >= 2 while the code and its tests still
+# claimed it scaled -- the ceiling always won.
 #
-# _CLIENT_STOP_MAX_SECONDS is what keeps that slice inside the grace period.
-# Sized down rather than the shared budget up, because the two are not
-# equivalent: the shared budget protects the touch flush, and cutting that loses
-# deltas, whereas this slice only has to cover a HEALTHY stop. A healthy stop
-# spends ~0.1s per client, so 12s is never approached by a working shutdown; it
-# is approached only when clients are genuinely hung, and being cut there is a
-# real failure worth reporting rather than a spurious one.
-_CLIENT_STOP_SECONDS = 10.0
-_CLIENT_STOP_MAX_SECONDS = 12.0
+# So this is a FLAT slice, sized for a healthy stop plus one stuck client. A
+# healthy stop spends ~0.1s per client, so 12s covers far more clients than any
+# deployment runs; it is approached only when clients are genuinely stuck, and
+# being cut there is a real failure worth reporting rather than a spurious one.
+_CLIENT_STOP_SECONDS = 12.0
 
+# Floors are granted even after the budget is spent, so the worst case is the
+# budget plus one floor for EVERY step that can be granted one -- not just the
+# plan's shared steps. app_runner.cleanup() is budgeted through _step_budget,
+# which follows the same max(..., FLOOR) rule, and it runs OUTSIDE
+# _teardown_plan, so counting only the plan's steps under-counted the bound by
+# a full floor.
+_PRE_PLAN_FLOOR_STEPS = 1  # app_runner.cleanup()
 _SHUTDOWN_WORST_CASE_SECONDS = (
     _SHUTDOWN_BUDGET_SECONDS
-    + _TEARDOWN_STEP_COUNT * _TEARDOWN_FLOOR_SECONDS
-    + _CLIENT_STOP_MAX_SECONDS
+    + (_TEARDOWN_STEP_COUNT + _PRE_PLAN_FLOOR_STEPS) * _TEARDOWN_FLOOR_SECONDS
+    + _CLIENT_STOP_SECONDS
 )
 
 assert _SHUTDOWN_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
@@ -334,24 +347,43 @@ assert _SHUTDOWN_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
     "the touch flush and db.close() run"
 )
 
+# The boot-failure handlers are bounded too. They used to call
+# _safe_teardown_step with no deadline, which made every step take its FULL
+# ceiling, behind a _cancel_tasks allowed 30s on two of the paths -- an 82s
+# worst case against a 30s grace, with the import assert above blind to it
+# because it only does arithmetic over constants and never looks at a call site.
+#
+# They share the budget and the floors, so their worst case is
+# cancel + budget + (steps * floor). They do NOT get the clients slice: a boot
+# failure already exits non-zero, so spending 12s on client shutdown buys
+# nothing, and being cut there costs no more than the exit already does.
+_BOOT_FAILURE_CANCEL_SECONDS = 5.0
+_BOOT_FAILURE_STEP_COUNT = 6  # the largest of the four paths
+_BOOT_FAILURE_WORST_CASE_SECONDS = (
+    _BOOT_FAILURE_CANCEL_SECONDS
+    + _SHUTDOWN_BUDGET_SECONDS
+    + _BOOT_FAILURE_STEP_COUNT * _TEARDOWN_FLOOR_SECONDS
+)
 
-def _client_stop_cap() -> float:
-    """Ceiling for cleanup_clients: 10s per client, bounded.
-
-    With a single client this is 10s -- more than the generic 8s step cap, and
-    that difference is the whole point: the generic cap was cutting a healthy
-    stop and reporting it as a failure. Still bounded so 40 clients cannot hold
-    the shutdown open indefinitely.
-    """
-    return min(
-        _CLIENT_STOP_MAX_SECONDS,
-        max(1, len(multi_clients)) * _CLIENT_STOP_SECONDS,
-    )
+assert _BOOT_FAILURE_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
+    f"a failed boot can take {_BOOT_FAILURE_WORST_CASE_SECONDS:.1f}s to unwind but "
+    f"the PaaS manifests only allow {_MIN_PAAS_GRACE_SECONDS:.0f}s -- the touch "
+    "flush and db.close() would be SIGKILLed"
+)
 
 
 def _budget_left(deadline: float) -> float:
     """Seconds remaining in the shared shutdown budget, floored at 0."""
     return max(deadline - asyncio.get_running_loop().time(), 0.0)
+
+
+def _boot_failure_deadline() -> float:
+    """Deadline for a boot-failure unwind.
+
+    These handlers used to pass no deadline at all, which made _safe_teardown_step
+    grant every step its FULL ceiling -- see _BOOT_FAILURE_WORST_CASE_SECONDS.
+    """
+    return asyncio.get_running_loop().time() + _SHUTDOWN_BUDGET_SECONDS
 
 
 def _step_budget(deadline: float) -> float:
@@ -389,9 +421,10 @@ def _teardown_plan() -> list[_Step]:
         _Step("rate limiter", rate_limiter.shutdown),
         _Step("touch buffer", drain_background_touch_tasks),
         _Step("shortener", close_shortener),
-        # 10s per client: its own slice, scaled by client count. Charging this
-        # to the shared budget is what made the scaling a no-op.
-        _Step("clients", cleanup_clients, _client_stop_cap(), shared=False),
+        # 10s per client is its own internal timeout; this flat slice is sized
+        # for a healthy stop plus one stuck client. Charging it to the shared
+        # budget is what made the old "scaled" ceiling inert.
+        _Step("clients", cleanup_clients, _CLIENT_STOP_SECONDS, shared=False),
         _Step("database", db.close),
     ]
 

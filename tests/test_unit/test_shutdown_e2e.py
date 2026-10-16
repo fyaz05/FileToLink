@@ -164,25 +164,57 @@ async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env,
 
 @pytest.mark.unit
 async def test_a_multi_client_stop_is_not_recorded_as_a_failure(shutdown_env, monkeypatch):
-    """cleanup_clients stops each client individually at 10s. Under the generic
-    8s step cap a healthy three-client stop was cut, recorded as an error, and
-    exited 1 -- which restarts a PaaS that was shutting down fine."""
-    monkeypatch.setattr(main_mod, "multi_clients", {0: object(), 1: object(), 2: object()})
+    """A healthy stop must exit 0.
 
+    cleanup_clients used to share the generic 8s step cap, which cut it and
+    recorded a failure that never happened -- restarting a PaaS that was
+    shutting down fine. It now has its own flat slice.
+
+    The previous version of this test inflated _SHUTDOWN_BUDGET_SECONDS to 30s,
+    so it passed because of a bigger budget rather than because of the slice.
+    Nothing is inflated here: the slice has to do the work on its own.
+    """
     waits = []
 
     async def slow_cleanup():
+        # three clients, each well under the slice
         for _ in range(3):
             waits.append(1)
             await asyncio.sleep(0.02)
 
     monkeypatch.setattr(main_mod, "cleanup_clients", slow_cleanup)
-    monkeypatch.setattr(main_mod, "_SHUTDOWN_BUDGET_SECONDS", 30.0)
+    # shrink the slice so the test proves the exemption, not the wall clock
+    monkeypatch.setattr(main_mod, "_CLIENT_STOP_SECONDS", 0.5)
 
     # no SystemExit: the point is that this stop is clean
     await main_mod.shutdown_services(background_tasks=[], app_runner=None)
 
     assert waits == [1, 1, 1], "cleanup_clients did not run to completion"
+
+
+@pytest.mark.unit
+async def test_a_clients_step_that_outlasts_its_slice_IS_reported(shutdown_env, monkeypatch):
+    """The other half, and the honest one.
+
+    The slice is flat: it cannot scale with the client count, because two hung
+    clients would need 20s and the rest of the teardown needs the remainder of
+    the platform's 30s. So a stop that genuinely exceeds it is cut, recorded,
+    and exits 1 -- which is correct, because it means clients are stuck.
+    """
+    monkeypatch.setattr(main_mod, "_CLIENT_STOP_SECONDS", 0.05)
+
+    async def stuck_cleanup():
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(main_mod, "cleanup_clients", stuck_cleanup)
+
+    with pytest.raises(SystemExit) as exc:
+        await main_mod.shutdown_services(background_tasks=[], app_runner=None)
+
+    assert exc.value.code == 1, (
+        "a clients step that outlasted its slice was not reported -- that is a "
+        "real failure and the restart policy should see it"
+    )
 
 
 @pytest.mark.unit

@@ -71,12 +71,6 @@ class FlagCache:
             self._inflight[key] = task
         return await asyncio.shield(task)
 
-    def _prune_inflight(self) -> None:
-        """Drop finished loader tasks; they can never be awaited usefully again."""
-        for key, task in list(self._inflight.items()):
-            if task.done():
-                self._inflight.pop(key, None)
-
     async def _load_and_store(
         self,
         key: Hashable,

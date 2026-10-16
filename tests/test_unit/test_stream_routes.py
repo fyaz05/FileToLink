@@ -9,6 +9,7 @@ from aiohttp.web import HTTPBadRequest, HTTPRequestRangeNotSatisfiable
 from Thunder.server.exceptions import InvalidHash
 from Thunder.server.stream_routes import (
     _is_activation_token,
+    _slot_release,
     _telegram_activate_url,
     build_content_disposition,
     parse_media_request,
@@ -264,6 +265,7 @@ class TestCanonicalDeliveryErrorLadder:
                 streamer=SimpleNamespace(),
                 client_id=0,
                 media_ref=1,
+                release_slot=_slot_release(0),
             )
 
     @pytest.mark.unit

@@ -71,9 +71,11 @@ _BATCH_DEADLINE_BASE = 30
 # FloodWait, and the resulting requeues stall a worker each.
 #
 # Capping the chunk count instead would mean dropping links, which is worse.
-# So the pause scales with the burst still to come and defers to the rate
-# limiter's breaker when it has real pressure to report. MESSAGE_DELAY stays as
-# the floor for a two-message batch.
+# So the pause scales with how many messages the batch will produce and takes
+# real pressure into account -- see _chunk_pause, which reads the limiter's
+# breaker AND its queue depth, because the breaker alone reports nothing unless
+# GLOBAL_RPS_LIMIT / GLOBAL_RATE_LIMIT are configured and both ship disabled.
+# MESSAGE_DELAY stays as the floor for a two-message batch.
 MESSAGE_DELAY = 0.5
 MAX_CHUNK_PAUSE_SECONDS = 4.0
 _CHUNK_PAUSE_REFERENCE_CHUNKS = 4

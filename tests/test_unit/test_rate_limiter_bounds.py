@@ -130,6 +130,68 @@ async def test_the_sweep_and_admission_agree_on_who_goes(limiter, monkeypatch):
 
 
 @pytest.mark.unit
+async def test_eviction_is_one_pass_not_one_per_victim(limiter, monkeypatch):
+    """O(n*k) vs O(n log n), measured rather than asserted about.
+
+    The min()-per-victim version was functionally correct -- every behavioural
+    test here passed with it -- and took 66 s of blocking CPU to evict 28672
+    entries, inside an async sweep() the sweeper calls directly. So the whole
+    bot freezes for a minute, under exactly the id-flood this bound exists to
+    survive. No functional assertion can see that; only the clock can.
+
+    The budget is 2 s against a correct runtime of ~0.05 s, so it is nowhere
+    near the point where a loaded CI box could fail it, while the O(n*k) form
+    is 30x over.
+    """
+    import time
+
+    monkeypatch.setattr(rl_mod, "MAX_TRACKED_USERS", 4096)
+    now = time.time()
+    for i in range(4096 * 8):
+        limiter.user_requests[i] = deque([now - (4096 * 8 - i) * 0.001])
+
+    started = time.perf_counter()
+    dropped = limiter._evict_inactive_users(4096)
+    elapsed = time.perf_counter() - started
+
+    assert dropped == 4096 * 7, f"evicted {dropped}, expected {4096 * 7}"
+    assert len(limiter.user_requests) == 4096
+    assert elapsed < 2.0, (
+        f"evicting {4096 * 7} entries took {elapsed:.1f}s -- that is the O(n*k) "
+        "min()-per-victim form, and sweep() runs it on the event loop"
+    )
+
+
+@pytest.mark.unit
+async def test_the_eviction_body_has_no_per_victim_loop():
+    """The same property structurally, so it is pinned even if the clock test
+    is skipped or the table happens to be small on some host.
+
+    Parsed rather than grepped: a naive "while" in the source also matches the
+    word in the docstring.
+    """
+    import ast
+    import inspect
+
+    func = next(
+        n
+        for n in ast.walk(ast.parse(inspect.getsource(rl_mod)))
+        if isinstance(n, ast.FunctionDef) and n.name == "_evict_inactive_users"
+    )
+    loops = [n for n in ast.walk(func) if isinstance(n, (ast.While, ast.comprehension))]
+    assert not loops, (
+        f"_evict_inactive_users contains {len(loops)} loop(s) at lines "
+        f"{[n.lineno for n in loops]}; it must sort once and drop the prefix"
+    )
+    sorts = [
+        n
+        for n in ast.walk(func)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "sorted"
+    ]
+    assert len(sorts) == 1, f"expected exactly one sorted() call, found {len(sorts)}"
+
+
+@pytest.mark.unit
 async def test_the_singleton_is_actually_using_the_constant(limiter, monkeypatch):
     """MAX_TRACKED_USERS was defined twice: a new 50_000 immediately shadowed by
     the pre-existing 4096 that sweep() uses. Ruff's F811 does not flag a plain

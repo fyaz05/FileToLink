@@ -469,7 +469,7 @@ async def _serve_media_response(
     streamer: ByteStreamer,
     client_id: int,
     media_ref: int | Message,
-    release_slot=None,
+    release_slot,
 ):
     file_size = int(file_info.get("file_size", 0) or 0)
     if file_size <= 0:
@@ -509,12 +509,11 @@ async def _serve_media_response(
         release_slot()
         return web.Response(status=206 if range_header else 200, headers=headers)
 
-    # Idempotent: the slot is given back by whichever of the generator's
-    # `finally`, the deadline watchdog, and the admission ladder gets there
-    # first. When the ladder owns the release we reuse its closure rather than
-    # minting a second one -- two closures would each decrement.
-    if release_slot is None:
-        release_slot = _slot_release(client_id)
+    # release_slot is REQUIRED, not defaulted to None. The ladder owns one
+    # closure per request and shares it with the body generator and the
+    # watchdog; minting a second here would decrement twice. A default of None
+    # advertised a mode that only worked for GET -- HEAD calls release_slot()
+    # before any fallback could run, so omitting it was a TypeError and a 500.
 
     body = _make_body(
         streamer,

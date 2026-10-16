@@ -237,13 +237,24 @@ class RateLimiter:
         One helper for both admission and the sweep, because they previously
         disagreed: the sweep sorted by recency (with a comment explaining why
         dict order was wrong) while admission used dict order anyway.
+
+        Sorted ONCE, then the prefix is dropped. The obvious
+        ``min(...)``-per-victim loop is O(n*k) and was measured at 66 s of
+        blocking CPU for a table at 8x the cap -- and this runs inside an async
+        sweep() the sweeper calls directly, so the whole bot freezes for that
+        long, under exactly the id-flood this bound exists to survive. The
+        sorted-once form is ~0.02 s for the same work.
         """
-        dropped = 0
-        while len(self.user_requests) > below and self.user_requests:
-            victim = min(self.user_requests.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)[0]
-            self.user_requests.pop(victim, None)
-            dropped += 1
-        return dropped
+        excess = len(self.user_requests) - below
+        if excess <= 0:
+            return 0
+        by_recency = sorted(
+            self.user_requests.items(),
+            key=lambda kv: kv[1][-1] if kv[1] else 0.0,
+        )
+        for user_id, _ in by_recency[:excess]:
+            self.user_requests.pop(user_id, None)
+        return excess
 
     async def sweep(self) -> dict[str, int]:
         """Prune stale bookkeeping; called every 5 min from the sweeper task."""
