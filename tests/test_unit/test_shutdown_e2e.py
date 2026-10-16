@@ -154,9 +154,35 @@ async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env,
     elapsed = loop.time() - started
 
     assert exc.value.code == 1, "a step that hung must be reported, not swallowed"
-    budget = main_mod._SHUTDOWN_BUDGET_SECONDS + 5 * main_mod._TEARDOWN_FLOOR_SECONDS
+    budget = (
+        main_mod._SHUTDOWN_BUDGET_SECONDS
+        + main_mod._TEARDOWN_STEP_COUNT * main_mod._TEARDOWN_FLOOR_SECONDS
+    )
     assert elapsed < budget + 2, f"shutdown took {elapsed:.1f}s, over the {budget:.0f}s bound"
     assert elapsed < 60, "shutdown outlived the container stop grace period"
+
+
+@pytest.mark.unit
+async def test_a_multi_client_stop_is_not_recorded_as_a_failure(shutdown_env, monkeypatch):
+    """cleanup_clients stops each client individually at 10s. Under the generic
+    8s step cap a healthy three-client stop was cut, recorded as an error, and
+    exited 1 -- which restarts a PaaS that was shutting down fine."""
+    monkeypatch.setattr(main_mod, "multi_clients", {0: object(), 1: object(), 2: object()})
+
+    waits = []
+
+    async def slow_cleanup():
+        for _ in range(3):
+            waits.append(1)
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(main_mod, "cleanup_clients", slow_cleanup)
+    monkeypatch.setattr(main_mod, "_SHUTDOWN_BUDGET_SECONDS", 30.0)
+
+    # no SystemExit: the point is that this stop is clean
+    await main_mod.shutdown_services(background_tasks=[], app_runner=None)
+
+    assert waits == [1, 1, 1], "cleanup_clients did not run to completion"
 
 
 @pytest.mark.unit

@@ -20,7 +20,7 @@ from pyrogram import idle
 from pyrogram.errors import MessageNotModified
 
 from Thunder import __version__
-from Thunder.bot import StreamBot, work_loads
+from Thunder.bot import StreamBot, multi_clients, work_loads
 from Thunder.bot.clients import (
     cleanup_clients,
     harden_session_files,
@@ -279,11 +279,52 @@ async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
 # instead of each taking its own generous timeout, but every teardown step
 # still gets a floor: a spent budget must not turn db.close() into a 0 s
 # timeout, which would record a failure that never happened and exit non-zero
-# on a perfectly healthy stop. Worst case is budget + steps * floor, which
-# docker-compose's stop_grace_period leaves room for.
-_SHUTDOWN_BUDGET_SECONDS = 40.0
+# on a perfectly healthy stop.
+#
+# The bound is _SHUTDOWN_BUDGET_SECONDS + steps * _TEARDOWN_FLOOR_SECONDS, and
+# it must fit the SMALLEST grace period we actually ship for, not compose's
+# comfortable one: Heroku, Render and Kubernetes all SIGKILL at 30s by default
+# and neither app.json nor render.yaml can raise it. A 40s budget x 2s floors
+# gave a 50s worst case that could not fit any of them, so a stop could be
+# killed before the touch flush ran -- the exact outcome this budget exists to
+# prevent. The assert below makes that structural: retune the constants and the
+# import fails rather than the deploy.
+#
+# docker-compose still gets 60s (stop_grace_period), which is comfortable.
+_MIN_PAAS_GRACE_SECONDS = 30.0
+_SHUTDOWN_BUDGET_SECONDS = 20.0
 _TEARDOWN_STEP_SECONDS = 8.0
-_TEARDOWN_FLOOR_SECONDS = 2.0
+_TEARDOWN_FLOOR_SECONDS = 1.5
+_TEARDOWN_STEP_COUNT = 5
+_SHUTDOWN_WORST_CASE_SECONDS = (
+    _SHUTDOWN_BUDGET_SECONDS + _TEARDOWN_STEP_COUNT * _TEARDOWN_FLOOR_SECONDS
+)
+
+assert _SHUTDOWN_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
+    f"shutdown can take {_SHUTDOWN_WORST_CASE_SECONDS:.1f}s but the PaaS manifests "
+    f"only allow {_MIN_PAAS_GRACE_SECONDS:.0f}s -- a stop would be SIGKILLed before "
+    "the touch flush and db.close() run"
+)
+
+# cleanup_clients is 10s PER CLIENT, so a fixed cap cuts a healthy stop as soon
+# as there is more than one client -- recorded as an error, exit 1, and the PaaS
+# restarts a container that was shutting down fine. Scale its cap instead.
+_CLIENT_STOP_SECONDS = 10.0
+_CLIENT_STOP_MAX_SECONDS = 60.0
+
+
+def _client_stop_cap() -> float:
+    """Ceiling for cleanup_clients: 10s per client, bounded.
+
+    With a single client this is 10s -- more than the generic 8s step cap, and
+    that difference is the whole point: the generic cap was cutting a healthy
+    stop and reporting it as a failure. Still bounded so 40 clients cannot hold
+    the shutdown open indefinitely.
+    """
+    return min(
+        _CLIENT_STOP_MAX_SECONDS,
+        max(1, len(multi_clients)) * _CLIENT_STOP_SECONDS,
+    )
 
 
 def _budget_left(deadline: float) -> float:
@@ -297,10 +338,46 @@ def _step_budget(deadline: float) -> float:
     return min(_TEARDOWN_STEP_SECONDS, max(_budget_left(deadline), _TEARDOWN_FLOOR_SECONDS))
 
 
+def _teardown_plan() -> list[tuple[str, object, float | None]]:
+    """The ordered teardown steps, with the per-step ceiling for each.
+
+    Declarative so the ordering AND each step's cap are inspectable: the
+    clients step needs a cap scaled by the client count, and a test that only
+    watched the clock could not tell a correct cap from one that was never
+    wired up (the scaled cap being far larger than any test's patience).
+    Order matters: the touch flush must precede db.close().
+    """
+    return [
+        ("rate limiter", rate_limiter.shutdown, None),
+        ("touch buffer", drain_background_touch_tasks, None),
+        ("shortener", close_shortener, None),
+        # 10s per client, so the generic 8s ceiling cuts a healthy multi-client
+        # stop and records a failure that never happened
+        ("clients", cleanup_clients, _client_stop_cap()),
+        ("database", db.close, None),
+    ]
+
+
 async def _safe_teardown_step(
-    step, name: str, errors: list | None = None, deadline: float | None = None
+    step,
+    name: str,
+    errors: list | None = None,
+    deadline: float | None = None,
+    *,
+    cap: float | None = None,
 ):
-    budget = _TEARDOWN_STEP_SECONDS if deadline is None else _step_budget(deadline)
+    """Run one teardown step on its share of the budget.
+
+    ``cap`` overrides the per-step ceiling for a step whose own work scales with
+    something the budget cannot know -- cleanup_clients stops every client
+    individually, so a fixed 8s cut a perfectly healthy multi-client stop and
+    turned it into a recorded failure.
+    """
+    ceiling = _TEARDOWN_STEP_SECONDS if cap is None else cap
+    if deadline is None:
+        budget = ceiling
+    else:
+        budget = min(ceiling, max(_budget_left(deadline), _TEARDOWN_FLOOR_SECONDS))
     try:
         await asyncio.wait_for(step(), timeout=budget)
     except asyncio.CancelledError as e:
@@ -363,12 +440,8 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         logger.warning(f"Drain deadline hit with {remaining} stream(s) still active.")
 
     # 4. ordered teardown
-    await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", errors, deadline)
-    await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", errors, deadline)
-    await _safe_teardown_step(close_shortener, "shortener", errors, deadline)
-    await _safe_teardown_step(cleanup_clients, "clients", errors, deadline)
-
-    await _safe_teardown_step(db.close, "database", errors, deadline)
+    for name, step, cap in _teardown_plan():
+        await _safe_teardown_step(step, name, errors, deadline, cap=cap)
     if _budget_left(deadline) <= 0:
         logger.warning("Shutdown budget exhausted; teardown steps ran on the floor timeout.")
     if not errors:
