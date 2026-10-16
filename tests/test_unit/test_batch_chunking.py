@@ -264,6 +264,102 @@ async def test_a_failed_group_chunk_is_counted(monkeypatch):
     assert dm_failed == 0, "a private chat has no DM mirror"
 
 
+# --- pacing ---------------------------------------------------------------
+#
+# Length-based chunking raised messages-per-batch 1x-4x, so the flat 0.5s
+# pause turned a 50-file CJK batch into 20-26 messages in ~7s -- which is what
+# trips FloodWait, and each resulting requeue stalls a worker.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("total", "floor_multiple"),
+    [(1, 1.0), (4, 1.0), (8, 2.0), (13, 2.0)],
+)
+def test_the_pause_scales_with_the_burst(total, floor_multiple):
+    pause = stream._chunk_pause(total)
+    assert pause >= stream.MESSAGE_DELAY * floor_multiple, (
+        f"a {total}-chunk batch only pauses {pause}s between messages"
+    )
+    assert pause <= stream.MAX_CHUNK_PAUSE_SECONDS
+
+
+@pytest.mark.unit
+def test_a_short_batch_still_paces_at_the_floor():
+    assert stream._chunk_pause(1) == stream.MESSAGE_DELAY
+
+
+@pytest.mark.unit
+def test_the_pause_is_capped():
+    """An unbounded pause leaves the user watching 'Processing...' long after
+    the links were computed."""
+    assert stream._chunk_pause(1000) <= stream.MAX_CHUNK_PAUSE_SECONDS
+
+
+@pytest.mark.unit
+def test_a_huge_breaker_backoff_is_still_capped(monkeypatch):
+    """The burst scaling already bounds itself at 8 chunks, so the explicit cap
+    only has teeth against the breaker -- which is the one input that can be
+    arbitrarily large."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=1.0, retry_after=lambda: 86400.0)
+    )
+    assert stream._chunk_pause(1) == stream.MAX_CHUNK_PAUSE_SECONDS, (
+        "a breaker backoff of a whole day would leave the request hanging"
+    )
+
+
+@pytest.mark.unit
+def test_the_pause_defers_to_the_breaker(monkeypatch):
+    """When the limiter is already shedding load, our own schedule does not get
+    to decide."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=0.5, retry_after=lambda: 3.0)
+    )
+    assert stream._chunk_pause(1) == 3.0, "the breaker wants 3s and the pause ignored it"
+
+
+@pytest.mark.unit
+def test_a_healthy_breaker_does_not_slow_us_down(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=0.0, retry_after=lambda: 0.0)
+    )
+    assert stream._chunk_pause(1) == stream.MESSAGE_DELAY
+
+
+@pytest.mark.unit
+async def test_delivery_uses_the_scaled_pause(monkeypatch):
+    """The pacing must be wired into the loop, not merely implemented."""
+    pauses: list[float] = []
+
+    async def record(seconds):
+        pauses.append(seconds)
+
+    _wire(monkeypatch, reply=lambda t: None, send=lambda t, k: None)
+    monkeypatch.setattr(stream.asyncio, "sleep", record)
+
+    links = [link_for("a" * 200, i) for i in range(90)]
+    _chat_failed, _dm_failed, total = await stream._deliver_chunks(
+        None, _msg(stream.enums.ChatType.PRIVATE), links
+    )
+
+    assert total > 3, f"need several chunks to exercise the pacing, got {total}"
+    assert len(pauses) == total - 1, "a pause was expected between every pair of chunks"
+    assert all(p > stream.MESSAGE_DELAY for p in pauses), (
+        f"a large batch was still paced at the 0.5s floor: {pauses}"
+    )
+    assert len(set(pauses)) == 1, (
+        f"the pause decayed as the batch drained ({pauses}) -- the limiter's "
+        "window fills progressively, so the tail must not go faster"
+    )
+
+
 @pytest.mark.unit
 async def test_a_failed_dm_chunk_is_counted_separately(monkeypatch):
     async def boom(text, kwargs):

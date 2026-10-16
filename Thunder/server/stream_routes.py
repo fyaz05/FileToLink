@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import re
 import secrets
@@ -309,6 +310,126 @@ async def _admission_ladder(client_id: int, label: str):
         raise
 
 
+# A stream slot is released in the body generator's `finally`. If the client
+# opens the connection and then stops reading, the transport's write buffer
+# fills, the generator is suspended at `yield` forever, and `finally` never
+# runs: the slot leaks permanently. EXECUTOR_WORKERS of those and the client
+# 503s forever with no in-flight request to show for it.
+#
+# Bounding the total transfer time caps the leak. It is a deadline, not a
+# stall detector -- a prompt answer to "this client is not reading" needs
+# progress-based reaping of live transfers, which is a larger change than this
+# branch should absorb. Generous enough not to cut a legitimate slow download:
+# the deadline only bites on a socket that has been idle for its whole budget.
+_STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND = 64 * 1024
+_STREAM_MIN_SECONDS = 120.0
+_STREAM_MAX_SECONDS = 1800.0
+
+
+def _stream_deadline_seconds(file_size: int) -> float:
+    """How long this transfer may take before the slot is reclaimed."""
+    need = max(0.0, file_size) / _STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND
+    return min(_STREAM_MAX_SECONDS, max(_STREAM_MIN_SECONDS, need))
+
+
+async def _reclaim_slot_when_stalled(completed, deadline_seconds, release, body):
+    """Give the slot back if the transfer is still running at the deadline.
+
+    A watchdog rather than a timeout inside the body generator: a stalled
+    reader leaves the generator suspended at a `yield`, so a timeout scoped to
+    the generator can never fire -- the consumer's await is what is pending, and
+    cancelling that task unwinds nothing inside the generator. A separate task
+    does not care where the generator is sitting.
+
+    Returns when `completed` is set (the stream finished normally) or when this
+    task is cancelled by the generator's own cleanup.
+    """
+    try:
+        await asyncio.wait_for(completed.wait(), timeout=deadline_seconds)
+        return
+    except TimeoutError:
+        pass
+    except asyncio.CancelledError:
+        return
+    release()
+    with contextlib.suppress(asyncio.CancelledError, RuntimeError):
+        await body.aclose()
+
+
+def _slot_release(client_id: int):
+    """An idempotent release of one admission slot.
+
+    Two paths give the slot back -- the body generator's `finally` and the
+    stall watchdog -- and either may get there first. Releasing twice drives
+    the counter negative, which makes select_optimal_client believe there is
+    spare capacity; that is worse than the leak this exists to prevent. So the
+    release is made once, here, and both paths call it.
+    """
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        work_loads[client_id] -= 1
+
+    return release
+
+
+def _make_body(streamer, media_ref, start, content_length, release_slot, deadline_seconds):
+    """Build the response body generator and its slot watchdog.
+
+    Returned separately from the Response so the streaming path can be driven
+    directly -- aiohttp wraps the generator in a payload and it is no longer
+    iterable from outside, which is exactly the object whose stalled state we
+    need to test.
+    """
+    completed = asyncio.Event()
+    holder: dict = {}
+
+    async def stream_generator():
+        try:
+            bytes_sent = 0
+            bytes_to_skip = start % CHUNK_SIZE
+
+            async for chunk in streamer.stream_file(
+                media_ref,
+                offset=start,
+                limit=content_length,
+            ):
+                if bytes_to_skip > 0:
+                    if len(chunk) <= bytes_to_skip:
+                        bytes_to_skip -= len(chunk)
+                        continue
+                    chunk = chunk[bytes_to_skip:]
+                    bytes_to_skip = 0
+
+                remaining = content_length - bytes_sent
+                if len(chunk) > remaining:
+                    chunk = chunk[:remaining]
+
+                if chunk:
+                    yield chunk
+                    bytes_sent += len(chunk)
+
+                if bytes_sent >= content_length:
+                    break
+        finally:
+            completed.set()
+            watchdog = holder.get("task")
+            if watchdog is not None and not watchdog.done():
+                watchdog.cancel()
+            release_slot()
+
+    body = stream_generator()
+    holder["task"] = asyncio.create_task(
+        _reclaim_slot_when_stalled(completed, deadline_seconds, release_slot, body),
+        name="stream_slot_watchdog",
+    )
+    return body
+
+
 async def _serve_media_response(
     request: web.Request,
     *,
@@ -355,39 +476,20 @@ async def _serve_media_response(
         work_loads[client_id] -= 1
         return web.Response(status=206 if range_header else 200, headers=headers)
 
-    async def stream_generator():
-        try:
-            bytes_sent = 0
-            bytes_to_skip = start % CHUNK_SIZE
+    # Idempotent: the slot is given back by whichever of the generator's
+    # `finally` and the deadline watchdog gets there first.
+    release_slot = _slot_release(client_id)
 
-            async for chunk in streamer.stream_file(
-                media_ref,
-                offset=start,
-                limit=content_length,
-            ):
-                if bytes_to_skip > 0:
-                    if len(chunk) <= bytes_to_skip:
-                        bytes_to_skip -= len(chunk)
-                        continue
-                    chunk = chunk[bytes_to_skip:]
-                    bytes_to_skip = 0
-
-                remaining = content_length - bytes_sent
-                if len(chunk) > remaining:
-                    chunk = chunk[:remaining]
-
-                if chunk:
-                    yield chunk
-                    bytes_sent += len(chunk)
-
-                if bytes_sent >= content_length:
-                    break
-        finally:
-            work_loads[client_id] -= 1
-
-    return web.Response(
-        status=206 if range_header else 200, body=stream_generator(), headers=headers
+    body = _make_body(
+        streamer,
+        media_ref,
+        start,
+        content_length,
+        release_slot,
+        _stream_deadline_seconds(content_length),
     )
+
+    return web.Response(status=206 if range_header else 200, body=body, headers=headers)
 
 
 @routes.get("/", allow_head=True)

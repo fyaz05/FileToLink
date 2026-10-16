@@ -49,7 +49,7 @@ from Thunder.utils.messages import (
     TELEGRAM_MAX_UNITS,
     telegram_len,
 )
-from Thunder.utils.rate_limiter import handle_rate_limited_request
+from Thunder.utils.rate_limiter import handle_rate_limited_request, rate_limiter
 from Thunder.utils.safe_call import (
     delete_safe,
     edit_safe,
@@ -61,8 +61,22 @@ from Thunder.vars import Var
 
 BATCH_SIZE = 10
 BATCH_UPDATE_INTERVAL = 5
-MESSAGE_DELAY = 0.5
 _BATCH_DEADLINE_BASE = 30
+
+# Pause between batch-link messages.
+#
+# A flat 0.5s was a guess, and length-based chunking made it wrong: 50 files
+# whose names are CJK or emoji need 10-13 chunks, and each chunk is a group
+# reply PLUS a DM mirror -- 20-26 messages in ~7 seconds. That is what trips
+# FloodWait, and the resulting requeues stall a worker each.
+#
+# Capping the chunk count instead would mean dropping links, which is worse.
+# So the pause scales with the burst still to come and defers to the rate
+# limiter's breaker when it has real pressure to report. MESSAGE_DELAY stays as
+# the floor for a two-message batch.
+MESSAGE_DELAY = 0.5
+MAX_CHUNK_PAUSE_SECONDS = 4.0
+_CHUNK_PAUSE_REFERENCE_CHUNKS = 4
 
 # Room left for everything that is not a link, so a chunk that measures
 # _LINK_CHUNK_UNITS still fits inside one message.
@@ -595,6 +609,21 @@ async def process_single(
         return None
 
 
+def _chunk_pause(total_chunks: int) -> float:
+    """Seconds to wait before each chunk message.
+
+    Scales with how MANY messages this batch will produce, not how many are
+    left: the limiter's window fills progressively, so decaying the pause as
+    the batch drains would send the tail faster than the head -- backwards.
+    Defers to the breaker when it already has pressure to report.
+    """
+    scaled = MESSAGE_DELAY * max(1.0, min(total_chunks, 8) / _CHUNK_PAUSE_REFERENCE_CHUNKS)
+    breaker = rate_limiter.breaker
+    if breaker.rate > 0:
+        scaled = max(scaled, breaker.retry_after())
+    return min(MAX_CHUNK_PAUSE_SECONDS, scaled)
+
+
 async def _deliver_chunks(bot: Client, msg: Message, links: list[str]) -> tuple[int, int, int]:
     """Send the batch links, mirroring each chunk to the requester's DM.
 
@@ -633,7 +662,7 @@ async def _deliver_chunks(bot: Client, msg: Message, links: list[str]) -> tuple[
                 logger.error(f"Error sending DM in batch: {e}", exc_info=True)
                 dm_failed += 1
         if idx + 1 < len(chunks):
-            await asyncio.sleep(MESSAGE_DELAY)
+            await asyncio.sleep(_chunk_pause(len(chunks)))
     return chat_failed, dm_failed, len(chunks)
 
 
