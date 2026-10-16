@@ -18,8 +18,6 @@ from Thunder.utils.messages import (
     MSG_BUTTON_GET_HELP,
     MSG_BUTTON_GITHUB,
     MSG_BUTTON_JOIN_CHANNEL,
-    MSG_ERROR_BROADCAST_INSTRUCTION,
-    MSG_ERROR_BROADCAST_RESTART,
     MSG_ERROR_CALLBACK_UNSUPPORTED,
     MSG_ERROR_CLOSE_NOT_ALLOWED,
     MSG_ERROR_UNEXPECTED,
@@ -121,29 +119,6 @@ async def about_callback(client: Client, callback_query: CallbackQuery):
         )
     except Exception as e:
         logger.debug(f"Could not edit about panel: {e}")
-
-
-@StreamBot.on_callback_query(filters.regex(r"^restart_broadcast$"))
-@guard_callback
-async def restart_broadcast_callback(client: Client, callback_query: CallbackQuery):
-    if not await owner_only(client, callback_query):
-        return
-    await answer_safe(callback_query, MSG_ERROR_BROADCAST_RESTART, show_alert=True)
-    buttons = [
-        [
-            InlineKeyboardButton(MSG_BUTTON_GET_HELP, callback_data="help_command"),
-            InlineKeyboardButton(MSG_BUTTON_CLOSE, callback_data="close_panel"),
-        ]
-    ]
-    try:
-        await edit_safe(
-            callback_query.message,
-            MSG_ERROR_BROADCAST_INSTRUCTION,
-            reply_markup=InlineKeyboardMarkup(buttons),  # type: ignore[arg-type]
-            disable_web_page_preview=True,
-        )
-    except Exception as e:
-        logger.debug(f"Could not edit restart-broadcast panel: {e}")
 
 
 @StreamBot.on_callback_query(filters.regex(r"^close_panel$"))

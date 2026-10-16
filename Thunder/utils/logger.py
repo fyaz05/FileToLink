@@ -55,15 +55,12 @@ def hash_path_token(token: str) -> str:
 
 
 class RedactingFormatter(logging.Formatter):
-    def __init__(self, fmt: str, redact: bool = True):
-        super().__init__(fmt)
-        self._redact = redact
+    """Always redacts. Both call sites want it, so there is no off switch to
+    forget -- a formatter that skipped redaction would leak BOT_TOKEN and the
+    Mongo URI straight into the log file."""
 
     def format(self, record: logging.LogRecord) -> str:
-        message = super().format(record)
-        if self._redact:
-            message = redact_secrets(message)
-        return message
+        return redact_secrets(super().format(record))
 
 
 class JsonFormatter(logging.Formatter):

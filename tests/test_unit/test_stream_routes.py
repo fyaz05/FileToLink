@@ -184,9 +184,10 @@ class TestCanonicalDeliveryErrorLadder:
         from Thunder.server.exceptions import TelegramUnavailable
 
         deleted: list[dict] = []
+        secret = "FloodWait-SECRET-xyz-987"
 
         async def get_message(_ref):
-            raise TelegramUnavailable("FloodWait exhausted")
+            raise TelegramUnavailable(secret)
 
         async def get_file_by_hash(_h, raise_on_error=False):
             return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
@@ -208,6 +209,10 @@ class TestCanonicalDeliveryErrorLadder:
         assert exc.value.headers.get("Retry-After") == "5"
         assert deleted == []  # transient error must NOT destroy the record
         assert stream_routes.work_loads == {0: 0}  # admission slot released
+        # 503 bodies are constant strings: the exception text carries internal
+        # state (FloodWait values, chat ids) and must never reach the client
+        assert secret not in exc.value.text
+        assert exc.value.text == "Telegram is temporarily unavailable; please retry shortly."
 
     @pytest.mark.unit
     async def test_true_absence_self_heals_and_maps_to_404(self, monkeypatch):
@@ -310,43 +315,3 @@ class TestAdmissionControl:
         assert exc.value.headers.get("Retry-After") == str(
             stream_routes.OVERLOAD_RETRY_AFTER_SECONDS
         )
-
-
-class TestConstantErrorBodies:
-    """503 bodies are constant strings: the exception text carries internal
-    state (FloodWait values, chat ids) and must never reach the client."""
-
-    @staticmethod
-    def _request():
-        return SimpleNamespace(match_info={"secure_hash": "a" * 32})
-
-    @pytest.mark.unit
-    async def test_503_body_hides_exception_text(self, monkeypatch):
-        import Thunder.server.stream_routes as stream_routes
-        from Thunder.server.exceptions import TelegramUnavailable
-
-        secret = "FloodWait-SECRET-xyz-987"
-
-        async def get_message(_ref):
-            raise TelegramUnavailable(secret)
-
-        async def get_file_by_hash(_h, raise_on_error=False):
-            return {"file_unique_id": "u1", "canonical_message_id": 123, "file_size": 10}
-
-        async def forget_stale_record(record):
-            return None
-
-        monkeypatch.setattr(stream_routes, "get_file_by_hash", get_file_by_hash)
-        monkeypatch.setattr(
-            stream_routes,
-            "select_optimal_client",
-            lambda: (0, SimpleNamespace(get_message=get_message)),
-        )
-        monkeypatch.setattr(stream_routes, "forget_stale_record", forget_stale_record)
-        monkeypatch.setattr(stream_routes, "work_loads", {0: 0})
-
-        with pytest.raises(web.HTTPServiceUnavailable) as exc:
-            await stream_routes.canonical_media_delivery(self._request())
-        assert secret not in exc.value.text
-        assert exc.value.text == "Telegram is temporarily unavailable; please retry shortly."
-        assert exc.value.headers.get("Retry-After") == "5"

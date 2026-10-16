@@ -25,10 +25,8 @@ def _load_env_layers() -> None:
         return
     merged: dict[str, str | None] = {}
     for path in ("config.env", "config.env.local"):
-        try:
-            merged.update(dotenv_values(path))
-        except OSError as e:
-            logger.warning(f"Could not read {path}: {e}")
+        # dotenv_values swallows missing/unreadable files and returns {}
+        merged.update(dotenv_values(path))
     for key, value in merged.items():
         if value is not None:
             os.environ.setdefault(key, value)

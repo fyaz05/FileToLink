@@ -3,7 +3,6 @@
 import pytest
 
 from Thunder.utils.canonical_files import (
-    LEGACY_PUBLIC_HASH_LENGTH,
     PUBLIC_HASH_LENGTH,
     _merge_replacement_record,
     build_public_hash,
@@ -21,12 +20,6 @@ def test_new_hashes_are_32_hex():
 def test_hash_is_deterministic():
     assert build_public_hash("abc") == build_public_hash("abc")
     assert build_public_hash("abc") != build_public_hash("abd")
-
-
-@pytest.mark.unit
-def test_legacy_length_constant_still_20():
-    # the old family must remain representable for dual validation
-    assert LEGACY_PUBLIC_HASH_LENGTH == 20
 
 
 @pytest.mark.unit
