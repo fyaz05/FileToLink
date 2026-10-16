@@ -18,7 +18,7 @@ from Thunder.utils.bot_utils import (
     notify_own,
     reply_user_err,
 )
-from Thunder.utils.canonical_files import get_or_create_canonical_file
+from Thunder.utils.canonical_files import IngestContended, get_or_create_canonical_file
 from Thunder.utils.database import db
 from Thunder.utils.decorators import preflight
 from Thunder.utils.flag_cache import flags
@@ -471,6 +471,10 @@ async def channel_receive_handler(bot: Client, msg: Message):
                     f"Error editing reply markup for message {message.id}: {e}", exc_info=True
                 )
                 await send_link(message, links)
+        except IngestContended:
+            # must reach the rate limiter, which requeues instead of letting
+            # this handler occupy an executor worker until the claim TTL
+            raise
         except Exception as e:
             logger.error(
                 f"Error in _actual_channel_receive_handler for message {message.id}: {e}",
@@ -577,6 +581,9 @@ async def process_single(
         if status_msg:
             await delete_safe(status_msg)
         return links
+    except IngestContended:
+        # reach the rate limiter so it can requeue; see _actual_channel_receive_handler
+        raise
     except Exception as e:
         logger.error(f"Error processing single file for message {file_msg.id}: {e}", exc_info=True)
         if status_msg:
@@ -736,7 +743,17 @@ async def process_batch(
         logger.debug(f"Could not update batch status message: {e}")
 
     workers = [asyncio.create_task(worker(), name=f"batch_worker_{i}") for i in range(worker_count)]
-    await asyncio.gather(*workers)
+    try:
+        await asyncio.gather(*workers)
+    except BaseException:
+        # process_single used to swallow everything, so gather never saw an
+        # exception. It can now (IngestContended), and gather propagates the
+        # first one while leaving its siblings running -- orphaned tasks that
+        # keep mutating results and still own the status message.
+        for w in workers:
+            w.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        raise
 
     failed = counters["failed"]
     processed = sum(1 for r in results.values() if r)

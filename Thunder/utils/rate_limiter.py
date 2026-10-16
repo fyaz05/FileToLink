@@ -18,6 +18,7 @@ from pyrogram import Client
 from pyrogram.errors import FloodWait, RPCError
 from pyrogram.types import Message
 
+from Thunder.utils.canonical_files import IngestContended
 from Thunder.utils.logger import logger
 from Thunder.utils.messages import (
     MSG_RATE_LIMIT_DROPPED,
@@ -32,6 +33,10 @@ from Thunder.vars import Var
 # max FloodWait requeues before a request is dropped and the user notified;
 # breaker/user-limit requeues are bounded by their own wait math instead
 MAX_REQUEST_ATTEMPTS = 5
+# Contention is not an error: the other worker usually finishes. But a crashed
+# worker's claim outlives the TTL with nothing to show for it, so this must be
+# bounded too or the user waits forever on a file that will never appear.
+MAX_CONTENDED_ATTEMPTS = 20
 # Bounded bookkeeping
 MAX_TRACKED_USERS = 4096
 MAX_TRACKED_FILES = 1024
@@ -405,6 +410,26 @@ class RateLimiter:
                 )
                 file_times.append(processing_time)
 
+        except IngestContended as e:
+            # allowed: pool path -- another worker holds the ingest claim for
+            # this exact file and is producing the record we want. Requeue
+            # instead of sleeping: the alternative is occupying a worker for
+            # the claim TTL, and the pool has only EXECUTOR_WORKERS of those.
+            # A separate counter from FloodWait's, so one cannot mask the other.
+            attempts = request_data.get("contended_attempts", 0) + 1
+            request_data["contended_attempts"] = attempts
+            if attempts > MAX_CONTENDED_ATTEMPTS:
+                logger.warning(
+                    f"Dropping request for user {user_id} after {attempts} ingest "
+                    f"contention requeues; {e.file_unique_id} never appeared."
+                )
+                await self._notify_drop(request_data)
+            else:
+                logger.debug(
+                    f"Ingest claim held elsewhere for {e.file_unique_id}; "
+                    f"requeueing for user {user_id} (attempt {attempts})."
+                )
+                await self._requeue_request(request_data, queue_type, delay=max(e.retry_after, 1.0))
         except FloodWait as e:
             # allowed: pool path -- tg_call already retried inside the queued
             # handler, so requeue with an attempt counter instead of stalling a worker.

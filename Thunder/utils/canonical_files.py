@@ -19,20 +19,47 @@ from Thunder.vars import Var
 # new hashes are 32 hex chars; legacy 20-char hashes stay valid forever.
 PUBLIC_HASH_LENGTH = 32
 LEGACY_PUBLIC_HASH_LENGTH = 20
+
+
+class IngestContended(Exception):
+    """Another worker holds the ingest claim for this file.
+
+    Raised instead of sleeping on it, so the caller can requeue rather than
+    occupy an executor worker until the claim TTL expires. Carries how long to
+    wait before the record is likely to exist.
+    """
+
+    def __init__(self, file_unique_id: str, retry_after: float) -> None:
+        super().__init__(f"ingest claim held elsewhere for {file_unique_id}")
+        self.file_unique_id = file_unique_id
+        self.retry_after = retry_after
+
+
 _CACHE_TTL_SECONDS = 600
 _CACHE_MAX_ITEMS = 4096
 # No heartbeat while copy_media runs, so this must outlast the slowest copy:
 # a claim that expires mid-upload is stolen and both workers copy the file.
 # The owner token still protects the release, just not the duplicate copy.
 _INGEST_CLAIM_TTL_SECONDS = 900
-# A crashed worker's claim blocks the file for the whole TTL, and
-# _wait_for_other_worker_canonical_record only exits early once the claim is
-# actually gone -- so the retry budget has to cover the TTL, or a client gives
-# up with "max ingest retries exhausted" while a stale claim is still holding
-# the file. Pinned by test_canonical_claim.
-_INGEST_CLAIM_WAIT_SECONDS = 90
-_INGEST_CLAIM_POLL_SECONDS = 0.5
-_MAX_INGEST_RETRIES = 10
+# A crashed worker's claim blocks the file for the whole TTL. Waiting that out
+# in-handler means occupying an executor worker for up to
+# _MAX_INGEST_RETRIES * _INGEST_CLAIM_WAIT_SECONDS, and the pool only has
+# EXECUTOR_WORKERS of those -- five requests for the same file used to wedge the
+# whole ingest queue for a quarter of an hour.
+#
+# So the handler does NOT wait the TTL out. It polls briefly, and if the other
+# worker is still working it raises IngestContended, which the rate limiter
+# turns into a requeue: the worker is freed immediately and the request comes
+# back later, when the record the other worker is producing will exist. An
+# earlier version of this comment demanded that the retry budget cover the TTL
+# with margin -- that is exactly backwards. Waiting longer while holding a
+# worker is strictly worse than giving up the worker and requeueing.
+_INGEST_CLAIM_WAIT_SECONDS = 20
+# Polling at 0.5s made each poll two Mongo reads plus a Telegram get_messages
+# when a stale record exists -- ~3.6k reads and 1.8k RPCs per stuck request,
+# and the RPCs could themselves raise the FloodWait the poll is waiting out.
+_INGEST_CLAIM_POLL_SECONDS = 2.0
+_MAX_INGEST_RETRIES = 3
 _CACHE_PRUNE_INTERVAL = 50
 
 # bounded touch buffer; overflow drops (counted), flush is one BulkWrite.
@@ -324,9 +351,15 @@ async def drain_background_touch_tasks() -> None:
 async def update_cached_file_id(record: dict[str, Any], file_id: str) -> None:
     if not record.get("public_hash") or not file_id:
         return
+    # persist first, then cache. The other order left the cache holding an id
+    # Mongo does not know if the write failed; nothing reads record["file_id"]
+    # for delivery today (custom_dl streams the vault Message, and
+    # stream_routes only uses it to decide a refresh is needed), so the blast
+    # radius was nil -- but ordering it correctly costs nothing and the cache
+    # write is free to redo.
+    await db.update_file_id(record["public_hash"], file_id, raise_on_error=True)
     record["file_id"] = file_id
     _remember(record)
-    await db.update_file_id(record["public_hash"], file_id, raise_on_error=True)
 
 
 async def _fetch_canonical_message(record: dict[str, Any], client) -> Message | None:
@@ -459,81 +492,97 @@ async def get_or_create_canonical_file(
     if not file_unique_id:
         return None, None, False
 
-    async with file_ingest_lock(file_unique_id):
-        for _attempt in range(_MAX_INGEST_RETRIES):
-            if _attempt > 0:
-                await asyncio.sleep(min(0.5 * (2 ** (_attempt - 1)), 5.0))
+    for _attempt in range(_MAX_INGEST_RETRIES):
+        if _attempt > 0:
+            await asyncio.sleep(min(0.5 * (2 ** (_attempt - 1)), 5.0))
 
-            reusable_record, stale_record = await _get_reusable_canonical_record(
-                file_unique_id, client
-            )
-            if reusable_record:
-                schedule_touch_file_record(reusable_record, reused=True)
-                return reusable_record, None, True
+        reusable_record, _ = await _get_reusable_canonical_record(file_unique_id, client)
+        if reusable_record:
+            schedule_touch_file_record(reusable_record, reused=True)
+            return reusable_record, None, True
 
+        # The lock guards claim+copy ONLY. Sleeping inside it was a liveness
+        # bug: the wait below runs up to _INGEST_CLAIM_WAIT_SECONDS per
+        # attempt, so one contended file could hold a worker for
+        # _MAX_INGEST_RETRIES * _INGEST_CLAIM_WAIT_SECONDS (~15 min). The
+        # executor pool has only EXECUTOR_WORKERS of those, so five requests
+        # naming the same file wedged the entire ingest queue -- with no
+        # cross-process claim involved at all, just five in-process waiters.
+        # Serialising the copy is correct and stays; serialising a sleep is
+        # not. Mongo's claim CAS, not this lock, is the real mutex.
+        async with file_ingest_lock(file_unique_id):
             claim_owner = await db.acquire_file_ingest_claim(
                 file_unique_id, ttl_seconds=_INGEST_CLAIM_TTL_SECONDS
             )
             if not claim_owner:
-                reusable_record = await _wait_for_other_worker_canonical_record(
-                    file_unique_id, client
-                )
-                if reusable_record:
-                    schedule_touch_file_record(reusable_record, reused=True)
-                    return reusable_record, None, True
-                continue
-
-            try:
-                reusable_record, stale_record = await _get_reusable_canonical_record(
-                    file_unique_id, client
-                )
-                if reusable_record:
-                    schedule_touch_file_record(reusable_record, reused=True)
-                    return reusable_record, None, True
-
-                stored_message = await copy_media(source_message)
-                if not stored_message:
-                    return None, None, False
-
-                record = build_file_record(
-                    stored_message,
-                    source_chat_id=source_message.chat.id if source_message.chat else None,
-                    source_message_id=source_message.id,
-                )
-                if not record:
-                    return None, stored_message, False
-
+                contended = True
+            else:
+                contended = False
                 try:
-                    if stale_record:
-                        record = _merge_replacement_record(stale_record, record)
-                        await db.replace_file_record(record)
-                    else:
-                        await db.create_file_record(record)
-                    _remember(record)
-                    return record, stored_message, False
-                except DuplicateKeyError:
-                    reusable_record = await _wait_for_other_worker_canonical_record(
+                    # re-check under the lock: another attempt may have
+                    # created the record between our probe and the claim
+                    reusable_record, stale_record = await _get_reusable_canonical_record(
                         file_unique_id, client
                     )
                     if reusable_record:
                         schedule_touch_file_record(reusable_record, reused=True)
-                        return reusable_record, stored_message, True
-                    if stored_message:
-                        try:
-                            await stored_message.delete()
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to delete stored message {stored_message.id} in BIN_CHANNEL: {e}",
-                                exc_info=True,
-                            )
-                    raise
-                except Exception as e:
-                    logger.error(
-                        f"Error creating canonical file for {file_unique_id}: {e}", exc_info=True
-                    )
-                    return None, stored_message, False
-            finally:
-                await db.release_file_ingest_claim(file_unique_id, claim_owner)
+                        return reusable_record, None, True
 
-        logger.error(f"Max ingest retries ({_MAX_INGEST_RETRIES}) exhausted for {file_unique_id}")
-        return None, None, False
+                    stored_message = await copy_media(source_message)
+                    if not stored_message:
+                        return None, None, False
+
+                    record = build_file_record(
+                        stored_message,
+                        source_chat_id=source_message.chat.id if source_message.chat else None,
+                        source_message_id=source_message.id,
+                    )
+                    if not record:
+                        return None, stored_message, False
+
+                    try:
+                        if stale_record:
+                            record = _merge_replacement_record(stale_record, record)
+                            await db.replace_file_record(record)
+                        else:
+                            await db.create_file_record(record)
+                        _remember(record)
+                        return record, stored_message, False
+                    except DuplicateKeyError:
+                        reusable_record = await _wait_for_other_worker_canonical_record(
+                            file_unique_id, client
+                        )
+                        if reusable_record:
+                            schedule_touch_file_record(reusable_record, reused=True)
+                            return reusable_record, stored_message, True
+                        if stored_message:
+                            try:
+                                await stored_message.delete()
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to delete stored message {stored_message.id} in BIN_CHANNEL: {e}",
+                                    exc_info=True,
+                                )
+                        raise
+                    except Exception as e:
+                        logger.error(
+                            f"Error creating canonical file for {file_unique_id}: {e}",
+                            exc_info=True,
+                        )
+                        return None, stored_message, False
+                finally:
+                    await db.release_file_ingest_claim(file_unique_id, claim_owner)
+
+        if contended:
+            # outside the lock on purpose -- see the note at the lock
+            reusable_record = await _wait_for_other_worker_canonical_record(file_unique_id, client)
+            if reusable_record:
+                schedule_touch_file_record(reusable_record, reused=True)
+                return reusable_record, None, True
+            # Still held after a short poll. Hand the worker back instead of
+            # sleeping through the claim TTL: the limiter requeues us, and by
+            # the time we come back the other worker's record will exist.
+            raise IngestContended(file_unique_id, _INGEST_CLAIM_WAIT_SECONDS)
+
+    logger.error(f"Max ingest retries ({_MAX_INGEST_RETRIES}) exhausted for {file_unique_id}")
+    return None, None, False
