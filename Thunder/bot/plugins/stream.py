@@ -615,12 +615,28 @@ def _chunk_pause(total_chunks: int) -> float:
     Scales with how MANY messages this batch will produce, not how many are
     left: the limiter's window fills progressively, so decaying the pause as
     the batch drains would send the tail faster than the head -- backwards.
-    Defers to the breaker when it already has pressure to report.
+
+    Two pressure signals, because only one of them works in the shipped config:
+
+    - The breaker, which is authoritative when it has anything to say. But
+      _breaker_rate() returns 0 unless GLOBAL_RPS_LIMIT > 0 or
+      GLOBAL_RATE_LIMIT is on, and both ship disabled -- so on a default
+      deployment the breaker never reports anything and a branch that only
+      consulted it would be dead code wearing a comment about deferring to the
+      limiter.
+    - Queue depth, which is always populated regardless of configuration. A
+      backlog means work is waiting, so our own burst should not add to it.
     """
     scaled = MESSAGE_DELAY * max(1.0, min(total_chunks, 8) / _CHUNK_PAUSE_REFERENCE_CHUNKS)
+
     breaker = rate_limiter.breaker
     if breaker.rate > 0:
         scaled = max(scaled, breaker.retry_after())
+    else:
+        queued = rate_limiter.occupancy()["queued"]
+        if queued:
+            scaled = max(scaled, MESSAGE_DELAY * min(queued, 4))
+
     return min(MAX_CHUNK_PAUSE_SECONDS, scaled)
 
 

@@ -330,7 +330,83 @@ def test_a_healthy_breaker_does_not_slow_us_down(monkeypatch):
     monkeypatch.setattr(
         stream.rate_limiter, "breaker", SimpleNamespace(rate=0.0, retry_after=lambda: 0.0)
     )
+    monkeypatch.setattr(stream.rate_limiter, "occupancy", lambda: {"queued": 0})
     assert stream._chunk_pause(1) == stream.MESSAGE_DELAY
+
+
+@pytest.mark.unit
+def test_the_breaker_is_inert_in_the_shipped_config():
+    """The reason queue depth is consulted as well.
+
+    _breaker_rate() returns 0 unless GLOBAL_RPS_LIMIT > 0 or GLOBAL_RATE_LIMIT
+    is on, and both ship disabled. So on a default deployment every test that
+    monkeypatched a live-looking breaker was testing a configuration nobody
+    runs. Pinned against the real Var values rather than a fake.
+    """
+    from Thunder.vars import Var
+
+    rate = stream.rate_limiter._breaker_rate()
+    configured = bool(Var.GLOBAL_RPS_LIMIT and Var.GLOBAL_RPS_LIMIT > 0) or bool(
+        Var.GLOBAL_RATE_LIMIT
+    )
+    assert (rate == 0.0) is not configured, (
+        f"_breaker_rate() is {rate} with GLOBAL_RPS_LIMIT={Var.GLOBAL_RPS_LIMIT} "
+        f"and GLOBAL_RATE_LIMIT={Var.GLOBAL_RATE_LIMIT}; if this ever becomes "
+        "non-zero by default, the queue-depth branch below stops being the only "
+        "live pressure signal and this test should say so"
+    )
+
+
+@pytest.mark.unit
+def test_queue_depth_slows_us_even_with_an_inert_breaker(monkeypatch):
+    """The signal that works on a default deployment."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=0.0, retry_after=lambda: 0.0)
+    )
+    monkeypatch.setattr(stream.rate_limiter, "occupancy", lambda: {"queued": 3})
+
+    assert stream._chunk_pause(1) == stream.MESSAGE_DELAY * 3, (
+        "a backlog of 3 did not slow the batch down at all"
+    )
+
+
+@pytest.mark.unit
+def test_queue_depth_scaling_is_bounded(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=0.0, retry_after=lambda: 0.0)
+    )
+    for queued in range(1, 500):
+        monkeypatch.setattr(stream.rate_limiter, "occupancy", lambda q=queued: {"queued": q})
+        assert stream._chunk_pause(1) <= stream.MAX_CHUNK_PAUSE_SECONDS
+
+
+@pytest.mark.unit
+def test_a_deep_queue_nudges_rather_than_dominates(monkeypatch):
+    """The inner min() is what keeps a backlog from pinning us to the cap.
+
+    MAX_CHUNK_PAUSE_SECONDS alone makes the unbounded version look fine: 0.5s x
+    50 is 25s, clamped to 4.0s, and a boundedness check cannot tell that from a
+    deliberate 2.0s. The intent is that queue depth is a nudge on top of the
+    burst schedule, not a replacement for it -- a user watching 'Processing...'
+    should not sit through the full cap because someone else's batch is queued.
+    """
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        stream.rate_limiter, "breaker", SimpleNamespace(rate=0.0, retry_after=lambda: 0.0)
+    )
+    monkeypatch.setattr(stream.rate_limiter, "occupancy", lambda: {"queued": 50})
+
+    pause = stream._chunk_pause(1)
+    assert pause < stream.MAX_CHUNK_PAUSE_SECONDS, (
+        f"a 50-deep queue pinned the pause to the {stream.MAX_CHUNK_PAUSE_SECONDS}s "
+        "cap; depth should nudge, not dominate"
+    )
+    assert pause == stream.MESSAGE_DELAY * 4
 
 
 @pytest.mark.unit

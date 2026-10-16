@@ -294,9 +294,122 @@ async def test_head_releases_the_slot_without_a_body(client_slot):
     request = types.SimpleNamespace(method="HEAD", headers={}, query={})
     work_loads[0] = 1
     await sr._serve_media_response(
-        request, file_info=_info(4096), streamer=_StalledStreamer(), client_id=0, media_ref=1
+        request,
+        file_info=_info(4096),
+        streamer=_StalledStreamer(),
+        client_id=0,
+        media_ref=1,
+        release_slot=sr._slot_release(0),
     )
     assert work_loads[0] == 0, "a HEAD request leaked its slot"
+
+
+# --- one release closure for the whole request ------------------------------
+#
+# The ladder, the generator's finally and the watchdog can all be first to
+# return a slot. Three separate decrements were three chances to go negative,
+# and a failure between "watchdog created" and "Response returned" genuinely
+# hit two of them at once.
+
+
+async def test_the_ladder_hands_the_stream_the_same_release(client_slot):
+    """The ladder, the generator's finally and the watchdog can all be first to
+    return a slot, so there must be ONE closure, not three decrements.
+
+    Decisive rather than arithmetic: if _serve_media_response minted its own
+    closure, the ladder's would still be unused, and calling it after HEAD would
+    take the counter to -1.
+    """
+    work_loads[0] = 1  # admission already took the slot
+
+    async with sr._admission_ladder(0, "probe") as release:
+        await sr._serve_media_response(
+            types.SimpleNamespace(method="HEAD", headers={}, query={}),
+            file_info=_info(4096),
+            streamer=_StalledStreamer(),
+            client_id=0,
+            media_ref=1,
+            release_slot=release,
+        )
+        assert work_loads[0] == 0, "HEAD should have returned the slot"
+
+        # the ladder's own release on the way out must now be a no-op
+        release()
+
+    assert work_loads[0] == 0, (
+        f"work_loads is {work_loads[0]} -- _serve_media_response used its own "
+        "release closure instead of the ladder's, so the slot is counted twice"
+    )
+
+
+async def test_the_watchdog_does_not_release_a_slot_the_ladder_already_returned(monkeypatch):
+    """The failure window is between _make_body (watchdog created, holding the
+    release) and the Response returning. The ladder releases on the way out and
+    the watchdog releases at its deadline -- with two closures that is -1, which
+    makes select_optimal_client believe there is spare capacity.
+
+    Driven through _serve_media_response, not _make_body directly, because the
+    HEAD path returns before _serve_media_response would touch the passed-in
+    closure -- so a HEAD-only test cannot see a second closure being minted.
+    The streaming path is where the swap happens.
+    """
+    monkeypatch.setattr(sr, "_STREAM_MIN_SECONDS", 0.15)
+    monkeypatch.setattr(sr, "_STREAM_MAX_SECONDS", 0.15)
+    monkeypatch.setattr(sr, "_STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND", 1)
+
+    work_loads[0] = 1
+    release = sr._slot_release(0)
+    response = await sr._serve_media_response(
+        types.SimpleNamespace(method="GET", headers={}, query={}),
+        file_info=_info(10**7),
+        streamer=_StalledStreamer(),
+        client_id=0,
+        media_ref=1,
+        release_slot=release,
+    )
+    assert work_loads[0] == 1, "the slot should still be held: nobody consumed the body"
+
+    # the request fails before/while the body is delivered, so the ladder's
+    # except-path returns the slot
+    release()
+    assert work_loads[0] == 0, "the ladder did not release"
+
+    await asyncio.sleep(0.4)  # the watchdog's deadline passes
+
+    assert work_loads[0] == 0, (
+        f"work_loads is {work_loads[0]} -- the watchdog released a slot the "
+        "ladder had already returned, so _serve_media_response must have minted "
+        "its own closure instead of reusing the one it was given"
+    )
+    # the response wraps the generator in a payload; closing it tears the
+    # transfer down the way aiohttp does on a client disconnect
+    response.body.close()
+
+
+async def test_both_routes_thread_the_ladder_closure_into_the_response():
+    """Structural, because the property is about a call site, not arithmetic.
+
+    If a route forgets `release_slot=`, _serve_media_response mints a fresh
+    closure and the ladder's release stops being idempotent with the watchdog's
+    -- the exact double-decrement above, invisible until a transfer stalls at
+    just the wrong moment.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(sr))
+    calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_serve_media_response"
+    ]
+    assert len(calls) == 2, f"expected 2 call sites, found {len(calls)} -- the scan is stale"
+    for call in calls:
+        kwargs = {kw.arg for kw in call.keywords}
+        assert "release_slot" in kwargs, (
+            f"line {call.lineno}: this route does not thread the ladder's "
+            "release closure into _serve_media_response"
+        )
 
 
 # --- the watchdog ----------------------------------------------------------

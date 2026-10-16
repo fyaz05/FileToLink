@@ -276,28 +276,38 @@ async def _route_ladder(label: str):
 async def _admission_ladder(client_id: int, label: str):
     """Shared post-admission ladder: the slot is released on every exit
     path; Telegram unavailability maps to 503 + Retry-After with a constant
-    body (the exception text carries internal state)."""
+    body (the exception text carries internal state).
+
+    Yields the IDEMPOTENT release closure rather than decrementing directly, and
+    callers hand the same closure to the body generator and its watchdog. A
+    failure between "watchdog created" and "Response returned" used to be
+    released twice -- once by the ladder here, once by the watchdog at its
+    deadline -- driving work_loads negative, which makes select_optimal_client
+    believe there is spare capacity. One closure, released once, no ordering
+    hazard.
+    """
+    release = _slot_release(client_id)
     try:
-        yield
+        yield release
     except (FileNotFound, InvalidHash):
-        work_loads[client_id] -= 1
+        release()
         raise
     except TelegramUnavailable as e:
-        work_loads[client_id] -= 1
+        release()
         logger.warning(f"{label}: Telegram unavailable: {e}")
         raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except FloodWait as e:
         # defense in depth: get_message converts exhaustions already, but any
         # raw FloodWait reaching admission must shed as 503, never 500
-        work_loads[client_id] -= 1
+        release()
         logger.warning(f"{label}: Telegram FloodWait: {e.value}s")
         raise _unavailable("Telegram is temporarily unavailable; please retry shortly.") from e
     except web.HTTPException as e:
-        work_loads[client_id] -= 1
+        release()
         logger.debug(f"Client HTTP error in {label}: {e}")
         raise
     except Exception as e:
-        work_loads[client_id] -= 1
+        release()
         error_id = secrets.token_hex(6)
         logger.error(f"{label} error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
@@ -306,7 +316,7 @@ async def _admission_ladder(client_id: int, label: str):
     except BaseException:
         # cancellation (client disconnect) must still release the slot,
         # or abandoned tickets pile up into false 503s
-        work_loads[client_id] -= 1
+        release()
         raise
 
 
@@ -459,6 +469,7 @@ async def _serve_media_response(
     streamer: ByteStreamer,
     client_id: int,
     media_ref: int | Message,
+    release_slot=None,
 ):
     file_size = int(file_info.get("file_size", 0) or 0)
     if file_size <= 0:
@@ -495,12 +506,15 @@ async def _serve_media_response(
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
     if request.method == "HEAD":
-        work_loads[client_id] -= 1
+        release_slot()
         return web.Response(status=206 if range_header else 200, headers=headers)
 
     # Idempotent: the slot is given back by whichever of the generator's
-    # `finally` and the deadline watchdog gets there first.
-    release_slot = _slot_release(client_id)
+    # `finally`, the deadline watchdog, and the admission ladder gets there
+    # first. When the ladder owns the release we reuse its closure rather than
+    # minting a second one -- two closures would each decrement.
+    if release_slot is None:
+        release_slot = _slot_release(client_id)
 
     body = _make_body(
         streamer,
@@ -681,7 +695,7 @@ async def canonical_media_delivery(request: web.Request):
         client_id, streamer = select_optimal_client()
         work_loads[client_id] += 1
 
-        async with _admission_ladder(client_id, "canonical stream"):
+        async with _admission_ladder(client_id, "canonical stream") as release_slot:
             # called for its side effect: a record without a unique id cannot be
             # served (there is no vault file to stream), so this is the
             # availability check for the whole route
@@ -738,6 +752,7 @@ async def canonical_media_delivery(request: web.Request):
                 streamer=streamer,
                 client_id=client_id,
                 media_ref=vault_message,
+                release_slot=release_slot,
             )
 
 
@@ -758,7 +773,7 @@ async def media_delivery(request: web.Request):
 
         work_loads[client_id] += 1
 
-        async with _admission_ladder(client_id, "media stream"):
+        async with _admission_ladder(client_id, "media stream") as release_slot:
             # one vault fetch serves both the info derivation and the stream:
             # passing the Message on means stream_file does not re-fetch
             vault_message = await streamer.get_message(message_id)
@@ -773,4 +788,5 @@ async def media_delivery(request: web.Request):
                 streamer=streamer,
                 client_id=client_id,
                 media_ref=vault_message,
+                release_slot=release_slot,
             )
