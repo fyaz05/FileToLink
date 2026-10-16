@@ -62,6 +62,41 @@ async def test_kind_branches():
     assert "media-player" not in other
 
 
+@pytest.mark.parametrize(
+    ("name", "mime", "expected"),
+    [
+        # generic mime: extension sniffing decides (render_template.py:48-55)
+        ("clip.mp4", "application/octet-stream", "video"),
+        ("song.mp3", "application/octet-stream", "audio"),
+        ("shot.png", "application/octet-stream", "image"),
+        ("archive.zip", "application/octet-stream", "other"),
+        # no mime at all
+        ("clip.mkv", None, "video"),
+        ("unknown.weirdext", None, "other"),
+        # a specific mime is authoritative, extension must not override it
+        ("mislabelled.mp3", "video/mp4", "video"),
+    ],
+)
+async def test_the_mime_fallback_actually_runs(name, mime, expected):
+    """Every case above used a real mime type, so _page_kind's extension
+    sniffing and its application/octet-stream guard were dead code: neutering
+    them left the whole file green."""
+    out = await _render(name, mime, 1024)
+    markers = {
+        "video": 'view-type="video"',
+        "audio": "cinema--audio",
+        "image": "image-viewer",
+        "other": "non-media",
+    }
+    present = [k for k, v in markers.items() if v in out]
+    assert markers[expected] in out, (
+        f"{name} with mime {mime!r} rendered as {present or 'nothing'}, expected {expected}"
+    )
+    for kind, marker in markers.items():
+        if kind != expected:
+            assert marker not in out, f"{name} rendered as {expected} and {kind}"
+
+
 async def test_download_uses_attachment():
     video = await _render()
     assert video.count("disposition=attachment") == 1  # download button only
@@ -176,6 +211,52 @@ async def test_fallback_state_is_only_entered_on_a_cdn_failure():
     assert "fallback-ready" not in inline_scripts.replace(
         "document.documentElement.classList.add('fallback-ready')", ""
     ), "an always-run script marks the page as fallback, hiding the full UI"
+
+
+async def test_every_failable_cdn_asset_carries_the_onerror():
+    """A substring check for onerror="markFallback()" *somewhere* passed with 6 of
+    7 assets unwired: a blocked jsdelivr then never engages the fallback on a
+    video/audio page and the user gets the half-broken layout."""
+    out = await _render()
+    cdn_assets = re.findall(
+        r'<(?:link|script)\b[^>]*?(?:href|src)="https://[^"]*"[^>]*>', out, re.S
+    )
+    # preconnect is a hint that can fail harmlessly, the font links carry
+    # onload=this.media, and the logo is decorative. The player assets are the
+    # ones whose failure must degrade the page.
+    player_assets = [
+        a
+        for a in cdn_assets
+        if 'rel="preconnect"' not in a and "fonts.googleapis" not in a and "logo.png" not in a
+    ]
+    assert len(player_assets) >= 5, (
+        f"the scan found only {len(player_assets)} CDN assets -- the template "
+        "changed shape and this test no longer examines anything"
+    )
+    unwired = [a[:90] for a in player_assets if "markFallback()" not in a]
+    assert not unwired, (
+        f"{len(unwired)} of {len(player_assets)} CDN assets can fail without "
+        f"triggering the fallback: {unwired}"
+    )
+
+
+async def test_the_css_and_the_js_agree_on_the_fallback_class():
+    """Each side was substring-checked independently. Renaming the CSS to
+    `.fallback-ready-v2` while the JS keeps `.fallback-ready` leaves the entire
+    fallback stylesheet inert -- and the suite green."""
+    out = await _render()
+    css = _inline_css(out)
+
+    scoped = set(re.findall(r"\.([A-Za-z][\w-]*)", css))
+    added = set(re.findall(r"classList\.add\(\s*'([^']+)'", out))
+    assert added, "the page never adds a fallback class"
+
+    conditional = {c for c in scoped if "fallback" in c}
+    assert conditional, f"the fallback stylesheet conditions on nothing (classes: {sorted(scoped)})"
+    assert conditional == added, (
+        f"the stylesheet keys on {sorted(conditional)} but the JS adds "
+        f"{sorted(added)} -- the fallback can never engage"
+    )
 
 
 async def test_fallback_css_is_scoped_to_the_fallback_state():

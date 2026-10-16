@@ -43,10 +43,34 @@ def test_every_media_call_site_is_unbounded():
 
 @pytest.mark.unit
 def test_lightweight_shapes_get_the_env_budget():
+    """Assert against Var, not against _env_timeout() itself.
+
+    _default_timeout returns _env_timeout() by construction, so comparing the
+    two asserted f(x) == f() and pinned nothing: hardcoding _env_timeout to
+    DEFAULT_RPC_TIMEOUT_SECONDS and deleting the Var.TG_RPC_TIMEOUT_SECONDS read
+    left every test green, and the documented env knob had no coverage at all.
+    """
+    from Thunder.vars import Var
+
     async def reply_text():
         return None
 
-    assert safe_call._default_timeout(reply_text) == safe_call._env_timeout()
+    expected = float(Var.TG_RPC_TIMEOUT_SECONDS)
+    assert expected > 0, "TG_RPC_TIMEOUT_SECONDS is not a usable number"
+    assert safe_call._env_timeout() == expected, (
+        f"the RPC budget ignores TG_RPC_TIMEOUT_SECONDS ({Var.TG_RPC_TIMEOUT_SECONDS})"
+    )
+    assert safe_call._default_timeout(reply_text) == expected
+
+
+@pytest.mark.unit
+def test_the_env_budget_knob_is_read_not_hardcoded():
+    """Distinct from the test above: this one reads the source, so it fails even
+    if the value happens to match today."""
+    import inspect
+
+    src = inspect.getsource(safe_call._env_timeout)
+    assert "TG_RPC_TIMEOUT_SECONDS" in src, "_env_timeout no longer reads the configured timeout"
 
 
 @pytest.mark.unit
