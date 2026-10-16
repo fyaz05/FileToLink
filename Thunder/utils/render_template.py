@@ -1,7 +1,9 @@
+import contextlib
 import time
 from collections import OrderedDict
 from pathlib import Path
 
+from aiohttp import web
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from Thunder.utils.bot_utils import quote_media_name
@@ -79,6 +81,41 @@ _legacy_cache: "OrderedDict[tuple[int, str], tuple[float, str, str | None, int]]
 _LEGACY_CACHE_TTL_SECONDS = 600
 _LEGACY_CACHE_MAX_ITEMS = 1024
 
+# Admission control for the vault lookup in render_page().
+#
+# The capability hash is a prefix of the file unique id stored in the very
+# message we must fetch to check it, so the RPC necessarily happens BEFORE the
+# hash is verified. A request whose hash does not match can never be cached,
+# so an unauthenticated caller holding one shape-valid 6-hex hash can turn
+# every request into a fresh Telegram RPC -- an amplifier, not a lookup.
+#
+# A plain counter, not asyncio.Semaphore: the check and the increment have no
+# await between them, so asyncio cannot interleave, and a module-level
+# Semaphore would bind to the first event loop that touches it and then reject
+# every other loop (pytest-asyncio creates one per test).
+_PREVIEW_RPC_CONCURRENCY = 4
+_preview_rpc_inflight = 0
+
+
+@contextlib.contextmanager
+def _preview_rpc_slot():
+    global _preview_rpc_inflight
+    if _preview_rpc_inflight >= _PREVIEW_RPC_CONCURRENCY:
+        raise web.HTTPServiceUnavailable(
+            text="Server is busy rendering pages. Please retry shortly.",
+            headers={
+                "Retry-After": "2",
+                "Access-Control-Allow-Origin": "*",
+                "X-Content-Type-Options": "nosniff",
+                "X-Robots-Tag": "noindex, nofollow",
+            },
+        )
+    _preview_rpc_inflight += 1
+    try:
+        yield
+    finally:
+        _preview_rpc_inflight -= 1
+
 
 def _legacy_cache_get(key) -> tuple[str, str | None, int] | None:
     cached = _legacy_cache.get(key)
@@ -116,18 +153,20 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         from Thunder.bot import StreamBot  # layering break: lazy import
         from Thunder.server.exceptions import InvalidHash, TelegramUnavailable
 
-        try:
-            message = await tg_call(
-                StreamBot.get_messages,
-                chat_id=int(Var.BIN_CHANNEL),
-                message_ids=int(message_id),
-                retries=1,
-                timeout=60,
-            )
-        except TimeoutError as e:
-            # vault timeout is transient, never absence: map to 503 (not
-            # FileNotFound self-heal, not ladder 500) like the delivery path
-            raise TelegramUnavailable(f"vault lookup timed out: {e}") from e
+        # every miss costs an RPC, so shed load here rather than queueing it
+        with _preview_rpc_slot():
+            try:
+                message = await tg_call(
+                    StreamBot.get_messages,
+                    chat_id=int(Var.BIN_CHANNEL),
+                    message_ids=int(message_id),
+                    retries=1,
+                    timeout=60,
+                )
+            except TimeoutError as e:
+                # vault timeout is transient, never absence: map to 503 (not
+                # FileNotFound self-heal, not ladder 500) like the delivery path
+                raise TelegramUnavailable(f"vault lookup timed out: {e}") from e
 
         if not message:
             raise InvalidHash("Message not found")
@@ -154,6 +193,17 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         return await render_media_page(
             file_name, src, mime_type=mime_type, size_bytes=file_size or None
         )
+    except InvalidHash as e:
+        # a 404 is the expected answer for a wrong capability hash, and the
+        # route ladder logs it at debug. Logging it as an ERROR with a
+        # traceback let an unauthenticated caller fill bot.txt with one
+        # traceback per probe -- the same amplifier, aimed at the log file.
+        logger.debug(f"render_page: {type(e).__name__} for message_id {message_id}")
+        raise
+    except web.HTTPException:
+        # load shed, not a fault: the caller already gets the right status and
+        # logging a traceback for every rejected request would be its own outage
+        raise
     except Exception as e:
         # the capability hash is a credential: never log it (bot.txt is uploaded via /log)
         logger.error(

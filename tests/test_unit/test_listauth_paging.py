@@ -103,7 +103,13 @@ async def test_listauth_sends_every_page_over_the_cap(monkeypatch):
     async def fake_reply(message, text=None, **kwargs):
         sent.append(text)
 
+    async def no_sleep(seconds):
+        # the pacing delay is real behaviour but not what this test is about;
+        # without this the suite pays 0.5s x page-count for nothing
+        return None
+
     monkeypatch.setattr(admin, "reply", fake_reply)
+    monkeypatch.setattr(admin.asyncio, "sleep", no_sleep)
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
 
     await admin.list_authorized_command(client=None, message=None)

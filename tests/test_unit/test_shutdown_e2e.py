@@ -109,7 +109,15 @@ async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env,
     """A touch flush that never answers must be *reported*, not silently
     swallowed: the drain shields its write, and swallowing the caller's
     cancellation would make wait_for return normally and mark the step clean.
-    The budget still bounds the whole teardown."""
+    The budget still bounds the whole teardown.
+
+    The step/budget caps are shrunk so the mechanism runs in ~0.2s instead of
+    waiting out the real 8s cap. The production values are pinned separately,
+    against the source, in test_shutdown_budget.py.
+    """
+    monkeypatch.setattr(main_mod, "_SHUTDOWN_BUDGET_SECONDS", 1.0)
+    monkeypatch.setattr(main_mod, "_TEARDOWN_STEP_SECONDS", 0.2)
+    monkeypatch.setattr(main_mod, "_TEARDOWN_FLOOR_SECONDS", 0.05)
 
     async def _hang(rows):
         await asyncio.sleep(30)
