@@ -16,6 +16,13 @@ COPY requirements.lock .
 
 # no `pip install --upgrade pip`: it would be the sole unhashed install;
 # 3.13-slim ships a pip that fully supports --require-hashes
+#
+# pyaes (transitive, via pymediainfo-pyrofork) ships an sdist and NO wheel. That
+# is fine here only because it is pure Python -- no C extension, no ctypes, no
+# cffi -- so pip builds a wheel from the sdist with no compiler. This image is
+# slim on purpose and installs no build tooling, so if pyaes ever gains a native
+# extension, or if anyone adds `--only-binary=:all:` or `--no-build-isolation`,
+# this line fails with a confusing error rather than an obvious one.
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY --chown=thunder:thunder . .
