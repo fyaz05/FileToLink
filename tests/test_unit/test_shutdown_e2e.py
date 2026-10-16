@@ -22,12 +22,24 @@ from Thunder.utils import rate_limiter as rl
 
 
 class _FakeDb:
+    """Mirrors Database.bulk_touch_file_records: the kwarg and the bool."""
+
     def __init__(self) -> None:
         self.touched: list[tuple[str, int, int]] = []
         self.closed = False
+        self.post_close_writes: list = []
+        self.raise_on_error_seen: list[bool] = []
 
-    async def bulk_touch_file_records(self, rows):
+    async def bulk_touch_file_records(self, rows, *, raise_on_error: bool = False) -> bool:
+        self.raise_on_error_seen.append(raise_on_error)
+        if self.closed:
+            # the real client raises once the pool is closed; a fake that
+            # accepts writes after close() cannot detect a flush that happens
+            # in the wrong order relative to db.close()
+            self.post_close_writes.append(list(rows))
+            raise RuntimeError("client is closed")
         self.touched.extend(rows)
+        return True
 
     async def close(self):
         self.closed = True
@@ -76,6 +88,16 @@ async def test_shutdown_flushes_the_touch_buffer_and_closes_cleanly(shutdown_env
     assert (("a" * cf.PUBLIC_HASH_LENGTH), 1, 1) in shutdown_env.touched
     assert not cf._pending_touches
     assert shutdown_env.closed, "the database was not closed"
+    # the fake rejects writes after close(), so this pins the ORDER, not just
+    # that both happened: moving db.close() before the flush loses the deltas
+    # with no error anywhere
+    assert not shutdown_env.post_close_writes, (
+        "the touch buffer was flushed after db.close() -- those deltas are lost"
+    )
+    assert shutdown_env.raise_on_error_seen == [True], (
+        "the flush did not ask the client to raise on failure, so a Mongo "
+        "brownout is reported as a clean shutdown"
+    )
 
 
 @pytest.mark.unit
@@ -119,7 +141,7 @@ async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env,
     monkeypatch.setattr(main_mod, "_TEARDOWN_STEP_SECONDS", 0.2)
     monkeypatch.setattr(main_mod, "_TEARDOWN_FLOOR_SECONDS", 0.05)
 
-    async def _hang(rows):
+    async def _hang(rows, *, raise_on_error: bool = False):
         await asyncio.sleep(30)
 
     monkeypatch.setattr(shutdown_env, "bulk_touch_file_records", _hang)

@@ -16,18 +16,27 @@ from Thunder.utils import canonical_files as cf
 
 
 class _FakeDb:
-    """Database stand-in that can block mid-write to open the race window."""
+    """Database stand-in that can block mid-write to open the race window.
+
+    Mirrors Database.bulk_touch_file_records' signature and return contract,
+    including ``raise_on_error``. An earlier version took only ``rows``, so a
+    TypeError from the unexpected kwarg was re-queued forever and the flush
+    loop spun -- the fake had drifted from the thing it stands in for.
+    """
 
     def __init__(self, block: asyncio.Event | None = None) -> None:
         self.calls: list[list[tuple[str, int, int]]] = []
+        self.raise_on_error_seen: list[bool] = []
         self._block = block
         self.entered = asyncio.Event()
 
-    async def bulk_touch_file_records(self, rows):
+    async def bulk_touch_file_records(self, rows, *, raise_on_error: bool = False) -> bool:
         self.calls.append(list(rows))
+        self.raise_on_error_seen.append(raise_on_error)
         self.entered.set()
         if self._block is not None:
             await self._block.wait()
+        return True
 
 
 @pytest.fixture
@@ -108,18 +117,73 @@ async def test_drain_writes_back_requeued_deltas(monkeypatch):
 
 @pytest.mark.unit
 async def test_failed_flush_keeps_deltas(touch_env):
-    """A failed write is still retried on the next flush (pre-existing behaviour)."""
+    """A failed write is still retried on the next flush (pre-existing behaviour).
 
-    async def _boom(rows):
-        raise RuntimeError("mongo down")
+    The stub honours ``raise_on_error`` exactly as Database.bulk_touch_file_
+    records does. An earlier version raised unconditionally, which is NOT what
+    the real callee does: it swallows every Mongo exception and returns False
+    unless asked to re-raise. That mis-model is why a Blocking bug shipped --
+    _bulk_flush omitted raise_on_error, so in production the exception never
+    arrived, the re-queue never ran, and every buffered delta was lost -- while
+    this test, against the raising stub, stayed green.
+    """
 
-    touch_env.bulk_touch_file_records = _boom
+    async def _fail_like_the_real_callee(rows, *, raise_on_error: bool = False):
+        if raise_on_error:
+            raise RuntimeError("mongo down")
+        return False
+
+    touch_env.bulk_touch_file_records = _fail_like_the_real_callee
     public_hash = "c" * cf.PUBLIC_HASH_LENGTH
     cf.schedule_touch_file_record(_record(public_hash))
 
     await cf._bulk_flush()
 
-    assert cf._pending_touches.get(public_hash) is not None
+    assert cf._pending_touches.get(public_hash) is not None, (
+        "the delta was dropped: a Mongo failure silently loses seen/reuse "
+        "counts while the in-memory cache has already been incremented"
+    )
+
+
+@pytest.mark.unit
+async def test_flush_does_not_swallow_a_failed_write(touch_env):
+    """Pin the call contract itself: the callee defaults to returning False,
+    so _bulk_flush must ask it to raise or the failure is unobservable."""
+    seen_kwargs = {}
+
+    async def _capture(rows, *, raise_on_error: bool = False):
+        seen_kwargs["raise_on_error"] = raise_on_error
+        return True
+
+    touch_env.bulk_touch_file_records = _capture
+    public_hash = "e" * cf.PUBLIC_HASH_LENGTH
+    cf.schedule_touch_file_record(_record(public_hash))
+
+    await cf._bulk_flush()
+
+    assert seen_kwargs.get("raise_on_error") is True, (
+        "bulk_touch_file_records is called without raise_on_error, so it "
+        "swallows Mongo errors and its False return is discarded"
+    )
+
+
+@pytest.mark.unit
+async def test_a_swallowed_write_is_detected_even_if_raise_on_error_is_dropped(touch_env):
+    """Defence in depth: should the callee ever change back to returning False,
+    _bulk_flush must not read that as success."""
+
+    async def _return_false(rows, *, raise_on_error: bool = False):
+        return False
+
+    touch_env.bulk_touch_file_records = _return_false
+    public_hash = "f" * cf.PUBLIC_HASH_LENGTH
+    cf.schedule_touch_file_record(_record(public_hash))
+
+    await cf._bulk_flush()
+
+    assert cf._pending_touches.get(public_hash) is not None, (
+        "a False return was treated as a successful flush; the delta is lost with no error anywhere"
+    )
 
 
 @pytest.mark.unit

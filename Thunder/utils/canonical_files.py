@@ -230,9 +230,21 @@ async def _bulk_flush() -> None:
     if not items:
         return
     try:
-        await db.bulk_touch_file_records(
-            [(h, reuse_delta, seen_delta) for h, (_, reuse_delta, seen_delta) in items]
+        # raise_on_error is mandatory, not decorative: bulk_touch_file_records
+        # catches every Mongo exception and returns False by default, so
+        # without this the failure is invisible here, the re-queue below never
+        # runs, and the deltas are dropped -- while schedule_touch_file_record
+        # has already bumped the cached counters, leaving cache and Mongo
+        # permanently divergent.
+        ok = await db.bulk_touch_file_records(
+            [(h, reuse_delta, seen_delta) for h, (_, reuse_delta, seen_delta) in items],
+            raise_on_error=True,
         )
+        if not ok:
+            # raise_on_error makes this unreachable today; it is here so that
+            # a future change to the callee's default cannot turn a lost
+            # delta into a silent success.
+            raise RuntimeError("bulk_touch_file_records reported failure")
     except BaseException as e:
         # CancelledError is a BaseException, not an Exception: shutdown cancels
         # this task mid-write, and the snapshot is already out of the buffer, so
