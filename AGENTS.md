@@ -49,11 +49,19 @@ slow. Measured on a Windows host with the dev group synced:
 
 | command | time | what it covers |
 |---|---|---|
-| `scripts/dev.sh gates` | 1.5 s | ruff + ruff-format + mypy, no pytest |
-| `scripts/dev.sh file <path>` | 4.0 s | one test file, or one node with `::` |
-| `scripts/dev.sh quick` | 6.8 s | the whole unit tier, no coverage |
-| `scripts/dev.sh test` | 10.7 s | the whole tier + the coverage gate |
-| `scripts/dev.sh all` | 12 s | gates + `test`, i.e. what CI runs |
+| `scripts/dev.sh gates` | 1.6 s | ruff + ruff-format + mypy, no pytest |
+| `scripts/dev.sh file <path>` | 3.9 s | one test file, or one node with `::` |
+| `scripts/dev.sh quick` | 9.0 s | the whole unit tier, no coverage |
+| `scripts/dev.sh test` | 14.3 s | the whole tier + the coverage gate |
+| `scripts/dev.sh all` | 16.0 s | gates + `test`, i.e. what CI runs |
+
+Best of three on a Windows host with the dev group synced, at 451 unit tests.
+Re-measure before trusting the absolute numbers — they drift with the test
+count, and a table nobody updates is a table nobody reads.
+
+One node costs the same as a whole file (3.9 s) because the floor is the
+`pyrofork` import, not the tests: there is nothing to be gained by selecting
+narrower.
 
 Iterate with `gates` and `file`. Run `quick` or `test` **once per commit**, not
 after every edit — re-running the full tier per 3-line change is the single
