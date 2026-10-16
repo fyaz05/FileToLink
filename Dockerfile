@@ -25,7 +25,10 @@ RUN mkdir -p /app Thunder/logs && chown -R thunder:thunder /app
 # run as non-root
 USER thunder
 
-# container health follows /health; PORT comes from the environment
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python3 -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8080').split('#')[0].strip()+'/health',timeout=5)"
+# container health follows /health. PORT is read the same way vars.py reads it:
+# a malformed value must fail the probe AND the boot, not report healthy while
+# the app refuses to start. The split('#') that used to be here made the probe
+# accept something the app rejects.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python3 -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.getenv('PORT','8080').strip()+'/health',timeout=5)"
 
 CMD ["bash", "thunder.sh"]

@@ -15,9 +15,18 @@ pytestmark = pytest.mark.unit
 
 
 async def _render(name="v.mp4", mime="video/mp4", size=10 * 1024 * 1024, src=None):
+    """Render the way the routes do.
+
+    src is built with quote_media_name, exactly as stream_routes does. This
+    helper used to interpolate the raw name, which bypassed the encoding the
+    production path relies on -- so a hostile-name test against it was
+    measuring the helper, not the template.
+    """
+    from Thunder.utils.bot_utils import quote_media_name
+
     return await render_media_page(
         name,
-        src or f"https://files.example/f/abc123/{name}",
+        src or f"https://files.example/f/abc123/{quote_media_name(name)}",
         mime_type=mime,
         size_bytes=size,
     )
@@ -164,6 +173,42 @@ async def test_no_go_template_remnants():
         assert remnant not in out
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "hostile_name",
+    [
+        'evil".onload="alert(1)',
+        "evil'><script>alert(1)</script>",
+        "a b&c#d",
+        "</a><img src=x onerror=alert(1)>",
+        '"' * 40,
+    ],
+)
+async def test_a_hostile_file_name_cannot_break_out_of_an_attribute(hostile_name):
+    """`src` and `download_src` are rendered with |safe -- every autoescaped
+    sibling like alt= and download= is escaped, these are not.
+
+    |safe is load-bearing (autoescaping would mangle the URL's query), so the
+    guarantee has to come from the value instead: the server builds src from
+    quote_media_name(file_name), which percent-encodes with safe="". Pin that,
+    because nothing else here would notice if it stopped.
+    """
+    from Thunder.utils.bot_utils import quote_media_name
+
+    encoded = quote_media_name(hostile_name)
+    assert '"' not in encoded, f"the encoded name still carries a quote: {encoded!r}"
+    assert "'" not in encoded, f"the encoded name still carries an apostrophe: {encoded!r}"
+    assert "<" not in encoded and ">" not in encoded
+
+    out = await _render(hostile_name, "video/mp4", 1024)
+    # every attribute that interpolates src must still be a well-formed tag
+    for tag in re.findall(r"<(?:a|img|meta)\b[^>]*>", out):
+        # a tag containing a second '<' means an attribute was escaped out of
+        assert tag.count("<") == 1, f"a crafted name broke out of a tag: {tag[:120]}"
+        assert tag.count('"') % 2 == 0, f"unbalanced quotes in a tag: {tag[:120]}"
+    assert "<script>alert(1)</script>" not in out
+
+
 # --- the inline fallback must not become the default ------------------------
 #
 # The inline <style> ships AFTER the CDN theme <link>, so at equal specificity
@@ -183,22 +228,14 @@ def _css_rules(css: str) -> list[str]:
     return [r.strip() for r in css.split("}") if "{" in r]
 
 
-@pytest.mark.parametrize(
-    "selector",
-    [".drawer", ".atmosphere", ".file-meta", ".cinema"],
-)
-async def test_fallback_css_never_hides_an_element_unconditionally(selector):
-    """Every display:none in the fallback stylesheet must be behind
-    .fallback-ready, so a healthy CDN load renders the full page."""
-    for rule in _css_rules(_inline_css(await _render())):
-        head, _, body = rule.partition("{")
-        if "display:none" not in body.replace(" ", ""):
-            continue
-        for part in head.split(","):
-            assert ".fallback-ready" in part, (
-                f"{selector.strip()} is hidden unconditionally by `{part.strip()}` -- "
-                "this rule applies on every load, not only when a CDN fails"
-            )
+def _declarations(body: str) -> str:
+    """Normalise a declaration block for comparison.
+
+    Whitespace INSIDE a declaration matters to this check: `display:\\n none` is
+    valid CSS and `body.replace(" ", "")` left the newline in, so a hidder
+    written across two lines passed the old test.
+    """
+    return re.sub(r"\s+", "", body)
 
 
 async def test_fallback_state_is_only_entered_on_a_cdn_failure():
@@ -260,16 +297,27 @@ async def test_the_css_and_the_js_agree_on_the_fallback_class():
 
 
 async def test_fallback_css_is_scoped_to_the_fallback_state():
-    """The whole block must be inert when the CDN is reachable."""
+    """The whole block must be inert when the CDN is reachable.
+
+    This subsumes the older per-selector hidder test, which was four
+    byte-identical parametrizations strictly weaker than this one.
+    """
     css = _inline_css(await _render())
     assert css.strip(), "expected an inline fallback stylesheet"
+    hiders = 0
     for rule in _css_rules(css):
-        head = rule.partition("{")[0]
+        head, _, body = rule.partition("{")
+        if "display:none" in _declarations(body):
+            hiders += 1
         for part in head.split(","):
             assert ".fallback-ready" in part, (
                 f"unscoped fallback rule `{part.strip()}` overrides the CDN theme "
                 "on every page load"
             )
+    assert hiders, (
+        "no display:none found in the fallback stylesheet -- the template "
+        "changed shape and the scoping check is no longer examining anything"
+    )
 
 
 async def test_fallback_marker_is_defined_before_any_use():

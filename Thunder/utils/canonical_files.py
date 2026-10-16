@@ -300,16 +300,20 @@ def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) 
     if public_hash in _pending_touches:
         _, reuse_delta, seen_delta = _pending_touches[public_hash]
         _pending_touches[public_hash] = (record, reuse_delta + int(reused), seen_delta + 1)
-    elif len(_pending_touches) >= _TOUCH_BUFFER_MAX:
-        # drop-on-overflow with a counter -- memory stays capped
-        _dropped_touches += 1
-        if _dropped_touches % 100 == 1:
-            logger.warning(
-                f"Touch buffer full ({_TOUCH_BUFFER_MAX}); "
-                f"dropped {_dropped_touches} increments so far"
-            )
     else:
         _pending_touches[public_hash] = (record, int(reused), 1)
+        # evict the OLDEST to make room, so the buffer always holds the most
+        # recent increments. This used to REJECT the new key instead, keeping
+        # the oldest -- the opposite of what the merge path does. Two rules for
+        # one bound, and neither was pinned.
+        while len(_pending_touches) > _TOUCH_BUFFER_MAX:
+            _pending_touches.popitem(last=False)
+            _dropped_touches += 1
+            if _dropped_touches % 100 == 1:
+                logger.warning(
+                    f"Touch buffer full ({_TOUCH_BUFFER_MAX}); "
+                    f"dropped {_dropped_touches} increments so far"
+                )
 
     if _flush_task is None or _flush_task.done():
         _flush_task = asyncio.create_task(_flush_pending_touches())

@@ -89,27 +89,23 @@ def test_emoji_dense_record_is_paged_by_units_not_characters():
 
 @pytest.mark.unit
 async def test_listauth_sends_every_page_over_the_cap(monkeypatch):
-    """The handler, not just the helper: delete the page loop and this fails."""
-    from Thunder.utils import database as database_mod
+    """The handler, not just the helper: delete the page loop and this fails.
 
+    The display-name lookup inside the handler is best-effort and fails without
+    a real client, which is fine -- the test pins the paging.
+    """
     users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
     monkeypatch.setattr(admin, "list_allowed", _async_return(users))
-    # the display-name lookup is best-effort inside the handler; let it fail so
-    # the test pins the paging, not the batched get_users round trip
-    monkeypatch.setattr(database_mod, "db", database_mod.db)
 
     sent: list[str] = []
 
     async def fake_reply(message, text=None, **kwargs):
         sent.append(text)
 
-    async def no_sleep(seconds):
-        # the pacing delay is real behaviour but not what this test is about;
-        # without this the suite pays 0.5s x page-count for nothing
-        return None
-
     monkeypatch.setattr(admin, "reply", fake_reply)
-    monkeypatch.setattr(admin.asyncio, "sleep", no_sleep)
+    # the pacing delay is real behaviour but not what this test is about;
+    # without this a 20-page list pays 0.5s x 20 for nothing
+    monkeypatch.setattr(admin, "_sleep_between_pages", _no_sleep)
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
 
     await admin.list_authorized_command(client=None, message=None)
@@ -129,7 +125,7 @@ async def test_one_failed_page_does_not_truncate_the_list(monkeypatch):
     users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
     monkeypatch.setattr(admin, "list_allowed", _async_return(users))
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
-    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(admin, "_sleep_between_pages", _no_sleep)
 
     sent: list[str] = []
     state = {"n": 0}
@@ -160,7 +156,7 @@ async def test_a_partial_list_is_reported(monkeypatch):
     users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
     monkeypatch.setattr(admin, "list_allowed", _async_return(users))
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
-    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(admin, "_sleep_between_pages", _no_sleep)
 
     sent: list[str] = []
     state = {"n": 0}
@@ -186,7 +182,7 @@ async def test_a_complete_list_reports_nothing(monkeypatch):
     users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
     monkeypatch.setattr(admin, "list_allowed", _async_return(users))
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
-    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(admin, "_sleep_between_pages", _no_sleep)
 
     sent: list[str] = []
 
@@ -207,7 +203,7 @@ async def test_every_record_appears_exactly_once(monkeypatch):
     users = [{"user_id": i, "authorized_by": 1, "authorized_at": "2026-01-01"} for i in range(50)]
     monkeypatch.setattr(admin, "list_allowed", _async_return(users))
     monkeypatch.setattr(admin, "_PAGE_BUDGET_UNITS", 300)
-    monkeypatch.setattr(admin.asyncio, "sleep", _no_sleep)
+    monkeypatch.setattr(admin, "_sleep_between_pages", _no_sleep)
 
     sent: list[str] = []
 
@@ -231,7 +227,8 @@ def test_page_delay_is_set_for_multi_page_lists():
     assert admin._PAGE_SEND_DELAY_SECONDS > 0
 
 
-async def _no_sleep(_s):
+async def _no_sleep():
+    """Stands in for admin._sleep_between_pages, which takes no arguments."""
     return None
 
 
@@ -248,13 +245,13 @@ async def test_listauth_paces_between_pages_not_after_the_last(monkeypatch):
     async def fake_reply(message, text=None, **kwargs):
         sent.append(text)
 
-    slept: list[float] = []
+    slept: list[int] = []
 
-    async def fake_sleep(seconds):
-        slept.append(seconds)
+    async def fake_sleep():
+        slept.append(1)
 
     monkeypatch.setattr(admin, "reply", fake_reply)
-    monkeypatch.setattr(admin.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(admin, "_sleep_between_pages", fake_sleep)
 
     await admin.list_authorized_command(client=None, message=None)
 

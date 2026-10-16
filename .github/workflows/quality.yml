@@ -57,24 +57,33 @@ jobs:
 
       - name: Ruff (lint + format check)
         run: |
-          uv run ruff check Thunder/ update.py tests/
-          uv run ruff format --check Thunder/ update.py tests/
+          uv run ruff check Thunder/ update.py tests/ scripts/
+          uv run ruff format --check Thunder/ update.py tests/ scripts/
 
       - name: Mypy (blocking)
-        run: uv run mypy Thunder update.py
+        run: uv run mypy Thunder update.py scripts/
 
       - name: Unit tests
         run: uv run pytest --cov=Thunder --cov-report=term-missing --cov-fail-under=35
 
       # addopts = "-m unit" silently deselects any test that forgets its marker:
       # an unmarked test is collected but never runs, and nothing else notices.
+      #
+      # The counts are grepped out of pytest's own summary rather than taken from
+      # `tail -1 | cut -d' ' -f1`: that pipeline captures whatever happens to be
+      # last on stdout, so any change to pytest's trailing output makes BOTH sides
+      # capture the same garbage, the comparison passes, and the gate silently
+      # stops guarding anything.
       - name: No test is silently excluded by the marker filter
         run: |
-          # compare the "collected/deselected" counts only -- the rest of the
-          # summary line carries a timing that differs between runs
-          UNIT=$(uv run pytest -m unit --collect-only -q | tail -1 | cut -d' ' -f1)
-          ALL=$(uv run pytest -m "not integration" --collect-only -q | tail -1 | cut -d' ' -f1)
+          set -o pipefail
+          UNIT=$(uv run pytest -m unit --collect-only -q | grep -oE '[0-9]+/[0-9]+ tests collected' | tail -1)
+          ALL=$(uv run pytest -m "not integration" --collect-only -q | grep -oE '[0-9]+/[0-9]+ tests collected' | tail -1)
           echo "unit=$UNIT all-non-integration=$ALL"
+          if [ -z "$UNIT" ] || [ -z "$ALL" ]; then
+            echo "::error::Could not parse the collection summary from pytest. Fix this step rather than letting it pass vacuously."
+            exit 1
+          fi
           if [ "$UNIT" != "$ALL" ]; then
             echo "::error::A test is missing its @pytest.mark.unit and addopts=-m unit is excluding it. Mark it, or move it to the integration tier."
             exit 1

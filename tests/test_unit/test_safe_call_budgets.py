@@ -16,29 +16,98 @@ from pyrogram.errors import FloodWait
 from Thunder.utils import safe_call
 from Thunder.utils.safe_call import UNBOUNDED_SHAPES, tg_call
 
+# Message methods that move a media payload. Spelled out as verb x noun rather
+# than a prefix, because `reply_` also matches reply_text and `edit_` matches
+# edit_reply_markup -- both of which are legitimately budgeted.
+_MEDIA_NOUNS = (
+    "document",
+    "photo",
+    "video",
+    "audio",
+    "animation",
+    "voice",
+    "video_note",
+    "media_group",
+    "paid_media",
+)
+_MESSAGE_MEDIA_SHAPES = {"copy"} | {
+    f"{verb}_{noun}" for verb in ("reply", "edit") for noun in _MEDIA_NOUNS
+}
+
 
 @pytest.mark.unit
 def test_every_media_call_site_is_unbounded():
     """The real contract is not the set's contents but that no media call site
     is missing from it. The call sites are read out of the source rather than
     restating a literal: /log ships a 5 MiB tail and /shell ships arbitrary
-    output, and a 30 s budget on either is a production failure."""
+    output, and a 30 s budget on either is a production failure.
+
+    The shape list is derived from pyrofork's own Client methods rather than
+    retyped. It used to name nine shapes and omit send_animation,
+    send_video_note, send_voice, send_paid_media and copy_message -- so
+    adding one of those as a tg_call site would inherit the 30 s budget while
+    this test stayed green.
+    """
+    import inspect
     import pathlib
     import re
+
+    from pyrogram import Client
+    from pyrogram.types import Message
 
     import Thunder
 
     root = pathlib.Path(Thunder.__file__).parent
-    media_shapes = re.compile(
-        r"tg_call\(\s*[\w.]*?(copy|reply_document|send_document|send_video|send_audio"
-        r"|send_photo|send_cached_media|stream_media|download_media)\b"
+
+    # every method that transfers a payload: the budget cannot apply to any of
+    # them. Text and metadata shapes are excluded on purpose -- the API caps
+    # them (4096 chars for a message), so a 30 s budget is correct there. The
+    # contract being protected is about media, not about every send_* method.
+    text_or_metadata = {
+        "send_chat_action",
+        "send_code",
+        "send_contact",
+        "send_dice",
+        "send_game",
+        "send_inline_bot_result",
+        "send_location",
+        "send_message",
+        "send_paid_reaction",
+        "send_reaction",
+        "send_recovery_code",
+        "send_todo",
+        "send_venue",
+        "send_web_page",
+    }
+    media_methods = {
+        name
+        for name in dir(Client)
+        if name.startswith(("send_", "copy", "stream_", "download_", "reply_"))
+        and name not in text_or_metadata
+    }
+    # Message carries the other half: Message.copy is the ingest forward and
+    # Message.reply_document ships /log's 5 MiB tail and /shell's output.
+    media_methods |= {name for name in dir(Message) if name in _MESSAGE_MEDIA_SHAPES}
+    assert len(media_methods) > 20, (
+        f"only found {len(media_methods)} transfer methods -- the derivation is broken"
     )
+    # the two shapes actually wired unbounded, so a regression that moved the
+    # call off them cannot pass silently
+    assert {"copy", "reply_document"} <= media_methods, (
+        f"the live call sites use Message.copy and Message.reply_document; "
+        f"derived set has {sorted(media_methods & {'copy', 'reply_document'})}"
+    )
+    # the scan and the derived set must agree, so a shape can never be quietly
+    # missing from the regex while the comparison still passes
+    scanned = "|".join(sorted(media_methods))
+    media_shapes = re.compile(rf"tg_call\(\s*[\w.]*?({scanned})\b")
     found: set[str] = set()
     for path in root.rglob("*.py"):
         found |= {m.group(1) for m in media_shapes.finditer(path.read_text(encoding="utf-8"))}
 
     assert found, "scan found no media call sites -- the pattern is stale"
     assert found <= UNBOUNDED_SHAPES, f"media calls without a budget: {found - UNBOUNDED_SHAPES}"
+    assert inspect.isfunction(safe_call._env_timeout)
 
 
 @pytest.mark.unit

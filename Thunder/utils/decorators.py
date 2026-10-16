@@ -99,8 +99,12 @@ async def check_banned(client, message: Message) -> bool:
                 message,
                 MSG_DECORATOR_BANNED.format(
                     # reason is owner-set free text; escaped + explicit HTML
-                    # parse mode so it cannot reflow into markup
-                    reason=html.escape(ban_details.get("reason", "Not specified")),
+                    # parse mode so it cannot reflow into markup.
+                    # Coerced to str first: add_banned_user's signature permits a
+                    # null reason and Mongo stores it verbatim, and html.escape
+                    # raises AttributeError on None -- which the outer except
+                    # would swallow, so the user is banned AND told nothing.
+                    reason=html.escape(str(ban_details.get("reason") or "Not specified")),
                     ban_time=ban_time,
                 ),
                 parse_mode=ParseMode.HTML,

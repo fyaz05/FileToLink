@@ -94,6 +94,16 @@ _PAGE_BUDGET_UNITS = TELEGRAM_MAX_UNITS - 600
 _PAGE_SEND_DELAY_SECONDS = 0.5
 
 
+async def _sleep_between_pages() -> None:
+    """The pacing delay, behind a name.
+
+    Tests patch THIS rather than `admin.asyncio.sleep`, which is the asyncio
+    module itself: patching through it replaces sleep for the whole process,
+    including anything the test framework awaits during teardown.
+    """
+    await asyncio.sleep(_PAGE_SEND_DELAY_SECONDS)
+
+
 # /log tail cap
 _LOG_TAIL_BYTES = 5 * 1024 * 1024
 
@@ -407,7 +417,7 @@ async def list_authorized_command(client: Client, message: Message):
             failed_pages += 1
         # pace only *between* pages: a burst of replies is what trips FloodWait
         if idx + 1 < len(pages):
-            await asyncio.sleep(_PAGE_SEND_DELAY_SECONDS)
+            await _sleep_between_pages()
 
     if failed_pages:
         await reply(

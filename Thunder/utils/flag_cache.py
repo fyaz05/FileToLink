@@ -58,9 +58,26 @@ class FlagCache:
         # loader task instead of stampeding the backend with N identical reads
         task = self._inflight.get(key)
         if task is None:
+            if len(self._inflight) >= self.max_items:
+                # Only _data honoured max_items; _inflight grew one Task per
+                # concurrent cold key and was bounded by nothing but handler
+                # concurrency. Bound it here rather than letting a stampede of
+                # distinct keys become unbounded bookkeeping.
+                self._prune_inflight()
+            if len(self._inflight) >= self.max_items:
+                # still full after pruning: skip single-flight for this key and
+                # load inline. Correctness does not depend on the coalescing --
+                # only the number of backend reads does.
+                return await self._load_and_store(key, loader)
             task = asyncio.create_task(self._load_and_store(key, loader))
             self._inflight[key] = task
         return await asyncio.shield(task)
+
+    def _prune_inflight(self) -> None:
+        """Drop finished loader tasks; they can never be awaited usefully again."""
+        for key, task in list(self._inflight.items()):
+            if task.done():
+                self._inflight.pop(key, None)
 
     async def _load_and_store(
         self,

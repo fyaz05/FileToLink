@@ -198,3 +198,68 @@ async def test_concurrent_touches_merge_into_one_row(touch_env):
 
     assert touch_env.calls == [[(public_hash, 1, 2)]]
     assert not cf._pending_touches
+
+
+# --- the two bounds the comments claim ------------------------------------
+#
+# "memory stays capped" and "repeated failures must not grow the buffer" were
+# both justified in the code by a comment and enforced by nothing: removing
+# either while-loop left the suite green.
+
+
+@pytest.mark.unit
+async def test_the_buffer_is_capped(touch_env):
+    from Thunder.utils import canonical_files as cf
+
+    for i in range(cf._TOUCH_BUFFER_MAX + 250):
+        cf.schedule_touch_file_record(_record(f"{i:032x}"[: cf.PUBLIC_HASH_LENGTH]))
+        assert len(cf._pending_touches) <= cf._TOUCH_BUFFER_MAX, (
+            f"the buffer grew to {len(cf._pending_touches)} entries, past the cap "
+            f"of {cf._TOUCH_BUFFER_MAX}"
+        )
+
+    assert cf._dropped_touches >= 250, "the overflow was not counted"
+
+
+@pytest.mark.unit
+async def test_the_oldest_entries_drop_first(touch_env):
+    """Dropping the NEWEST would discard the deltas we just took, which is worse
+    than dropping the ones we have been failing to flush longest."""
+    from Thunder.utils import canonical_files as cf
+
+    total = cf._TOUCH_BUFFER_MAX + 10
+    for i in range(total):
+        cf.schedule_touch_file_record(_record(f"{i:032x}"[: cf.PUBLIC_HASH_LENGTH]))
+
+    keys = list(cf._pending_touches)
+    assert len(keys) == cf._TOUCH_BUFFER_MAX
+    expected = [f"{i:032x}"[: cf.PUBLIC_HASH_LENGTH] for i in range(10, total)]
+    assert keys == expected, "the wrong end of the buffer was dropped"
+
+
+@pytest.mark.unit
+async def test_a_repeatedly_failing_flush_does_not_grow_the_buffer(touch_env):
+    """Re-queued deltas merge by key, so a persistently failing Mongo cannot make
+    the buffer grow -- the merge is what bounds it, not the cap alone."""
+
+    async def _fail_like_the_real_callee(rows, *, raise_on_error: bool = False):
+        if raise_on_error:
+            raise RuntimeError("mongo down")
+        return False
+
+    touch_env.bulk_touch_file_records = _fail_like_the_real_callee
+    public_hash = "9" * cf.PUBLIC_HASH_LENGTH
+    rounds = cf._TOUCH_BUFFER_MAX + 20
+
+    for _ in range(rounds):
+        cf.schedule_touch_file_record(_record(public_hash))
+        await cf._bulk_flush()
+
+    assert len(cf._pending_touches) == 1, (
+        f"the same file grew into {len(cf._pending_touches)} buffered rows -- a "
+        "failing flush is multiplying deltas instead of merging them"
+    )
+    assert cf._pending_touches[public_hash][2] == rounds, (
+        f"the merged delta is {cf._pending_touches[public_hash][2]}, expected one "
+        f"per schedule call ({rounds})"
+    )

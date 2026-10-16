@@ -37,6 +37,11 @@ MAX_REQUEST_ATTEMPTS = 5
 # worker's claim outlives the TTL with nothing to show for it, so this must be
 # bounded too or the user waits forever on a file that will never appear.
 MAX_CONTENDED_ATTEMPTS = 20
+# Hard ceiling on per-user windows held in memory. The sweep prunes on a timer,
+# which is not a bound: it bounds the steady state, not what can be created in
+# the interval. dicts preserve insertion order, so the oldest tracked user is
+# the one evicted.
+MAX_TRACKED_USERS = 50_000
 # Bounded bookkeeping
 MAX_TRACKED_USERS = 4096
 MAX_TRACKED_FILES = 1024
@@ -202,7 +207,13 @@ class RateLimiter:
             if len(self.global_requests) >= self.max_global_requests_per_minute:
                 return False
 
-        user_timestamps = self.user_requests.setdefault(user_id, deque())
+        user_timestamps = self.user_requests.get(user_id)
+        if user_timestamps is None:
+            # hard bound, not only sweep-bounded (H6a): between the 5-minute
+            # sweeps a flood of distinct user ids would add a deque each
+            if len(self.user_requests) >= MAX_TRACKED_USERS:
+                self.user_requests.pop(next(iter(self.user_requests)), None)
+            user_timestamps = self.user_requests[user_id] = deque()
         while (
             user_timestamps and user_timestamps[0] <= current_time - self.rate_limit_period_seconds
         ):
@@ -489,8 +500,17 @@ class RateLimiter:
         if self._deferred_timer is not None:
             self._deferred_timer.cancel()
         self._deferred_timer = asyncio.get_running_loop().call_later(
-            min(earliest - now, 300.0), self.request_event.set
+            min(earliest - now, 300.0), self._deferred_wakeup
         )
+
+    def _deferred_wakeup(self) -> None:
+        """Clear our own handle when the timer fires.
+
+        The handle was left dangling after firing: it kept a completed
+        TimerHandle alive for the process's lifetime, and the next
+        _park_if_all_deferred then cancelled an already-fired timer."""
+        self._deferred_timer = None
+        self.request_event.set()
 
     async def request_executor(self):
         """One consumer; start :data:`Var.EXECUTOR_WORKERS` -- see start_executors()."""
