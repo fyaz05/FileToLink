@@ -66,6 +66,20 @@ jobs:
       - name: Unit tests
         run: uv run pytest --cov=Thunder --cov-report=term-missing --cov-fail-under=35
 
+      # addopts = "-m unit" silently deselects any test that forgets its marker:
+      # an unmarked test is collected but never runs, and nothing else notices.
+      - name: No test is silently excluded by the marker filter
+        run: |
+          # compare the "collected/deselected" counts only -- the rest of the
+          # summary line carries a timing that differs between runs
+          UNIT=$(uv run pytest -m unit --collect-only -q | tail -1 | cut -d' ' -f1)
+          ALL=$(uv run pytest -m "not integration" --collect-only -q | tail -1 | cut -d' ' -f1)
+          echo "unit=$UNIT all-non-integration=$ALL"
+          if [ "$UNIT" != "$ALL" ]; then
+            echo "::error::A test is missing its @pytest.mark.unit and addopts=-m unit is excluding it. Mark it, or move it to the integration tier."
+            exit 1
+          fi
+
       # Audit the locked env: `-r requirements.txt` (direct pins only) never covered transitives.
       - name: pip-audit (locked environment incl. transitives)
         run: uv run pip-audit

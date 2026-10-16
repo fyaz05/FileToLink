@@ -129,11 +129,17 @@ async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env,
     assert elapsed < 60, "shutdown outlived the container stop grace period"
 
 
-def test_signal_delivery_is_wired_for_pid_1():
+@pytest.mark.unit
+def test_thunder_sh_execs_python_so_it_becomes_pid_1():
     """Docker runs CMD ["bash", "thunder.sh"]; without exec, bash stays PID 1 and
-    never forwards SIGTERM, so shutdown_services would be unreachable in every
-    container deploy. Pyrofork's idle() installs the handler -- assert both
-    halves of that chain instead of trusting them."""
+    never forwards SIGTERM, so shutdown_services is unreachable in every
+    container deploy.
+
+    This covers only our half of the chain. That pyrofork's idle() actually
+    delivers the signal to a real process is proved for real, by sending
+    SIGTERM to a live interpreter, in test_signal_delivery.test_sigterm_reaches_idle
+    (integration tier: POSIX only).
+    """
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[2]
@@ -142,11 +148,5 @@ def test_signal_delivery_is_wired_for_pid_1():
 
     assert "exec " in script, "thunder.sh must exec python so it becomes PID 1"
     assert 'CMD ["bash", "thunder.sh"]' in dockerfile
-
-    import inspect
-
-    import pyrogram.methods.utilities.idle as idle_mod
-
-    source = inspect.getsource(idle_mod.idle)
-    assert "SIGTERM" in source, "pyrofork's idle() must install the SIGTERM handler"
-    assert "signal_fn(" in source
+    # the update phase runs under bash as PID 1; it must not block forever
+    assert "update.py" in script
