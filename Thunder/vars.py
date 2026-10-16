@@ -7,6 +7,7 @@ kept so no import site changes.
 """
 
 import os
+from urllib.parse import unquote, urlsplit
 
 from dotenv import dotenv_values
 
@@ -124,6 +125,12 @@ class Var:
     _require(API_HASH, "API_HASH", "app hash from my.telegram.org")
     _require(BOT_TOKEN, "BOT_TOKEN", "bot token from @BotFather")
 
+    # NAME is NOT the bot's display name -- the banner prints
+    # bot_info.first_name straight from Telegram. NAME is used in exactly one
+    # place, Database(Var.DATABASE_URL, Var.NAME), and selects the Mongo
+    # database. config_sample.env used to call it "Bot application name",
+    # which is how an operator ends up renaming the bot and silently pointing
+    # it at a different, empty database.
     NAME: str = os.getenv("NAME", "ThunderF2L")
     # pyrofork auto-sleeps FloodWait <= this threshold inside the RPC; waits
     # above it surface to tg_call's bounded retry. Keep well below
@@ -157,6 +164,30 @@ class Var:
 
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     _require(DATABASE_URL, "DATABASE_URL", "MongoDB connection string")
+
+    # The database NAME comes from NAME, not from the path in DATABASE_URL.
+    # config_sample.env's example ("mongodb+srv://user:pass@host/db") reads as
+    # though the path selects the database, so an operator pointing DATABASE_URL
+    # at a new cluster expects a new database and instead gets the old NAME's,
+    # which looks exactly like total data loss. Verified against a live cluster:
+    # a URI whose path said "frdeewf" was served from "ThunderF2L".
+    #
+    # Warn rather than silently honour the path: switching which one wins would
+    # repoint every existing deployment at an empty database.
+    _uri_db = ""
+    try:
+        _path = urlsplit(DATABASE_URL).path.strip("/")
+        if _path:
+            _uri_db = unquote(_path.split("/")[0])
+    except Exception:
+        _uri_db = ""
+    if _uri_db and _uri_db != NAME:
+        _config_warnings.append(
+            f"DATABASE_URL names database {_uri_db!r} but NAME selects "
+            f"{NAME!r} -- NAME wins and the path is IGNORED. Set NAME="
+            f"{_uri_db!r} to use the URI's database, or drop the path to silence "
+            "this. Silently using the other one looks like total data loss."
+        )
 
     MAX_BATCH_FILES: int = _get_int("MAX_BATCH_FILES", "50", min_val=1, max_val=100)
 

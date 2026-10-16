@@ -26,7 +26,12 @@ def _run_in(tmp_path, extra_env=None):
             "API_HASH": "h",
             "BOT_TOKEN": "1:x",
             "BIN_CHANNEL": "-1",
-            "DATABASE_URL": "mongodb://localhost/x",
+            # No path: the database comes from NAME, and a path that disagrees
+            # with it makes vars.py warn -- which would then show up in the
+            # stdout this file asserts on. These tests are about layer
+            # precedence, not about the database, so keep the fixture
+            # internally consistent rather than asserting the warning away.
+            "DATABASE_URL": "mongodb://localhost",
             "OWNER_ID": "42",
             "PYTHONPATH": str(REPO_ROOT),
         }
