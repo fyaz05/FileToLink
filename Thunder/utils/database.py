@@ -33,21 +33,29 @@ class Database:
         self.migration_flags_col: AsyncCollection = self.db.migration_flags
 
     async def _deduplicate_users(self) -> None:
+        """Collapse duplicate ``users.id`` documents, keeping the oldest.
+
+        Scoped to the duplicated ids only: the previous version materialised
+        every surviving ``_id`` and deleted with ``{"_id": {"$nin": keep_ids}}``,
+        which embeds one ObjectId per user in a single BSON document (16 MB cap)
+        and sorts the whole collection in memory -- both fatal at scale inside
+        the client's ``timeoutMS``.
+        """
         pipeline: list[dict[str, Any]] = [
             {"$sort": {"join_date": 1}},
-            {"$group": {"_id": "$id", "doc_id": {"$first": "$_id"}}},
-            {"$project": {"_id": "$doc_id"}},
+            {"$group": {"_id": "$id", "n": {"$sum": 1}, "keep": {"$first": "$_id"}}},
+            {"$match": {"n": {"$gt": 1}}},
         ]
-        keep_ids = []
+        deleted = 0
         # AsyncCollection.aggregate() is a coroutine in pymongo's async API:
         # iterate the awaited cursor, never the coroutine itself.
-        cursor = await self.col.aggregate(pipeline)
+        cursor = await self.col.aggregate(pipeline, allowDiskUse=True)
         async for doc in cursor:
-            keep_ids.append(doc["_id"])
-        if keep_ids:
-            result = await self.col.delete_many({"_id": {"$nin": keep_ids}})
-            if result.deleted_count > 0:
-                logger.warning(f"Deduplicated {result.deleted_count} duplicate user documents.")
+            # one small delete per duplicate group, whatever the user count
+            result = await self.col.delete_many({"id": doc["_id"], "_id": {"$ne": doc["keep"]}})
+            deleted += result.deleted_count
+        if deleted:
+            logger.warning(f"Deduplicated {deleted} duplicate user documents.")
 
     async def _file_ttl_index_seconds(self) -> int | None:
         """Current ``expireAfterSeconds`` of the file TTL index, or None when
@@ -196,6 +204,13 @@ class Database:
             logger.warning(f"Index ensure on {col.name} skipped; re-checked on next boot: {e}")
         except OperationFailure as e:
             logger.error(f"Index ensure on {col.name} failed; re-checked on next boot: {e}")
+            if opts.get("unique"):
+                # files has no dedup recovery path, so an unenforced unique
+                # index silently splits seen/reuse counters across duplicates
+                logger.error(
+                    f"Unique index on {col.name} is NOT enforced until it succeeds: "
+                    "duplicate records will split per-file counters."
+                )
 
     async def ensure_indexes(self, *, raise_on_error: bool = True) -> bool:
         try:
@@ -214,10 +229,14 @@ class Database:
                     await self._create_file_ttl_index(expected_ttl)
                     logger.info(f"File TTL index active: {Var.FILE_TTL_DAYS} days")
             else:
-                try:
-                    await self.files_col.drop_index("last_seen_at_1")
-                except Exception:
-                    pass
+                # probe first: with FILE_TTL_DAYS=0 a per-boot dropIndexes that
+                # always fails is a wasted round-trip, and its blanket except
+                # used to swallow genuine auth/namespace errors
+                if await self._file_ttl_index_seconds() is not None:
+                    try:
+                        await self.files_col.drop_index("last_seen_at_1")
+                    except OperationFailure as e:
+                        logger.warning(f"Could not drop the file TTL index: {e}")
 
             await self._ensure_index(self.banned_users_col, "user_id", unique=True)
             await self._ensure_index(self.banned_channels_col, "channel_id", unique=True)
@@ -228,12 +247,24 @@ class Database:
                 self.token_col, [("user_id", 1), ("activated", 1), ("expires_at", -1)]
             )
             await self._ensure_index(self.authorized_users_col, "user_id", unique=True)
+            # users.id is the one unique index that may legitimately need a
+            # dedup pass first, so it cannot go through _ensure_index as-is --
+            # but neither a dedup failure nor an auth/namespace error may abort
+            # the ten ensures that follow.
             try:
                 await self.col.create_index("id", unique=True)
             except DuplicateKeyError:
                 logger.warning("Duplicate users found, deduplicating...")
-                await self._deduplicate_users()
-                await self._ensure_index(self.col, "id", unique=True)
+                try:
+                    await self._deduplicate_users()
+                except Exception as e:
+                    logger.error(
+                        f"User dedup failed; users.id stays unindexed until next boot: {e}"
+                    )
+                else:
+                    await self._ensure_index(self.col, "id", unique=True)
+            except OperationFailure as e:
+                logger.error(f"users.id unique index ensure failed; re-checked on next boot: {e}")
             await self._ensure_index(self.token_col, "expires_at", expireAfterSeconds=0)
             await self._ensure_index(self.token_col, "activated")
             await self._ensure_index(self.restart_message_col, "message_id", unique=True)
