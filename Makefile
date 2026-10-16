@@ -1,4 +1,4 @@
-.PHONY: format lint test integration coverage lock audit run clean
+.PHONY: format lint test integration coverage lock audit run clean gates quick t
 
 # Developer entry points (see CONTRIBUTING.md)
 # Recipes need hard TABs; tools run via `uv run` (project env, not the ambient venv).
@@ -14,6 +14,35 @@ lint:
 
 test:
 	uv run pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35
+
+# --- the fast loop -------------------------------------------------------
+#
+# Measured with the dev group synced. Importing pyrogram costs ~2.8s and
+# happens in every pytest run, so there is a hard floor of ~3.8s per
+# invocation no matter how few tests you select. The expensive part is
+# therefore running the WRONG command, not the tool being slow:
+#
+#   make gates      1.5s  ruff + ruff-format + mypy, no pytest
+#   make t <path>   4.0s  one test file (or one node with ::)
+#   make quick      6.8s  the whole unit tier, no coverage
+#   make test      10.7s  the whole tier plus the coverage gate
+#
+# Iterate with `make gates` and `make t <file>`. Run `make quick` or
+# `make test` ONCE per commit, not after every edit.
+
+gates:
+	uv run ruff check Thunder/ update.py tests/
+	uv run ruff format --check Thunder/ update.py tests/
+	uv run mypy Thunder update.py --ignore-missing-imports
+
+# make t FILE=tests/test_unit/test_batch_chunking.py
+# make t FILE=tests/test_unit/test_batch_chunking.py::test_chunking_never_drops
+t:
+	uv run pytest -m unit -q --no-cov $(FILE)
+
+# the whole tier without the coverage gate -- the pre-commit check
+quick:
+	uv run pytest -m unit -q --no-cov
 
 # CI parity for the opt-in tier (needs Docker): real MongoDB via testcontainers
 integration:

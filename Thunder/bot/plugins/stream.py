@@ -64,9 +64,27 @@ BATCH_UPDATE_INTERVAL = 5
 MESSAGE_DELAY = 0.5
 _BATCH_DEADLINE_BASE = 30
 
-# Room left for the header, the DM prefix (which carries the chat title) and the
-# <code> tags, so a chunk that measures _LINK_CHUNK_UNITS still fits the cap.
-_LINK_CHUNK_UNITS = TELEGRAM_MAX_UNITS - 600
+# Room left for everything that is not a link, so a chunk that measures
+# _LINK_CHUNK_UNITS still fits inside one message.
+#
+# The DM mirror carries the chat title, and html.escape turns ONE character
+# into as many as six (&#x27; for an apostrophe). A legal 128-character group
+# title therefore costs up to 768 units, not 128 -- an earlier flat 600 reserve
+# was below that and Telegram rejected the DM at 4252 units for exactly the
+# CJK/emoji filenames this budget exists to protect. Derived from the real
+# messages so it cannot drift when the wording changes.
+_MAX_TITLE_CHARS = 128
+_WORST_ESCAPE_EXPANSION = 6  # "&#x27;" is the longest single-character escape
+# escaped, because that is what is interpolated at the call site
+_DM_PREFIX_RESERVE = (
+    telegram_len(MSG_DM_BATCH_PREFIX.format(chat_title=html.escape("'" * _MAX_TITLE_CHARS))) + 1
+)
+_HEADER_RESERVE = telegram_len(MSG_BATCH_LINKS_READY.format(count=999)) + 2
+_TAG_RESERVE = len("<code></code>")
+_LINK_CHUNK_UNITS = TELEGRAM_MAX_UNITS - (_DM_PREFIX_RESERVE + _HEADER_RESERVE + _TAG_RESERVE)
+assert _DM_PREFIX_RESERVE >= _MAX_TITLE_CHARS * _WORST_ESCAPE_EXPANSION, (
+    "the DM reserve no longer covers the worst-case escape expansion of a 128-character group title"
+)
 
 
 async def fwd_media(m_msg: Message) -> Message | None:
@@ -570,6 +588,48 @@ async def process_single(
         return None
 
 
+async def _deliver_chunks(bot: Client, msg: Message, links: list[str]) -> tuple[int, int, int]:
+    """Send the batch links, mirroring each chunk to the requester's DM.
+
+    Returns ``(chat_failed, dm_failed, total_chunks)``. A failed send is
+    counted and reported rather than logged and forgotten -- an undelivered
+    chunk is links the user never receives, and in a private chat there is no
+    other indication that anything went wrong.
+    """
+    chunks = _batch_chunks(links)
+    dm_failed = 0
+    chat_failed = 0
+    mirror = msg.chat.type != enums.ChatType.PRIVATE and msg.from_user
+    for idx, chunk in enumerate(chunks):
+        chunk_text = _batch_chunk_text(chunk)
+        try:
+            await reply_safe(
+                msg, chunk_text, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML
+            )
+        except Exception as e:
+            logger.error(f"Error sending batch chunk: {e}", exc_info=True)
+            chat_failed += 1
+        if mirror:
+            try:
+                await send_safe(
+                    bot,
+                    msg.from_user.id,
+                    text=MSG_DM_BATCH_PREFIX.format(
+                        chat_title=html.escape((msg.chat.title or "the chat")[:_MAX_TITLE_CHARS])
+                    )
+                    + "\n"
+                    + chunk_text,
+                    disable_web_page_preview=True,
+                    parse_mode=enums.ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.error(f"Error sending DM in batch: {e}", exc_info=True)
+                dm_failed += 1
+        if idx + 1 < len(chunks):
+            await asyncio.sleep(MESSAGE_DELAY)
+    return chat_failed, dm_failed, len(chunks)
+
+
 async def process_batch(
     bot: Client,
     msg: Message,
@@ -682,36 +742,7 @@ async def process_batch(
     processed = sum(1 for r in results.values() if r)
 
     links_list = [rec["online_link"] for mid in ids if (rec := results.get(mid))]
-    chunks = _batch_chunks(links_list)
-    dm_failed_chunks = 0
-    chat_failed_chunks = 0
-    for idx, chunk in enumerate(chunks):
-        chunk_text = _batch_chunk_text(chunk)
-        try:
-            await reply_safe(
-                msg, chunk_text, disable_web_page_preview=True, parse_mode=enums.ParseMode.HTML
-            )
-        except Exception as e:
-            logger.error(f"Error sending batch chunk: {e}", exc_info=True)
-            chat_failed_chunks += 1
-        if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
-            try:
-                await send_safe(
-                    bot,
-                    msg.from_user.id,
-                    text=MSG_DM_BATCH_PREFIX.format(
-                        chat_title=html.escape(msg.chat.title or "the chat")
-                    )
-                    + "\n"
-                    + chunk_text,
-                    disable_web_page_preview=True,
-                    parse_mode=enums.ParseMode.HTML,
-                )
-            except Exception as e:
-                logger.error(f"Error sending DM in batch: {e}", exc_info=True)
-                dm_failed_chunks += 1
-        if idx + 1 < len(chunks):
-            await asyncio.sleep(MESSAGE_DELAY)
+    chat_failed_chunks, dm_failed_chunks, total_chunks = await _deliver_chunks(bot, msg, links_list)
 
     # A chunk that fails to send is a chunk of links the user never receives.
     # Reporting it is the whole point: the old code only logged and moved on.
@@ -719,14 +750,14 @@ async def process_batch(
         await reply_user_err(
             msg,
             MSG_ERROR_BATCH_CHUNK_FAILED.format(
-                failed_chunks=chat_failed_chunks, total_chunks=len(chunks)
+                failed_chunks=chat_failed_chunks, total_chunks=total_chunks
             ),
         )
     if dm_failed_chunks:
         await reply_user_err(
             msg,
             MSG_ERROR_DM_BATCH_FAILED.format(
-                failed_chunks=dm_failed_chunks, total_chunks=len(chunks)
+                failed_chunks=dm_failed_chunks, total_chunks=total_chunks
             ),
         )
 

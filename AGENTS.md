@@ -40,6 +40,31 @@ make test        # unit tier (hermetic: no network, no Mongo)
 make audit       # pip-audit + bandit + vulture + dependency-count
 ```
 
+### The fast loop — read this before running the full tier
+
+Importing `pyrofork` costs **~2.8 s** and happens on *every* pytest invocation,
+so there is a hard floor of **~3.8 s per run** no matter how few tests you
+select. The expensive part is running the wrong command, not the tool being
+slow. Measured on a Windows host with the dev group synced:
+
+| command | time | what it covers |
+|---|---|---|
+| `scripts/dev.sh gates` | 1.5 s | ruff + ruff-format + mypy, no pytest |
+| `scripts/dev.sh file <path>` | 4.0 s | one test file, or one node with `::` |
+| `scripts/dev.sh quick` | 6.8 s | the whole unit tier, no coverage |
+| `scripts/dev.sh test` | 10.7 s | the whole tier + the coverage gate |
+| `scripts/dev.sh all` | 12 s | gates + `test`, i.e. what CI runs |
+
+Iterate with `gates` and `file`. Run `quick` or `test` **once per commit**, not
+after every edit — re-running the full tier per 3-line change is the single
+biggest time sink in this repo. `make gates/quick/t FILE=...` are equivalent
+for hosts that have `make`.
+
+Keep new tests fast. Two tests once accounted for 18 s of a 25 s run: one paid
+a real `asyncio.sleep` per page it generated, the other waited out the real
+production timeout to prove a mechanism. Stub the delay, or shrink the constant
+locally and pin the production value in a separate test.
+
 ## Test tiers
 
 - **Unit** (every PR): `uv run pytest -m unit --cov=Thunder --cov-report=term-missing --cov-fail-under=35`
