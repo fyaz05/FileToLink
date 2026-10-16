@@ -72,6 +72,8 @@ from Thunder.utils.messages import (
     MSG_USER_NOT_IN_BAN_LIST,
     MSG_USER_UNBANNED_NOTIFICATION,
     MSG_WORKLOAD_ITEM,
+    TELEGRAM_MAX_UNITS,
+    paginate_lines,
 )
 from Thunder.utils.rate_limiter import rate_limiter
 from Thunder.utils.safe_call import (
@@ -86,14 +88,9 @@ from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
 
-# Telegram counts message length in UTF-16 code units, not code points
-_PAGE_BUDGET_UNITS = 3500
+# headroom under the 4096 cap for the markup and the markup-escaped records
+_PAGE_BUDGET_UNITS = TELEGRAM_MAX_UNITS - 600
 _PAGE_SEND_DELAY_SECONDS = 0.5
-
-
-def _telegram_len(text: str) -> int:
-    """Length as Telegram measures it: an emoji costs 2 units, len() counts 1."""
-    return len(text.encode("utf-16-le")) // 2
 
 
 # /log tail cap
@@ -386,22 +383,10 @@ async def list_authorized_command(client: Client, message: Message):
 
     text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)
 
-    # long auth lists exceed Telegram's 4096 cap: page by lines, measured in
-    # UTF-16 code units because that is what the cap counts (an emoji costs 2,
-    # so len() alone lets an emoji-dense page over the limit)
-    if _telegram_len(text) <= _PAGE_BUDGET_UNITS:
-        pages = [text]
-    else:
-        pages, current = [], ""
-        for line in text.split("\n"):
-            if _telegram_len(current) + _telegram_len(line) + 1 > _PAGE_BUDGET_UNITS:
-                pages.append(current)
-                current = ""
-            current += line + "\n"
-        if current:
-            pages.append(current)
-
-    for page in pages:
+    # long auth lists exceed Telegram's 4096 cap: page on line breaks, measured
+    # in UTF-16 units because that is what the cap counts
+    pages = paginate_lines(text, _PAGE_BUDGET_UNITS)
+    for idx, page in enumerate(pages):
         try:
             await reply(
                 message,
@@ -415,7 +400,8 @@ async def list_authorized_command(client: Client, message: Message):
             # one failed page must not silently drop the rest of the list
             logger.error(f"Failed to send /listauth page: {e}", exc_info=True)
             break
-        if len(pages) > 1:
+        # pace only *between* pages: a burst of replies is what trips FloodWait
+        if idx + 1 < len(pages):
             await asyncio.sleep(_PAGE_SEND_DELAY_SECONDS)
 
 

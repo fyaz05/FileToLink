@@ -1,3 +1,36 @@
+# ====== LIMITS ======
+
+# Telegram rejects a message longer than 4096 UTF-16 code units. An emoji costs
+# 2 units where len() counts 1, so len() is the wrong measure.
+TELEGRAM_MAX_UNITS = 4096
+
+
+def telegram_len(text: str) -> int:
+    """Length as Telegram measures it: an emoji costs 2 units, len() counts 1."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def paginate_lines(text: str, budget: int) -> list[str]:
+    """Split text into pages of at most ``budget`` UTF-16 units, on line breaks.
+
+    Never splits mid-line: a line longer than the budget becomes its own page
+    rather than being chopped, because a half-rendered record is worse than one
+    over-long line the caller will notice.
+    """
+    if telegram_len(text) <= budget:
+        return [text]
+    pages: list[str] = []
+    current = ""
+    for line in text.split("\n"):
+        if current and telegram_len(current) + telegram_len(line) + 1 > budget:
+            pages.append(current)
+            current = ""
+        current += line + "\n"
+    if current:
+        pages.append(current)
+    return pages
+
+
 # ====== ERROR MESSAGES ======
 
 MSG_ERROR_GENERIC = (
@@ -19,6 +52,12 @@ MSG_ERROR_DM_BATCH_FAILED = (
     "⚠️ **Partial DM Delivery**\n\n"
     "> 📭 I couldn't deliver {failed_chunks} of {total_chunks} batch chunk(s) to you in private chat.\n"
     "> This usually means you haven't started a private chat with me, or you've blocked me."
+)
+MSG_ERROR_BATCH_CHUNK_FAILED = (
+    "⚠️ **Partial delivery**\n\n"
+    "> I couldn't send {failed_chunks} of {total_chunks} batch chunk(s) here — "
+    "those links are missing from the list above.\n"
+    "> Try `/link` again in smaller batches, or pick me up in private."
 )
 
 MSG_ERROR_TEMP = (

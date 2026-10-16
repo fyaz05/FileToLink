@@ -31,6 +31,7 @@ from Thunder.utils.messages import (
     MSG_CRITICAL_ERROR,
     MSG_DM_BATCH_PREFIX,
     MSG_DM_SINGLE_PREFIX,
+    MSG_ERROR_BATCH_CHUNK_FAILED,
     MSG_ERROR_DM_BATCH_FAILED,
     MSG_ERROR_INVALID_NUMBER,
     MSG_ERROR_NO_FILE,
@@ -45,6 +46,8 @@ from Thunder.utils.messages import (
     MSG_PROCESSING_REQUEST,
     MSG_PROCESSING_RESULT,
     MSG_PROCESSING_STATUS,
+    TELEGRAM_MAX_UNITS,
+    telegram_len,
 )
 from Thunder.utils.rate_limiter import handle_rate_limited_request
 from Thunder.utils.safe_call import (
@@ -57,10 +60,13 @@ from Thunder.utils.safe_call import (
 from Thunder.vars import Var
 
 BATCH_SIZE = 10
-LINK_CHUNK_SIZE = 20
 BATCH_UPDATE_INTERVAL = 5
 MESSAGE_DELAY = 0.5
 _BATCH_DEADLINE_BASE = 30
+
+# Room left for the header, the DM prefix (which carries the chat title) and the
+# <code> tags, so a chunk that measures _LINK_CHUNK_UNITS still fits the cap.
+_LINK_CHUNK_UNITS = TELEGRAM_MAX_UNITS - 600
 
 
 async def fwd_media(m_msg: Message) -> Message | None:
@@ -116,6 +122,35 @@ def _batch_chunk_text(chunk: list[str]) -> str:
     """
     body = "\n".join(html.escape(link) for link in chunk)
     return MSG_BATCH_LINKS_READY.format(count=len(chunk)) + f"\n\n<code>{body}</code>"
+
+
+def _batch_chunks(links: list[str], *, budget: int = _LINK_CHUNK_UNITS) -> list[list[str]]:
+    """Split links so every rendered chunk fits inside one Telegram message.
+
+    Chunking by count is not safe: a link embeds the percent-encoded file name,
+    so one CJK glyph costs 9 characters. 20 such links render to ~12000 UTF-16
+    units against a 4096 cap -- reply_safe raises, the error was only logged,
+    and the user silently lost the whole chunk. Measure what is actually sent.
+
+    Budget reserves room for the header, the DM prefix and the <code> tags.
+    A single link that alone exceeds the budget still gets its own chunk rather
+    than looping forever; telegram rejects it, which is visible, not silent.
+    """
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for link in links:
+        # escaped: the width that matters is the one sent on the wire
+        cost = telegram_len(html.escape(link)) + 1  # + the joining newline
+        if current and size + cost > budget:
+            chunks.append(current)
+            current = []
+            size = 0
+        current.append(link)
+        size += cost
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 async def send_channel_links(
@@ -647,10 +682,9 @@ async def process_batch(
     processed = sum(1 for r in results.values() if r)
 
     links_list = [rec["online_link"] for mid in ids if (rec := results.get(mid))]
-    chunks = [
-        links_list[i : i + LINK_CHUNK_SIZE] for i in range(0, len(links_list), LINK_CHUNK_SIZE)
-    ]
+    chunks = _batch_chunks(links_list)
     dm_failed_chunks = 0
+    chat_failed_chunks = 0
     for idx, chunk in enumerate(chunks):
         chunk_text = _batch_chunk_text(chunk)
         try:
@@ -659,6 +693,7 @@ async def process_batch(
             )
         except Exception as e:
             logger.error(f"Error sending batch chunk: {e}", exc_info=True)
+            chat_failed_chunks += 1
         if msg.chat.type != enums.ChatType.PRIVATE and msg.from_user:
             try:
                 await send_safe(
@@ -678,6 +713,15 @@ async def process_batch(
         if idx + 1 < len(chunks):
             await asyncio.sleep(MESSAGE_DELAY)
 
+    # A chunk that fails to send is a chunk of links the user never receives.
+    # Reporting it is the whole point: the old code only logged and moved on.
+    if chat_failed_chunks:
+        await reply_user_err(
+            msg,
+            MSG_ERROR_BATCH_CHUNK_FAILED.format(
+                failed_chunks=chat_failed_chunks, total_chunks=len(chunks)
+            ),
+        )
     if dm_failed_chunks:
         await reply_user_err(
             msg,
