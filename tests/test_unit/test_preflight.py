@@ -88,6 +88,58 @@ async def test_owner_bypasses_force_sub(monkeypatch):
 
 
 @pytest.mark.unit
+async def test_gate_reply_failure_never_breaks_the_gate(monkeypatch):
+    """The bot usually has no send permission in a storage channel, so a gate
+    denial that cannot be delivered must not change the gate's answer or raise
+    -- that is the whole point of routing denials through one helper."""
+    from Thunder.utils import decorators as dec
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("CHAT_WRITE_FORBIDDEN")
+
+    monkeypatch.setattr(dec, "reply_safe", _boom)
+
+    class _Msg:
+        from_user = None
+
+    # returns None (no exception escapes) for the failure path...
+    assert await dec._reply_ignore_failure(_Msg(), "denied") is None
+    # ...and the gate still denies
+    assert await dec.check_banned(object(), _Msg()) is False
+
+
+@pytest.mark.unit
+async def test_gate_reply_is_delivered_when_possible(monkeypatch):
+    from Thunder.utils import decorators as dec
+
+    seen: list[tuple] = []
+
+    async def _ok(msg, text, **kwargs):
+        seen.append((text, kwargs))
+
+    monkeypatch.setattr(dec, "reply_safe", _ok)
+    await dec._reply_ignore_failure(object(), "denied", parse_mode="HTML")
+    assert seen == [("denied", {"parse_mode": "HTML"})]
+
+
+@pytest.mark.unit
+def test_every_gate_denial_goes_through_the_helper():
+    """Guards the refactor: no gate may re-introduce a bare
+    try/except Exception: pass around a reply."""
+    import inspect
+
+    from Thunder.utils import decorators as dec
+
+    source = inspect.getsource(dec)
+    # the helper itself contains the only try/except around a reply
+    body = source.split("async def check_banned", 1)[1]
+    assert (
+        "try:\n" not in body.replace("try:\n            await _reply_ignore_failure", "")
+        or body.count("await reply_safe(") == 0
+    ), "a gate is calling reply_safe directly instead of the helper"
+
+
+@pytest.mark.unit
 async def test_anonymous_sender_denied_by_every_gate(monkeypatch):
     """Messages with no attributable sender (channel posts, anonymous admins)
     are DENIED fail-closed -- never bypass."""

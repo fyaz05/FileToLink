@@ -45,6 +45,20 @@ from Thunder.utils.tokens import allowed, check, generate
 from Thunder.vars import Var
 
 
+async def _reply_ignore_failure(message: Message, text: str, **kwargs) -> None:
+    """Best-effort gate reply.
+
+    A gate must never fail because the *denial* could not be delivered -- the
+    bot has no send permission in most storage channels, and replying is
+    advisory anyway. Every gate denial goes through here so the swallow-everything
+    policy lives in one place instead of eleven copies.
+    """
+    try:
+        await reply_safe(message, text, **kwargs)
+    except Exception as e:
+        logger.debug(f"Gate reply not delivered: {e}")
+
+
 async def check_banned(client, message: Message) -> bool:
     """Ban gate -- cached, fail-closed."""
     try:
@@ -53,10 +67,7 @@ async def check_banned(client, message: Message) -> bool:
             # would let a banned user post as the channel or as an anonymous
             # admin, so fail-closed like the private-mode and token gates.
             logger.debug("Denied unattributable sender (ban gate, no from_user).")
-            try:
-                await reply_safe(message, MSG_ERROR_ANONYMOUS_SENDER)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_ANONYMOUS_SENDER)
             return False
         user_id = message.from_user.id
         if user_id == Var.OWNER_ID:
@@ -72,10 +83,7 @@ async def check_banned(client, message: Message) -> bool:
         except Exception as e:
             # fail-closed: a Mongo outage must not un-ban everybody
             logger.error(f"Ban check degraded for user {user_id}: {e}", exc_info=True)
-            try:
-                await reply_safe(message, MSG_ERROR_TEMP)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_TEMP)
             return False
 
         if ban_details:
@@ -87,19 +95,16 @@ async def check_banned(client, message: Message) -> bool:
                 if banned_at
                 else "N/A"
             )
-            try:
-                await reply_safe(
-                    message,
-                    MSG_DECORATOR_BANNED.format(
-                        # reason is owner-set free text; escaped + explicit HTML
-                        # parse mode so it cannot reflow into markup
-                        reason=html.escape(ban_details.get("reason", "Not specified")),
-                        ban_time=ban_time,
-                    ),
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception:
-                pass
+            await _reply_ignore_failure(
+                message,
+                MSG_DECORATOR_BANNED.format(
+                    # reason is owner-set free text; escaped + explicit HTML
+                    # parse mode so it cannot reflow into markup
+                    reason=html.escape(ban_details.get("reason", "Not specified")),
+                    ban_time=ban_time,
+                ),
+                parse_mode=ParseMode.HTML,
+            )
             logger.debug(f"Blocked banned user {user_id}.")
             return False
         return True
@@ -116,10 +121,7 @@ async def check_private_mode(client, message: Message) -> bool:
         # Channel-posted / anonymous-admin messages have no verifiable user
         # id, so allowlist membership cannot be checked: fail-closed.
         logger.debug("Rejected unattributable sender (PRIVATE_MODE, no from_user).")
-        try:
-            await reply_safe(message, MSG_PRIVATE_MODE_DENIED)
-        except Exception:
-            pass
+        await _reply_ignore_failure(message, MSG_PRIVATE_MODE_DENIED)
         return False
     user_id = message.from_user.id
     if user_id == Var.OWNER_ID:
@@ -129,15 +131,9 @@ async def check_private_mode(client, message: Message) -> bool:
             return True
     except Exception as e:
         logger.error(f"Private-mode auth check failed for {user_id}: {e}", exc_info=True)
-        try:
-            await reply_safe(message, MSG_ERROR_TEMP)
-        except Exception:
-            pass
+        await _reply_ignore_failure(message, MSG_ERROR_TEMP)
         return False
-    try:
-        await reply_safe(message, MSG_PRIVATE_MODE_DENIED)
-    except Exception:
-        pass
+    await _reply_ignore_failure(message, MSG_PRIVATE_MODE_DENIED)
     logger.debug(f"Rejected non-allowlisted user {user_id} (PRIVATE_MODE).")
     return False
 
@@ -153,10 +149,7 @@ async def require_token(client, message: Message) -> bool:
         if not message.from_user:
             # anonymous senders cannot hold a token: fail-closed
             logger.debug("Denied unattributable sender (token gate, no from_user).")
-            try:
-                await reply_safe(message, MSG_ERROR_ANONYMOUS_SENDER)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_ANONYMOUS_SENDER)
             return False
 
         user_id = message.from_user.id
@@ -168,10 +161,7 @@ async def require_token(client, message: Message) -> bool:
                 return True
         except Exception as e:
             logger.error(f"Token gate degraded for user {user_id}: {e}", exc_info=True)
-            try:
-                await reply_safe(message, MSG_ERROR_TEMP)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_TEMP)
             return False
 
         try:
@@ -180,10 +170,7 @@ async def require_token(client, message: Message) -> bool:
             logger.error(
                 f"Failed to generate temporary token for user {user_id}: {e}", exc_info=True
             )
-            try:
-                await reply_safe(message, MSG_ERROR_TOKEN_LINK_FAILED)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_TOKEN_LINK_FAILED)
             return False
 
         # generate() returns a token or raises; no empty-string path exists
@@ -192,17 +179,11 @@ async def require_token(client, message: Message) -> bool:
             me = await tg_call(client.get_me)
         except Exception as e:
             logger.error(f"Failed to get bot info for user {user_id}: {e}", exc_info=True)
-            try:
-                await reply_safe(message, MSG_ERROR_UNEXPECTED)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_UNEXPECTED)
             return False
         if not me:
             logger.error(f"get_me returned nothing for user {user_id}.", exc_info=True)
-            try:
-                await reply_safe(message, MSG_ERROR_UNEXPECTED)
-            except Exception:
-                pass
+            await _reply_ignore_failure(message, MSG_ERROR_UNEXPECTED)
             return False
         deep_link = (
             "https://t.me/" + me.username + "?start=" + quote_plus(temp_token_string, safe="")
@@ -219,26 +200,18 @@ async def require_token(client, message: Message) -> bool:
                 exc_info=True,
             )
 
-        try:
-            await reply_safe(
-                message,
-                MSG_TOKEN_INVALID,
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("Activate Access", url=short_url)]]
-                ),
-            )
-        except Exception:
-            pass
+        await _reply_ignore_failure(
+            message,
+            MSG_TOKEN_INVALID,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Activate Access", url=short_url)]]
+            ),
+        )
         logger.debug(f"Sent temporary token activation link to user {user_id}.")
         return False
     except Exception as e:
         logger.error(f"Error in require_token: {e}", exc_info=True)
-        try:
-            await reply_safe(message, MSG_ERROR_UNEXPECTED)
-        except Exception as inner_e:
-            logger.error(
-                f"Failed to send error message to user in require_token: {inner_e}", exc_info=True
-            )
+        await _reply_ignore_failure(message, MSG_ERROR_UNEXPECTED)
         return False
 
 

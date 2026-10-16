@@ -378,8 +378,10 @@ async def list_authorized_command(client: Client, message: Message):
             i=i,
             display_name=display_name,
             user_id=user["user_id"],
-            authorized_by=user["authorized_by"],
-            auth_time=user["authorized_at"],
+            # these come from the authorization records, not from Telegram:
+            # escape anyway, they render inside an HTML message (M7)
+            authorized_by=html.escape(str(user["authorized_by"])),
+            auth_time=html.escape(str(user["authorized_at"])),
         )
 
     text += MSG_ADMIN_AUTH_OWNER_FOOTER.format(owner_id=Var.OWNER_ID)

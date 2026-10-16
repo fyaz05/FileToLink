@@ -1,0 +1,152 @@
+"""End-to-end shutdown: the path CI never exercises.
+
+The container fix (shared budget + floor per step) is only meaningful if
+SIGTERM actually reaches ``shutdown_services`` and the touch buffer lands in
+Mongo before the process exits. Docker is not available on every dev host, so
+this drives ``shutdown_services`` directly with a populated buffer and a
+cancel-friendly background task -- the real function, the real rate limiter,
+the real touch buffer, only the database and the Telegram client are faked.
+
+What this does NOT cover: PID 1 signal delivery, which is a property of
+Dockerfile/thunder.sh. That is pinned separately by
+``test_signal_delivery_is_wired_for_pid_1``.
+"""
+
+import asyncio
+
+import pytest
+
+from Thunder import __main__ as main_mod
+from Thunder.utils import canonical_files as cf
+from Thunder.utils import rate_limiter as rl
+
+
+class _FakeDb:
+    def __init__(self) -> None:
+        self.touched: list[tuple[str, int, int]] = []
+        self.closed = False
+
+    async def bulk_touch_file_records(self, rows):
+        self.touched.extend(rows)
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.fixture
+def shutdown_env(monkeypatch):
+    """Wire shutdown_services to fakes and give back an observation bucket."""
+    fake = _FakeDb()
+    monkeypatch.setattr(cf, "db", fake)
+    monkeypatch.setattr(cf, "_pending_touches", type(cf._pending_touches)())
+    monkeypatch.setattr(cf, "_flush_task", None)
+    monkeypatch.setattr(cf, "_dropped_touches", 0)
+    monkeypatch.setattr(cf, "_cache_by_hash", type(cf._cache_by_hash)())
+    monkeypatch.setattr(cf, "_cache_by_unique_id", type(cf._cache_by_unique_id)())
+    monkeypatch.setattr(main_mod, "close_shortener", _noop)
+    monkeypatch.setattr(main_mod, "cleanup_clients", _noop)
+    monkeypatch.setattr(main_mod, "db", fake)
+    monkeypatch.setattr(main_mod, "work_loads", {})
+    # no rate-limiter executors running in a unit test
+    monkeypatch.setattr(rl.rate_limiter, "shutdown", _noop)
+    return fake
+
+
+async def _noop():
+    return None
+
+
+def _arm_touch(cf_mod, public_hash: str) -> None:
+    cf_mod.schedule_touch_file_record(
+        {"public_hash": public_hash, "file_unique_id": "u", "seen_count": 0}, reused=True
+    )
+
+
+@pytest.mark.unit
+async def test_shutdown_flushes_the_touch_buffer_and_closes_cleanly(shutdown_env):
+    """The whole point: a populated buffer must reach Mongo during teardown,
+    and the process must NOT exit non-zero (which would restart-loop a PaaS)."""
+    _arm_touch(cf, "a" * cf.PUBLIC_HASH_LENGTH)
+
+    assert cf._pending_touches, "fixture did not populate the buffer"
+
+    await main_mod.shutdown_services(background_tasks=[], app_runner=None)
+
+    assert shutdown_env.touched, "the touch buffer was never flushed on shutdown"
+    assert (("a" * cf.PUBLIC_HASH_LENGTH), 1, 1) in shutdown_env.touched
+    assert not cf._pending_touches
+    assert shutdown_env.closed, "the database was not closed"
+
+
+@pytest.mark.unit
+async def test_shutdown_returns_normally_on_a_healthy_stop(shutdown_env):
+    """A healthy stop returns without raising. sys.exit(1) here would
+    restart-loop Heroku/Render on every clean deploy, so the only exit this
+    path may take is a real, recorded failure."""
+
+    assert await main_mod.shutdown_services(background_tasks=[], app_runner=None) is None
+
+
+@pytest.mark.unit
+async def test_shutdown_cancels_background_work_without_failing(shutdown_env):
+    """Background tasks are cancelled first; a clean return must survive that,
+    or every deploy looks like a crash."""
+    started = asyncio.Event()
+
+    async def _worker():
+        started.set()
+        await asyncio.sleep(3600)
+
+    task = asyncio.create_task(_worker())
+    await started.wait()
+
+    assert await main_mod.shutdown_services(background_tasks=[task], app_runner=None) is None
+    assert task.done()
+
+
+@pytest.mark.unit
+async def test_hung_mongo_during_shutdown_is_reported_as_a_failure(shutdown_env, monkeypatch):
+    """A touch flush that never answers must be *reported*, not silently
+    swallowed: the drain shields its write, and swallowing the caller's
+    cancellation would make wait_for return normally and mark the step clean.
+    The budget still bounds the whole teardown."""
+
+    async def _hang(rows):
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(shutdown_env, "bulk_touch_file_records", _hang)
+    _arm_touch(cf, "b" * cf.PUBLIC_HASH_LENGTH)
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    with pytest.raises(SystemExit) as exc:
+        await main_mod.shutdown_services(background_tasks=[], app_runner=None)
+    elapsed = loop.time() - started
+
+    assert exc.value.code == 1, "a step that hung must be reported, not swallowed"
+    budget = main_mod._SHUTDOWN_BUDGET_SECONDS + 5 * main_mod._TEARDOWN_FLOOR_SECONDS
+    assert elapsed < budget + 2, f"shutdown took {elapsed:.1f}s, over the {budget:.0f}s bound"
+    assert elapsed < 60, "shutdown outlived the container stop grace period"
+
+
+def test_signal_delivery_is_wired_for_pid_1():
+    """Docker runs CMD ["bash", "thunder.sh"]; without exec, bash stays PID 1 and
+    never forwards SIGTERM, so shutdown_services would be unreachable in every
+    container deploy. Pyrofork's idle() installs the handler -- assert both
+    halves of that chain instead of trusting them."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    script = (root / "thunder.sh").read_text(encoding="utf-8")
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "exec " in script, "thunder.sh must exec python so it becomes PID 1"
+    assert 'CMD ["bash", "thunder.sh"]' in dockerfile
+
+    import inspect
+
+    import pyrogram.methods.utilities.idle as idle_mod
+
+    source = inspect.getsource(idle_mod.idle)
+    assert "SIGTERM" in source, "pyrofork's idle() must install the SIGTERM handler"
+    assert "signal_fn(" in source

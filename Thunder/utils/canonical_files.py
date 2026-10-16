@@ -299,7 +299,12 @@ async def drain_background_touch_tasks() -> None:
         # not a dropped delta.
         await asyncio.shield(asyncio.ensure_future(_bulk_flush()))
     except asyncio.CancelledError:
+        # Our caller timed us out (or is shutting down). The shielded write
+        # keeps running, but the cancellation MUST be re-raised: swallowing it
+        # makes wait_for return normally, so a hung Mongo would be recorded as
+        # a clean teardown step instead of a failure.
         logger.warning("Touch drain cancelled; the in-flight flush is still running.")
+        raise
     except Exception as e:
         logger.error(f"Failed to flush touch buffer at shutdown: {e}", exc_info=True)
 
