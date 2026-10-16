@@ -27,7 +27,9 @@ audit:
 	# -ll = high severity only
 	uv run bandit -c pyproject.toml -r Thunder update.py -ll --skip B101
 	uv run vulture Thunder update.py --min-confidence 80
-	@count=$$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt); \
+	@count=$$(grep -vE '^[[:space:]]*(#|$$)' requirements.txt \
+		| sed -E 's/[[:space:]]*;.*$$//; s/[[:space:]]*\[.*\]//; s/==.*$$//' \
+		| tr -d '\r' | sort -u | wc -l); \
 	echo "Direct runtime deps: $$count"; \
 	if [ "$$count" -gt 7 ]; then \
 		echo "ERROR: dependency count increased beyond 7; justify or remove."; \

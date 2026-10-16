@@ -78,7 +78,11 @@ jobs:
 
       - name: Dependency count gate (leanness is permanent)
         run: |
-          COUNT=$(grep -cE '^[a-zA-Z0-9_-]+==' requirements.txt)
+          # distinct package names, so a conditional platform marker for the same
+          # package (pyrofork[speedup] / pyrofork) does not inflate the count
+          COUNT=$(grep -vE '^[[:space:]]*(#|$)' requirements.txt \
+            | sed -E 's/[[:space:]]*;.*$//; s/[[:space:]]*\[.*\]//; s/==.*$//' \
+            | tr -d '\r' | sort -u | wc -l)
           echo "Direct runtime deps: $COUNT"
           if [ "$COUNT" -gt 7 ]; then
             echo "::error::Direct dependency count increased beyond the agreed 7; justify in the PR or remove."
