@@ -185,7 +185,7 @@ async def start_services():
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         # index-ensure may be live already -- stop it before db.close
         await _cancel_tasks(background_tasks, timeout=10)
-        await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", cap=_client_stop_cap())
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
         raise SystemExit(1) from e
@@ -204,7 +204,7 @@ async def start_services():
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         await _safe_teardown_step(close_shortener, "shortener")
-        await _safe_teardown_step(cleanup_clients, "clients (boot failure)")
+        await _safe_teardown_step(cleanup_clients, "clients (boot failure)", cap=_client_stop_cap())
         await _safe_teardown_step(StreamBot.stop, "bot (boot failure)")
         await _safe_teardown_step(db.close, "database (boot failure)")
         raise SystemExit(1) from e
@@ -239,7 +239,7 @@ async def start_services():
         await _safe_teardown_step(rate_limiter.shutdown, "rate limiter")
         await _safe_teardown_step(drain_background_touch_tasks, "touch buffer")
         await _safe_teardown_step(close_shortener, "shortener")
-        await _safe_teardown_step(cleanup_clients, "clients")
+        await _safe_teardown_step(cleanup_clients, "clients", cap=_client_stop_cap())
         await _safe_teardown_step(db.close, "database")
         raise SystemExit(1) from e
 

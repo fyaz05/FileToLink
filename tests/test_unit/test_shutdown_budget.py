@@ -102,6 +102,63 @@ async def test_the_teardown_plan_is_ordered_and_the_clients_step_is_scaled(monke
 
 
 @pytest.mark.unit
+async def test_every_cleanup_clients_call_site_is_scaled():
+    """shutdown_services is not the only caller. The three boot-failure paths
+    also stop clients, and they used the generic ceiling -- so a multi-client
+    boot failure left sessions half-stopped, leaking Telegram session files.
+
+    Structural, because the alternative is a test that waits out real timeouts
+    on three code paths nobody can exercise cheaply.
+    """
+    import ast
+    import inspect
+
+    def _is_scaled_cap(node) -> bool:
+        # _client_stop_cap() -- a Call node, not a Name
+        return getattr(getattr(node, "func", None), "id", None) == "_client_stop_cap"
+
+    tree = ast.parse(inspect.getsource(main_mod))
+
+    keyword_sites = 0
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "_safe_teardown_step"
+            and node.args
+            and getattr(node.args[0], "id", None) == "cleanup_clients"
+        ):
+            continue
+        keyword_sites += 1
+        caps = {kw.arg: kw.value for kw in node.keywords}
+        assert "cap" in caps, (
+            f"line {node.lineno}: cleanup_clients is stopped with the generic "
+            "ceiling, which cuts a multi-client stop"
+        )
+        assert _is_scaled_cap(caps["cap"]), f"line {node.lineno}: the cap is not the scaled one"
+
+    # the plan's entry passes the cap POSITIONALLY, so the keyword walk above
+    # cannot see it -- check it too rather than trusting one shape
+    plan = main_mod._teardown_plan()
+    entries = [
+        node for node in ast.walk(tree) if isinstance(node, ast.Tuple) and len(node.elts) == 3
+    ]
+    plan_entries = [n for n in entries if getattr(n.elts[1], "id", None) == "cleanup_clients"]
+    assert plan_entries, "the teardown plan no longer lists cleanup_clients as a tuple"
+    for entry in plan_entries:
+        assert _is_scaled_cap(entry.elts[2]), (
+            f"line {entry.lineno}: the plan's clients entry has an unscaled cap"
+        )
+    # and the two views must agree, so neither can drift unnoticed
+    assert len(plan_entries) == 1, f"{len(plan_entries)} clients entries in one plan"
+    assert any(name == "clients" for name, _s, _c in plan)
+
+    assert keyword_sites == 3, (
+        f"expected 3 direct _safe_teardown_step(cleanup_clients, ...) calls "
+        f"(three boot-failure paths), found {keyword_sites} -- the scan is stale"
+    )
+
+
+@pytest.mark.unit
 async def test_the_touch_flush_precedes_the_database_close():
     """After db.close() the client rejects writes, so a flush that runs later
     loses every delta with no error."""
