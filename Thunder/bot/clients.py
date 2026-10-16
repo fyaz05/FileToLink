@@ -47,6 +47,7 @@ async def initialize_clients():
         return
 
     async def start_client(client_id, token):
+        client: Client | None = None
         try:
             client = Client(
                 api_hash=Var.API_HASH,
@@ -67,10 +68,11 @@ async def initialize_clients():
             logger.error(f"   ✖ Failed to start Client ID {client_id}. Error: {e}", exc_info=True)
             # a client that connected before failing is left running and never
             # stopped, so its MTProto session survives every reboot attempt
-            try:
-                await tg_call(client.stop, timeout=10.0)
-            except Exception as stop_err:
-                logger.debug(f"   ▶ Client ID {client_id} stop after failed start: {stop_err}")
+            if client is not None:
+                try:
+                    await tg_call(client.stop, timeout=10.0)
+                except Exception as stop_err:
+                    logger.debug(f"   ▶ Client ID {client_id} stop after failed start: {stop_err}")
             return None
 
     clients = await asyncio.gather(

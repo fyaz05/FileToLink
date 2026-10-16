@@ -115,6 +115,7 @@ from Thunder.vars import Var                      # all env config
 - `/start` runs only `banned + private-mode` (activation stays reachable).
 - `PRIVATE_MODE=True` restricts the whole bot to owner + authorized users.
 - No-sender messages (channel posts, anonymous admins) are DENIED wherever a gate is active — fail-closed, never bypass.
+- Force-sub admits `OWNER`/`ADMINISTRATOR`/`MEMBER`, or `RESTRICTED` with `is_member`: `get_chat_member` only raises for a user absent from the channel, so banned and left members come back as a `ChatMember` and must be rejected by status.
 - New gate = one `PREFLIGHT_GATES` entry + a row above.
 
 ## Rate Limiting

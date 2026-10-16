@@ -87,3 +87,13 @@ async def test_dedup_is_a_noop_without_duplicates():
     await _db(users)._deduplicate_users()
 
     assert users.deletes == []
+
+
+@pytest.mark.unit
+async def test_dedup_never_collapses_documents_with_no_id():
+    """$group folds every missing id into one null bucket. Deleting that
+    bucket would remove unrelated users -- they must be left alone."""
+    users = _FakeUsers([{"_id": None, "n": 5, "keep": "ObjectId(anything)"}])
+    await _db(users)._deduplicate_users()
+
+    assert users.deletes == [], "documents without an id were treated as duplicates"

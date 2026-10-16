@@ -51,6 +51,12 @@ class Database:
         # iterate the awaited cursor, never the coroutine itself.
         cursor = await self.col.aggregate(pipeline, allowDiskUse=True)
         async for doc in cursor:
+            if doc["_id"] is None:
+                # $group folds every document with a missing id into one null
+                # bucket: deleting that bucket would delete unrelated users.
+                # Leave them; the unique index stays unbuilt until it converges.
+                logger.warning("Skipping users with no id during dedup (left untouched).")
+                continue
             # one small delete per duplicate group, whatever the user count
             result = await self.col.delete_many({"id": doc["_id"], "_id": {"$ne": doc["keep"]}})
             deleted += result.deleted_count
