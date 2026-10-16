@@ -38,21 +38,31 @@
     <!-- L7: preconnect hints for CDN origins -->
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
+    <!-- L7: entered only when a CDN asset genuinely fails to load. Scoped to
+         .fallback-ready because an unscoped rule here would override the
+         bundle's own layout on every page, not just on a broken one.
+         Declared up here, before any asset that can fail to load. -->
+    <script>
+        function markFallback() {
+            document.documentElement.classList.add('fallback-ready');
+        }
+    </script>
+
     <!-- Vidstack Player -- pinned @1.15.6 + SRI: originals from npm, not the
          dynamically-minified cdn.vidstack.io proxy (whose own header says SRI-unsafe) -->
     {% if kind == 'video' %}
-    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+    <link rel="stylesheet" onerror="markFallback()" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
         crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
-    <link rel="stylesheet" integrity="sha384-Pye8mXuY3OU46b5zsf/OBfd+esy+JP/GiOsEnr6qo5iJ9+6c9kJPLAzuHXFsf7Su"
+    <link rel="stylesheet" onerror="markFallback()" integrity="sha384-Pye8mXuY3OU46b5zsf/OBfd+esy+JP/GiOsEnr6qo5iJ9+6c9kJPLAzuHXFsf7Su"
         crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/video.css" />
-    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+    <script type="module" onerror="markFallback()" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
         crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
     {% elif kind == 'audio' %}
-    <link rel="stylesheet" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
+    <link rel="stylesheet" onerror="markFallback()" integrity="sha384-7HVHtwv1jAsERSB1l8ysZZlKx9beWwd9dGojBnKFWomqs6WCXUeC+L79DweRc+Fm"
         crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/theme.css" />
-    <link rel="stylesheet" integrity="sha384-KRJ7FoKJ+WR7M5eseizS0aAkjlHEiZqCLXWVCht10UU4q3mEdlccim7qsjalqt0k"
+    <link rel="stylesheet" onerror="markFallback()" integrity="sha384-KRJ7FoKJ+WR7M5eseizS0aAkjlHEiZqCLXWVCht10UU4q3mEdlccim7qsjalqt0k"
         crossorigin="anonymous" href="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/styles/player/default/layouts/audio.css" />
-    <script type="module" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
+    <script type="module" onerror="markFallback()" integrity="sha384-NRTop3tDYTwrvvZPh2N64dC3LB3PYJ6Kheb3m31KcjZn8nINe0T9R8CEOQbt5GRp"
         crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@vidstack/cdn@1.15.6/player.js"></script>
     {% endif %}
 
@@ -68,18 +78,25 @@
     </noscript>
 
     <!-- Styles (CDN-hosted theme, pinned to an immutable commit + SRI) -->
-    <link rel="stylesheet" integrity="sha384-l4Ojw3YQu+8wpZ1HepaRCcvp81kEdUb2uDv+7XDJZDT1i6+j+YT5B5x0fkB65lui"
+    <link rel="stylesheet" onerror="markFallback()" integrity="sha384-l4Ojw3YQu+8wpZ1HepaRCcvp81kEdUb2uDv+7XDJZDT1i6+j+YT5B5x0fkB65lui"
         crossorigin="anonymous"
         href="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.css">
 
-    <!-- L7: inline fallback keeps the page usable when all CDNs are blocked. -->
+    <!-- L7: inline fallback keeps the page usable when the CDNs are blocked.
+         Every rule is scoped to .fallback-ready: the bundle's CSS declares no
+         `display` for .drawer and only `position` for .atmosphere, so an
+         unscoped `display:none` would win on specificity and hide the Open-In
+         drawer and the ambient background on every single page load. -->
     <style>
-        body { margin:0; min-height:100vh; display:flex; flex-direction:column;
+        .fallback-ready body { margin:0; min-height:100vh; display:flex; flex-direction:column;
                align-items:center; justify-content:center; gap:1.25rem;
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
                 background:#0b0a09; color:#f3ede4; padding:2rem; text-align:center; }
-        .cinema, .drawer, .atmosphere, .masthead .file-meta { display:none; }
-        body.fallback-ready .cinema, body.fallback-ready .command-bar { display:block; }
+        .fallback-ready .cinema,
+        .fallback-ready .drawer,
+        .fallback-ready .atmosphere,
+        .fallback-ready .masthead .file-meta { display:none; }
+        .fallback-ready .command-bar { display:block; }
     </style>
 </head>
 
@@ -389,8 +406,11 @@
         };
     </script>
     <script src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@f1d2cff376fb53fed5188d1bce1ce3ee84400971/ThunderGo/player.min.js"
+        onerror="markFallback()"
         integrity="sha384-oHqpcdzrrFLizcr4kbAVv5G2FxKznDJrx5UOu1iHGZfgNRokonIa0t236CJBWSzV" crossorigin="anonymous" defer></script>
-    <!-- L7 fallback: copy-link without the CDN script -->
+    <!-- L7 fallback: copy-link without the CDN script. Must NOT mark the page
+         as fallback-ready: this script runs on every load, so doing so would
+         hide the drawer and the ambient background even when the CDN worked. -->
     <script>
         (function () {
             var btn = document.getElementById('copyBtn');
@@ -398,7 +418,6 @@
                 var src = {{ src | tojson }};
                 if (navigator.clipboard) navigator.clipboard.writeText(src);
             });
-            document.body.classList.add('fallback-ready');
         })();
     </script>
 </body>

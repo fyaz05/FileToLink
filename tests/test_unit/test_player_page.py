@@ -127,3 +127,84 @@ async def test_no_go_template_remnants():
     out = await _render()
     for remnant in ("{{.", "{{if ", "{{end}}", "printf", "ThunderGo/logo"):
         assert remnant not in out
+
+
+# --- the inline fallback must not become the default ------------------------
+#
+# The inline <style> ships AFTER the CDN theme <link>, so at equal specificity
+# it wins. The bundle declares no `display` for .drawer and only `position` for
+# .atmosphere, and .file-meta is display:flex at LOWER specificity than
+# `.masthead .file-meta` -- so an unscoped `display:none` in this template
+# permanently hides the Open-In drawer, the ambient background and the file
+# metadata on every page, not only when the CDN is blocked. Those elements'
+# ids were all present, which is why an id-presence test never noticed.
+
+
+def _inline_css(out: str) -> str:
+    return "\n".join(re.findall(r"<style>(.*?)</style>", out, re.S))
+
+
+def _css_rules(css: str) -> list[str]:
+    return [r.strip() for r in css.split("}") if "{" in r]
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [".drawer", ".atmosphere", ".file-meta", ".cinema"],
+)
+async def test_fallback_css_never_hides_an_element_unconditionally(selector):
+    """Every display:none in the fallback stylesheet must be behind
+    .fallback-ready, so a healthy CDN load renders the full page."""
+    for rule in _css_rules(_inline_css(await _render())):
+        head, _, body = rule.partition("{")
+        if "display:none" not in body.replace(" ", ""):
+            continue
+        for part in head.split(","):
+            assert ".fallback-ready" in part, (
+                f"{selector.strip()} is hidden unconditionally by `{part.strip()}` -- "
+                "this rule applies on every load, not only when a CDN fails"
+            )
+
+
+async def test_fallback_state_is_only_entered_on_a_cdn_failure():
+    out = await _render()
+    # the class is added by markFallback(), which is only wired to onerror=
+    assert "function markFallback()" in out
+    assert 'onerror="markFallback()"' in out
+    # and never unconditionally from a script that runs on every load
+    inline_scripts = "\n".join(re.findall(r"<script(?![^>]*\bsrc=)(.*?)</script>", out, re.S))
+    assert "fallback-ready" not in inline_scripts.replace(
+        "document.documentElement.classList.add('fallback-ready')", ""
+    ), "an always-run script marks the page as fallback, hiding the full UI"
+
+
+async def test_fallback_css_is_scoped_to_the_fallback_state():
+    """The whole block must be inert when the CDN is reachable."""
+    css = _inline_css(await _render())
+    assert css.strip(), "expected an inline fallback stylesheet"
+    for rule in _css_rules(css):
+        head = rule.partition("{")[0]
+        for part in head.split(","):
+            assert ".fallback-ready" in part, (
+                f"unscoped fallback rule `{part.strip()}` overrides the CDN theme "
+                "on every page load"
+            )
+
+
+async def test_fallback_marker_is_defined_before_any_use():
+    """onerror="markFallback()" fires as soon as the asset fails, which for the
+    head <link> tags is during parsing -- before <body> exists."""
+    out = await _render()
+    defined = out.index("function markFallback()")
+    for match in re.finditer(r'onerror="markFallback\(\)"', out):
+        assert match.start() > defined, "an onerror handler fires before markFallback is defined"
+    assert "document.documentElement.classList.add('fallback-ready')" in out
+
+
+async def test_drawer_and_chrome_exist_so_they_can_be_shown():
+    """The drawer the fallback used to hide -- its markup must stay."""
+    out = await _render()
+    assert 'id="playersDrawer"' in out
+    assert 'id="playersPanel"' in out or 'id="playersDrawer"' in out
+    assert 'class="atmosphere"' in out
+    assert 'id="fileMeta"' in out
