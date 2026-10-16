@@ -15,6 +15,14 @@ services:
       - mongo
     ports:
       - "8080:8080"
+    # SIGKILL before shutdown finishes skips the touch flush, so give the
+    # 45 s budget in Thunder/__main__.py room to complete
+    stop_grace_period: 60s
+    volumes:
+      # /log tails this file; without a volume it dies with the container
+      - app-logs:/app/Thunder/logs
+    # NOTE: every key here lands in the real environment, which outranks
+    # config.env.local -- drop this block if you rely on local overrides
     env_file:
       - config.env
     environment:
@@ -23,3 +31,4 @@ services:
 
 volumes:
   mongo-data:
+  app-logs:

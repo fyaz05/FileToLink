@@ -272,9 +272,28 @@ async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
             logger.warning(f"Background task {t.get_name()} ignored cancellation; re-cancelled")
 
 
-async def _safe_teardown_step(step, name: str, errors: list | None = None):
+# Shutdown has to finish inside the container's stop grace period: SIGKILL
+# mid-teardown skips the touch flush. Every step below is bounded by what is
+# left of ONE budget instead of its own generous timeout, so the worst case is
+# the budget rather than the sum of five timeouts. docker-compose sets
+# stop_grace_period above this.
+_SHUTDOWN_BUDGET_SECONDS = 45.0
+_TEARDOWN_STEP_SECONDS = 10.0
+
+
+def _budget_left(deadline: float) -> float:
+    """Seconds remaining in the shutdown budget, floored at 0."""
+    return max(deadline - asyncio.get_running_loop().time(), 0.0)
+
+
+async def _safe_teardown_step(
+    step, name: str, errors: list | None = None, deadline: float | None = None
+):
+    budget = _TEARDOWN_STEP_SECONDS
+    if deadline is not None:
+        budget = min(budget, _budget_left(deadline))
     try:
-        await asyncio.wait_for(step(), timeout=30)
+        await asyncio.wait_for(step(), timeout=budget)
     except asyncio.CancelledError as e:
         # shutdown completeness wins over cancellation propagation: record
         # and continue with the remaining steps instead of aborting them
@@ -291,6 +310,8 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     """Restart-marker-safe, bounded drain, aggregated errors."""
     print("   ▶ Shutting down services...")
     errors: list = []
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _SHUTDOWN_BUDGET_SECONDS
 
     # 1. stop accepting new work
     for task in background_tasks:
@@ -299,7 +320,9 @@ async def shutdown_services(background_tasks, app_runner) -> None:
 
     # one bounded wait for the whole batch (per-task waits would stack)
     if background_tasks:
-        done, pending = await asyncio.wait(background_tasks, timeout=10)
+        done, pending = await asyncio.wait(
+            background_tasks, timeout=min(10.0, _budget_left(deadline))
+        )
         for t in pending:
             t.cancel()
             logger.warning(f"Background task {t.get_name()} ignored cancellation; re-cancelled")
@@ -317,14 +340,13 @@ async def shutdown_services(background_tasks, app_runner) -> None:
     # 2. stop accepting new HTTP before draining in-flight streams
     if app_runner is not None:
         try:
-            await asyncio.wait_for(app_runner.cleanup(), timeout=30)
+            await asyncio.wait_for(app_runner.cleanup(), timeout=min(10.0, _budget_left(deadline)))
         except Exception as e:
             errors.append(("web server", e))
             logger.error(f"Error during web server cleanup: {e}")
 
-    # 3. bounded drain: wait (<= 30 s) for in-flight streams to finish
-    loop = asyncio.get_running_loop()
-    drain_deadline = loop.time() + 30
+    # 3. bounded drain: wait for in-flight streams, never past the budget
+    drain_deadline = min(loop.time() + 30.0, deadline)
     while sum(work_loads.values()) > 0 and loop.time() < drain_deadline:
         await asyncio.sleep(0.25)
     remaining = sum(work_loads.values())
@@ -332,12 +354,14 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         logger.warning(f"Drain deadline hit with {remaining} stream(s) still active.")
 
     # 4. ordered teardown
-    await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", errors)
-    await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", errors)
-    await _safe_teardown_step(close_shortener, "shortener", errors)
-    await _safe_teardown_step(cleanup_clients, "clients", errors)
+    await _safe_teardown_step(rate_limiter.shutdown, "rate limiter", errors, deadline)
+    await _safe_teardown_step(drain_background_touch_tasks, "touch buffer", errors, deadline)
+    await _safe_teardown_step(close_shortener, "shortener", errors, deadline)
+    await _safe_teardown_step(cleanup_clients, "clients", errors, deadline)
 
-    await _safe_teardown_step(db.close, "database", errors)
+    await _safe_teardown_step(db.close, "database", errors, deadline)
+    if _budget_left(deadline) <= 0:
+        logger.warning("Shutdown budget exhausted; some teardown steps were skipped.")
     if not errors:
         print("   ✓ Database connection closed")
 
