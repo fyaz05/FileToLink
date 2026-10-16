@@ -316,11 +316,16 @@ async def _admission_ladder(client_id: int, label: str):
 # runs: the slot leaks permanently. EXECUTOR_WORKERS of those and the client
 # 503s forever with no in-flight request to show for it.
 #
-# Bounding the total transfer time caps the leak. It is a deadline, not a
-# stall detector -- a prompt answer to "this client is not reading" needs
-# progress-based reaping of live transfers, which is a larger change than this
-# branch should absorb. Generous enough not to cut a legitimate slow download:
-# the deadline only bites on a socket that has been idle for its whole budget.
+# Bounding the total transfer time caps the leak. It is a WALL-CLOCK deadline,
+# not a stall detector, and there is no idle check anywhere in it: any client
+# sustaining less than size/1800s gets cut mid-transfer, with Content-Length
+# already sent, and must resume with a Range. Concretely, at the 1800s cap that
+# is 1.14 MiB/s for a 2 GiB file and 2.28 MiB/s for 4 GiB -- fine on a wired
+# connection, not fine on a congested mobile link. A prompt answer to "this
+# client is not reading" needs progress-based reaping of live transfers, which is
+# a larger change than this branch should absorb. Stated here rather than
+# dressed up as idle-only, because an earlier version of this comment claimed
+# the deadline "only bites on a socket that has been idle", which is false.
 _STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND = 64 * 1024
 _STREAM_MIN_SECONDS = 120.0
 _STREAM_MAX_SECONDS = 1800.0
@@ -341,6 +346,17 @@ async def _reclaim_slot_when_stalled(completed, deadline_seconds, release, body)
     cancelling that task unwinds nothing inside the generator. A separate task
     does not care where the generator is sitting.
 
+    The slot IS always returned; that is the leak this exists to close.
+
+    Stopping the upstream fetch is best-effort and is NOT guaranteed. `aclose()`
+    only works on a generator suspended at a `yield`. While a consumer is
+    actively pulling -- which is the normal state, and exactly what a slow
+    upstream looks like -- the generator is suspended inside
+    `await streamer.stream_file(...)` and `aclose()` raises RuntimeError. The
+    fetch then keeps running until the consumer's own teardown or the GC closes
+    it. That is a bounded annoyance, not a second slot leak: the counter is
+    correct either way.
+
     Returns when `completed` is set (the stream finished normally) or when this
     task is cancelled by the generator's own cleanup.
     """
@@ -352,8 +368,14 @@ async def _reclaim_slot_when_stalled(completed, deadline_seconds, release, body)
     except asyncio.CancelledError:
         return
     release()
-    with contextlib.suppress(asyncio.CancelledError, RuntimeError):
-        await body.aclose()
+    if body.ag_running:
+        # a consumer is mid-__anext__; closing now would raise. Not an error --
+        # the consumer owns the generator and will close it.
+        logger.debug("stream slot reclaimed at its deadline; body still in flight")
+        return
+    # CancelledError is deliberately NOT suppressed here: swallowing it would
+    # hide a real cancellation of this watchdog as a quiet success.
+    await body.aclose()
 
 
 def _slot_release(client_id: int):

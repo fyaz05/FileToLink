@@ -13,6 +13,7 @@ suspended at a yield -- something a mock cannot show.
 """
 
 import asyncio
+import contextlib
 import types
 
 import pytest
@@ -23,19 +24,75 @@ from Thunder.server import stream_routes as sr
 pytestmark = pytest.mark.unit
 
 
+_PATTERN = bytes(range(256))
+
+
+def _bytes_at(start: int, size: int) -> bytes:
+    """A chunk whose byte values encode its absolute position (mod 256).
+
+    Cheap (one repeat-and-slice) but position-sensitive: a trim that is skipped,
+    or applied to the wrong chunk, shifts the content and shows up in the bytes
+    rather than only in the length.
+    """
+    off = start % 256
+    blob = _PATTERN * (size // 256 + 2)
+    return blob[off : off + size]
+
+
 class _StalledStreamer:
-    """Yields data forever. The consumer decides how much it takes."""
+    """Yields data forever. The consumer decides how much it takes.
+
+    Models the REAL ByteStreamer.stream_file contract, which is easy to get
+    wrong and which this fake previously violated:
+
+        chunk_offset = offset // CHUNK_SIZE          # seek to a chunk BOUNDARY
+        chunk_limit = ceil(limit / CHUNK_SIZE) + 1  # in CHUNKS, not bytes
+
+    The real streamer returns whole CHUNK_SIZE pieces starting at the aligned
+    offset, and the caller trims the leading ``offset % CHUNK_SIZE`` bytes. The
+    old version ignored ``offset`` entirely and yielded exactly ``limit`` bytes,
+    which happened to work for every case here because they all used start=0 --
+    so the trim path was never exercised, and adding a Range case would have
+    silently delivered wrong bytes rather than failing.
+
+    It reads sr.CHUNK_SIZE rather than capturing it, so a test that patches the
+    route's chunk size moves both sides together, exactly as custom_dl.CHUNK_SIZE
+    does in production.
+    """
 
     def __init__(self):
         self.started = 0
+        self.pulled = 0
+        self.calls: list[tuple[int, int]] = []
 
     async def stream_file(self, media_ref, offset=0, limit=0):
         self.started += 1
-        chunk = b"x" * 1024
-        sent = 0
-        while sent < limit:
-            yield chunk
-            sent += len(chunk)
+        self.calls.append((offset, limit))
+        chunk_size = sr.CHUNK_SIZE
+        chunk_offset = (offset // chunk_size) * chunk_size
+        chunk_limit = ((limit + chunk_size - 1) // chunk_size) + 1 if limit > 0 else 0
+        for i in range(chunk_limit or 1):
+            start = chunk_offset + i * chunk_size
+            self.pulled += 1
+            yield _bytes_at(start, chunk_size)
+
+
+async def _drain(body):
+    """Consume a body generator the way aiohttp does: keep pulling."""
+    async for _ in body:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def small_chunks(monkeypatch):
+    """Shrink the route's chunk size for the whole module.
+
+    Production is 1 MiB. Building a real 1 MiB position-encoded chunk per test
+    would cost more than the tests themselves, and the alignment arithmetic is
+    identical at any size -- what matters is that start is not a multiple of it.
+    Both sides read sr.CHUNK_SIZE, so this moves them together.
+    """
+    monkeypatch.setattr(sr, "CHUNK_SIZE", 64)
 
 
 @pytest.fixture
@@ -54,7 +111,7 @@ def _info(size):
     return {"file_size": size, "file_name": "v.mp4", "mime_type": "video/mp4"}
 
 
-def _body_for(streamer, content_length, client_id=0, deadline=None):
+def _body_for(streamer, content_length, client_id=0, deadline=None, start=0):
     """Drive the real body builder with a slot already taken.
 
     Uses the production release helper rather than a local copy: an earlier
@@ -65,7 +122,7 @@ def _body_for(streamer, content_length, client_id=0, deadline=None):
     release_slot = sr._slot_release(client_id)
     if deadline is None:
         deadline = sr._stream_deadline_seconds(content_length)
-    return sr._make_body(streamer, 1, 0, content_length, release_slot, deadline)
+    return sr._make_body(streamer, 1, start, content_length, release_slot, deadline)
 
 
 def test_the_release_helper_is_idempotent():
@@ -80,6 +137,67 @@ def test_the_release_helper_is_idempotent():
     release()
     release()
     assert work_loads[0] == 4, f"the slot was released more than once ({work_loads[0]})"
+
+
+# --- the range-alignment trim ---------------------------------------------
+#
+# ByteStreamer.stream_file(offset=N) seeks to floor(N / CHUNK_SIZE) * CHUNK_SIZE
+# and yields whole chunks from there, so the body generator must drop the
+# leading N % CHUNK_SIZE bytes itself. Nothing pinned that: every case in this
+# file used start=0, where the trim is a no-op, and the fake ignored offset --
+# so the arithmetic could have been deleted outright and the suite stayed green.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("start", "length"),
+    [
+        (0, 100),  # aligned: no trim at all
+        (1, 100),  # one byte of trim
+        (10, 10),  # trim longer than the requested span
+        (63, 1),  # last byte of the first chunk
+        (64, 64),  # exactly chunk-aligned start
+        (65, 130),  # spans three chunks from a misaligned start
+        (200, 10),  # start deep past the first chunk
+    ],
+)
+async def test_a_range_gets_exactly_the_requested_bytes(client_slot, start, length):
+    body = _body_for(_StalledStreamer(), length, start=start)
+    delivered = b"".join([chunk async for chunk in body])
+
+    assert len(delivered) == length, f"start={start} length={length}: got {len(delivered)} bytes"
+    assert delivered == _bytes_at(start, length), (
+        f"start={start}: the wrong bytes were delivered -- the offset % CHUNK_SIZE trim is wrong or missing"
+    )
+    assert work_loads[0] == 0, "the slot was not released"
+
+
+@pytest.mark.unit
+async def test_the_streamer_is_asked_for_the_aligned_position(client_slot):
+    """The route passes the raw start; the STREAMER aligns it, and the route
+    trims. If either side moved the other way the bytes would be wrong."""
+    streamer = _StalledStreamer()
+    body = _body_for(streamer, 100, start=70)
+
+    async for _ in body:
+        pass
+
+    assert streamer.calls == [(70, 100)], (
+        f"stream_file was called with {streamer.calls}; the route must pass the raw "
+        "offset and let the streamer align it to a chunk boundary"
+    )
+
+
+@pytest.mark.unit
+async def test_the_fake_is_position_sensitive(client_slot):
+    """Guards the tests above against becoming vacuous: if the fake stopped
+    encoding position, a broken trim would pass."""
+    body = _body_for(_StalledStreamer(), 10, start=10)
+    delivered = b"".join([chunk async for chunk in body])
+
+    assert delivered != _bytes_at(0, 10), (
+        "the fake no longer distinguishes positions -- a missing trim would go unnoticed"
+    )
 
 
 # --- the deadline itself ---------------------------------------------------
@@ -249,6 +367,97 @@ async def test_cancelling_the_watchdog_reclaims_nothing():
         "cancelling the watchdog released the slot twice -- the generator's own "
         "cleanup already did it"
     )
+
+
+async def test_the_watchdog_does_not_close_a_generator_a_consumer_is_pulling(monkeypatch):
+    """`aclose()` only works on a generator suspended at a `yield`.
+
+    While a consumer is actively awaiting the next chunk -- the NORMAL state, and
+    exactly what a slow upstream looks like -- the generator is suspended inside
+    `await streamer.stream_file(...)` and aclose() raises
+    "RuntimeError: asynchronous generator is already running". An earlier version
+    wrapped it in suppress(RuntimeError), which turned a real, reportable failure
+    into silence while claiming the upstream fetch had been stopped.
+    """
+    monkeypatch.setattr(sr, "_STREAM_MIN_SECONDS", 0.2)
+    monkeypatch.setattr(sr, "_STREAM_MAX_SECONDS", 0.2)
+    monkeypatch.setattr(sr, "_STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND", 1)
+
+    upstream_closed = []
+
+    class SlowUpstream:
+        async def stream_file(self, media_ref, offset=0, limit=0):
+            try:
+                while True:
+                    yield b"x" * 64
+                    await asyncio.sleep(5)  # long enough that the deadline lands here
+            finally:
+                upstream_closed.append(1)
+
+    body = _body_for(SlowUpstream(), 10**7)
+    consumer = asyncio.ensure_future(_drain(body))
+    await asyncio.sleep(0.1)
+    assert body.ag_running, "the consumer should be mid-__anext__, not parked at a yield"
+
+    # Hold the watchdog so its outcome is observable. Removing the ag_running
+    # guard makes aclose() raise RuntimeError, and the effects the other
+    # assertions look at (upstream not closed, slot reclaimed) are IDENTICAL
+    # either way -- release() runs first. The only difference is whether the
+    # watchdog survives, which only surfaces by awaiting it. A task's exception
+    # reaches the loop's handler at GC time, so checking that would be racy.
+    watchdog = next(
+        (t for t in asyncio.all_tasks() if t.get_name() == "stream_slot_watchdog"),
+        None,
+    )
+    assert watchdog is not None, "no watchdog task was created"
+
+    try:
+        await asyncio.wait_for(asyncio.shield(watchdog), timeout=2.0)
+    except RuntimeError as e:
+        pytest.fail(
+            f"the watchdog died with {e!r} -- aclose() was called on a generator "
+            "a consumer is already pulling. The guard is gone."
+        )
+    except TimeoutError:
+        pytest.fail("the watchdog never finished; its deadline did not fire")
+
+    assert work_loads[0] == 0, "the slot must be reclaimed even when we cannot close"
+    assert not upstream_closed, (
+        "the upstream was closed -- aclose() cannot do that while a consumer is "
+        "pulling, so either the guard is gone or this test is not in the state "
+        "it claims to be"
+    )
+    assert not consumer.done(), "the consumer should still own the generator"
+    consumer.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await consumer
+
+
+async def test_the_watchdog_reclaims_while_a_consumer_is_mid_fetch(monkeypatch):
+    """The slot is the thing that must always come back. Even when the
+    generator cannot be closed, the counter must not stay held."""
+    monkeypatch.setattr(sr, "_STREAM_MIN_SECONDS", 0.15)
+    monkeypatch.setattr(sr, "_STREAM_MAX_SECONDS", 0.15)
+    monkeypatch.setattr(sr, "_STREAM_MIN_THROUGHPUT_BYTES_PER_SECOND", 1)
+
+    class SlowUpstream:
+        async def stream_file(self, media_ref, offset=0, limit=0):
+            while True:
+                yield b"x" * 64
+                await asyncio.sleep(5)
+
+    body = _body_for(SlowUpstream(), 10**7)
+    consumer = asyncio.ensure_future(_drain(body))
+    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.4)
+
+    assert work_loads[0] == 0, (
+        "a stalled reader held its slot because the generator was mid-fetch -- "
+        "the reclaim must not depend on being able to close it"
+    )
+    consumer.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await consumer
 
 
 async def test_the_watchdog_does_not_outlive_a_healthy_stream():

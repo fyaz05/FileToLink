@@ -238,6 +238,67 @@ async def test_the_oldest_entries_drop_first(touch_env):
 
 
 @pytest.mark.unit
+async def test_the_hottest_key_is_not_the_one_evicted(touch_env):
+    """Assigning to an existing OrderedDict key does NOT reorder it.
+
+    That made this a silent data-loss regression: the file touched most often
+    stayed at position 0 and was the first thing popitem(last=False) threw away,
+    taking every delta it had accumulated with it, while files touched once each
+    were kept. A test that only ever inserts never-repeated keys cannot see this,
+    because for them insertion order and touch order are the same thing.
+    """
+    from Thunder.utils import canonical_files as cf
+
+    keys = [f"{i:032x}"[: cf.PUBLIC_HASH_LENGTH] for i in range(cf._TOUCH_BUFFER_MAX)]
+    for k in keys:
+        cf.schedule_touch_file_record(_record(k))
+
+    hot = keys[0]
+    for _ in range(50):
+        cf.schedule_touch_file_record(_record(hot))
+
+    assert cf._pending_touches[hot][2] == 51, "the delta did not accumulate"
+    assert list(cf._pending_touches).index(hot) == len(cf._pending_touches) - 1, (
+        "the most-touched file is still at the FRONT of the buffer -- "
+        "re-touching it did not move it to the back, so it is next to be evicted"
+    )
+
+    # one new key forces exactly one eviction
+    cf.schedule_touch_file_record(_record("ff" * 16))
+
+    assert hot in cf._pending_touches, (
+        "the most frequently touched file was evicted while four-thousand files "
+        "touched once each were kept -- its accumulated deltas are gone"
+    )
+    assert cf._dropped_touches == 1
+
+
+@pytest.mark.unit
+async def test_a_requeued_entry_is_not_evicted_by_the_next_overflow(touch_env):
+    """_requeue_touches re-inserts an entry that keeps failing to flush. Without
+    moving it to the back it sits at the front and the trim below drops it on the
+    very next overflow -- so the entry that failed most is the first lost, while
+    live arrivals at the back survive.
+    """
+    from Thunder.utils import canonical_files as cf
+
+    keys = [f"{i:032x}"[: cf.PUBLIC_HASH_LENGTH] for i in range(cf._TOUCH_BUFFER_MAX)]
+    for k in keys:
+        cf.schedule_touch_file_record(_record(k))
+
+    doomed = keys[0]
+    before = cf._pending_touches[doomed]
+    cf._requeue_touches([(doomed, before)])
+
+    assert list(cf._pending_touches).index(doomed) == len(cf._pending_touches) - 1, (
+        "the re-queued entry is still at the front, so the next overflow drops it"
+    )
+
+    cf.schedule_touch_file_record(_record("ff" * 16))
+    assert doomed in cf._pending_touches, "the persistently failing entry was evicted"
+
+
+@pytest.mark.unit
 async def test_a_repeatedly_failing_flush_does_not_grow_the_buffer(touch_env):
     """Re-queued deltas merge by key, so a persistently failing Mongo cannot make
     the buffer grow -- the merge is what bounds it, not the cap alone."""

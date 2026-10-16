@@ -243,9 +243,14 @@ def _requeue_touches(items: list[tuple[str, tuple[dict[str, Any], int, int]]]) -
             _pending_touches[h] = payload
         else:
             _pending_touches[h] = (payload[0], old[1] + payload[1], old[2] + payload[2])
-    # the cap binds here too: repeated failures must not grow the buffer
-    # without limit. Oldest entries drop first (counted, like the
-    # schedule-site overflow).
+        # Re-queued entries are freshly touched, so they belong at the BACK.
+        # Without this a key that keeps failing to flush stays at the front and
+        # is evicted by the trim below on the very next overflow, while live
+        # arrivals at the back are the ones that survive.
+        _pending_touches.move_to_end(h)
+    # The cap binds here too: repeated failures must not grow the buffer
+    # without limit. Least-recently-touched entries drop first (counted, like
+    # the schedule-site overflow).
     while len(_pending_touches) > _TOUCH_BUFFER_MAX:
         _pending_touches.popitem(last=False)
         _dropped_touches += 1
@@ -300,12 +305,18 @@ def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) 
     if public_hash in _pending_touches:
         _, reuse_delta, seen_delta = _pending_touches[public_hash]
         _pending_touches[public_hash] = (record, reuse_delta + int(reused), seen_delta + 1)
+        # move_to_end is REQUIRED here, not tidiness. Assigning to an existing
+        # OrderedDict key does not reorder it, so without this the most
+        # frequently touched file stays at position 0 and is the FIRST thing
+        # popitem(last=False) throws away -- losing every delta it accumulated
+        # while keeping files touched once each. The sibling caches at lines
+        # 145/160/165 already do this; the touch buffer did not.
+        _pending_touches.move_to_end(public_hash)
     else:
         _pending_touches[public_hash] = (record, int(reused), 1)
-        # evict the OLDEST to make room, so the buffer always holds the most
-        # recent increments. This used to REJECT the new key instead, keeping
-        # the oldest -- the opposite of what the merge path does. Two rules for
-        # one bound, and neither was pinned.
+        # Evict the least-recently-touched to make room. This used to REJECT the
+        # new key instead, keeping the oldest -- the opposite of what the merge
+        # path does. Two rules for one bound, and neither was pinned.
         while len(_pending_touches) > _TOUCH_BUFFER_MAX:
             _pending_touches.popitem(last=False)
             _dropped_touches += 1

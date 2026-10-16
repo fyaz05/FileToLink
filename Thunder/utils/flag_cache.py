@@ -56,19 +56,17 @@ class FlagCache:
 
         # single-flight: concurrent callers of a cold/expired key share one
         # loader task instead of stampeding the backend with N identical reads
+        #
+        # _inflight needs no cap of its own: _load_and_store pops its own entry
+        # on BOTH success and failure, so the dict only ever holds loaders that
+        # are running right now -- it is bounded by concurrency by construction.
+        # An earlier version capped it at max_items and fell back to loading
+        # inline, which was worse in every way: the store in _load_and_store is
+        # fenced on `self._inflight.get(key) is task`, and an unregistered inline
+        # call never satisfies that, so the value was returned and never cached.
+        # Every later read paid another backend round-trip. Reverted deliberately.
         task = self._inflight.get(key)
         if task is None:
-            if len(self._inflight) >= self.max_items:
-                # Only _data honoured max_items; _inflight grew one Task per
-                # concurrent cold key and was bounded by nothing but handler
-                # concurrency. Bound it here rather than letting a stampede of
-                # distinct keys become unbounded bookkeeping.
-                self._prune_inflight()
-            if len(self._inflight) >= self.max_items:
-                # still full after pruning: skip single-flight for this key and
-                # load inline. Correctness does not depend on the coalescing --
-                # only the number of backend reads does.
-                return await self._load_and_store(key, loader)
             task = asyncio.create_task(self._load_and_store(key, loader))
             self._inflight[key] = task
         return await asyncio.shield(task)

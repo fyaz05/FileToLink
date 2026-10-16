@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -292,12 +293,39 @@ async def _cancel_tasks(tasks: list[asyncio.Task], timeout: float) -> None:
 #
 # docker-compose still gets 60s (stop_grace_period), which is comfortable.
 _MIN_PAAS_GRACE_SECONDS = 30.0
-_SHUTDOWN_BUDGET_SECONDS = 20.0
+# The shared budget covers ONLY the steps that are cheap in practice. It used to
+# be 20s and to cover the clients step too, which made the shared budget the
+# binding constraint there: `_safe_teardown_step` grants
+# min(ceiling, budget_left), so a 10s-per-client ceiling can never exceed the
+# remaining budget no matter how it is scaled. With 20s shared, two clients
+# needing 10s each consumed the whole pool that four other steps also draw from
+# and were cut anyway -- recorded as an error, exit 1, restart loop. The clients
+# step now has its own slice, sized below, and is NOT charged to this budget.
+_SHUTDOWN_BUDGET_SECONDS = 10.0
 _TEARDOWN_STEP_SECONDS = 8.0
 _TEARDOWN_FLOOR_SECONDS = 1.5
-_TEARDOWN_STEP_COUNT = 5
+# Steps that draw from the shared budget. The clients step is deliberately not
+# in this count; see _SHUTDOWN_WORST_CASE_SECONDS.
+_TEARDOWN_STEP_COUNT = 4
+
+# cleanup_clients stops each client individually with a 10s timeout, so its cost
+# scales with the client count and a single shared cap always cuts the second
+# client. It gets its OWN slice of the shutdown window for that reason.
+#
+# _CLIENT_STOP_MAX_SECONDS is what keeps that slice inside the grace period.
+# Sized down rather than the shared budget up, because the two are not
+# equivalent: the shared budget protects the touch flush, and cutting that loses
+# deltas, whereas this slice only has to cover a HEALTHY stop. A healthy stop
+# spends ~0.1s per client, so 12s is never approached by a working shutdown; it
+# is approached only when clients are genuinely hung, and being cut there is a
+# real failure worth reporting rather than a spurious one.
+_CLIENT_STOP_SECONDS = 10.0
+_CLIENT_STOP_MAX_SECONDS = 12.0
+
 _SHUTDOWN_WORST_CASE_SECONDS = (
-    _SHUTDOWN_BUDGET_SECONDS + _TEARDOWN_STEP_COUNT * _TEARDOWN_FLOOR_SECONDS
+    _SHUTDOWN_BUDGET_SECONDS
+    + _TEARDOWN_STEP_COUNT * _TEARDOWN_FLOOR_SECONDS
+    + _CLIENT_STOP_MAX_SECONDS
 )
 
 assert _SHUTDOWN_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
@@ -305,12 +333,6 @@ assert _SHUTDOWN_WORST_CASE_SECONDS < _MIN_PAAS_GRACE_SECONDS, (
     f"only allow {_MIN_PAAS_GRACE_SECONDS:.0f}s -- a stop would be SIGKILLed before "
     "the touch flush and db.close() run"
 )
-
-# cleanup_clients is 10s PER CLIENT, so a fixed cap cuts a healthy stop as soon
-# as there is more than one client -- recorded as an error, exit 1, and the PaaS
-# restarts a container that was shutting down fine. Scale its cap instead.
-_CLIENT_STOP_SECONDS = 10.0
-_CLIENT_STOP_MAX_SECONDS = 60.0
 
 
 def _client_stop_cap() -> float:
@@ -338,23 +360,39 @@ def _step_budget(deadline: float) -> float:
     return min(_TEARDOWN_STEP_SECONDS, max(_budget_left(deadline), _TEARDOWN_FLOOR_SECONDS))
 
 
-def _teardown_plan() -> list[tuple[str, object, float | None]]:
+class _Step(NamedTuple):
+    """One teardown step and how it is budgeted.
+
+    ``shared=False`` means this step does NOT draw on the common budget and gets
+    its full ``cap`` instead. That is the whole point for cleanup_clients: with
+    ``shared=True`` the grant is min(cap, budget_left), so the common budget
+    silently becomes the binding constraint and scaling ``cap`` achieves nothing.
+    """
+
+    name: str
+    run: object
+    cap: float | None = None
+    shared: bool = True
+
+
+def _teardown_plan() -> list[_Step]:
     """The ordered teardown steps, with the per-step ceiling for each.
 
-    Declarative so the ordering AND each step's cap are inspectable: the
-    clients step needs a cap scaled by the client count, and a test that only
-    watched the clock could not tell a correct cap from one that was never
-    wired up (the scaled cap being far larger than any test's patience).
+    Declarative so the ordering AND each step's budgeting are inspectable: a
+    test that only watched the clock could not tell a correct cap from one that
+    was never wired up (the scaled cap being far larger than any test's
+    patience) -- and could not see that a correctly-scaled cap is inert while the
+    shared budget overrides it.
     Order matters: the touch flush must precede db.close().
     """
     return [
-        ("rate limiter", rate_limiter.shutdown, None),
-        ("touch buffer", drain_background_touch_tasks, None),
-        ("shortener", close_shortener, None),
-        # 10s per client, so the generic 8s ceiling cuts a healthy multi-client
-        # stop and records a failure that never happened
-        ("clients", cleanup_clients, _client_stop_cap()),
-        ("database", db.close, None),
+        _Step("rate limiter", rate_limiter.shutdown),
+        _Step("touch buffer", drain_background_touch_tasks),
+        _Step("shortener", close_shortener),
+        # 10s per client: its own slice, scaled by client count. Charging this
+        # to the shared budget is what made the scaling a no-op.
+        _Step("clients", cleanup_clients, _client_stop_cap(), shared=False),
+        _Step("database", db.close),
     ]
 
 
@@ -365,6 +403,7 @@ async def _safe_teardown_step(
     deadline: float | None = None,
     *,
     cap: float | None = None,
+    shared: bool = True,
 ):
     """Run one teardown step on its share of the budget.
 
@@ -372,9 +411,12 @@ async def _safe_teardown_step(
     something the budget cannot know -- cleanup_clients stops every client
     individually, so a fixed 8s cut a perfectly healthy multi-client stop and
     turned it into a recorded failure.
+
+    ``shared=False`` exempts the step from the common budget entirely, which is
+    what actually makes a scaled ``cap`` mean anything.
     """
     ceiling = _TEARDOWN_STEP_SECONDS if cap is None else cap
-    if deadline is None:
+    if deadline is None or not shared:
         budget = ceiling
     else:
         budget = min(ceiling, max(_budget_left(deadline), _TEARDOWN_FLOOR_SECONDS))
@@ -440,8 +482,10 @@ async def shutdown_services(background_tasks, app_runner) -> None:
         logger.warning(f"Drain deadline hit with {remaining} stream(s) still active.")
 
     # 4. ordered teardown
-    for name, step, cap in _teardown_plan():
-        await _safe_teardown_step(step, name, errors, deadline, cap=cap)
+    for step in _teardown_plan():
+        await _safe_teardown_step(
+            step.run, step.name, errors, deadline, cap=step.cap, shared=step.shared
+        )
     if _budget_left(deadline) <= 0:
         logger.warning("Shutdown budget exhausted; teardown steps ran on the floor timeout.")
     if not errors:

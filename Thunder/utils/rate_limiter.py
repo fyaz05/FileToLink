@@ -38,11 +38,8 @@ MAX_REQUEST_ATTEMPTS = 5
 # bounded too or the user waits forever on a file that will never appear.
 MAX_CONTENDED_ATTEMPTS = 20
 # Hard ceiling on per-user windows held in memory. The sweep prunes on a timer,
-# which is not a bound: it bounds the steady state, not what can be created in
-# the interval. dicts preserve insertion order, so the oldest tracked user is
-# the one evicted.
-MAX_TRACKED_USERS = 50_000
-# Bounded bookkeeping
+# which bounds the steady state, not what can be created between sweeps -- so
+# admission enforces it too, not just the sweep.
 MAX_TRACKED_USERS = 4096
 MAX_TRACKED_FILES = 1024
 
@@ -211,8 +208,7 @@ class RateLimiter:
         if user_timestamps is None:
             # hard bound, not only sweep-bounded (H6a): between the 5-minute
             # sweeps a flood of distinct user ids would add a deque each
-            if len(self.user_requests) >= MAX_TRACKED_USERS:
-                self.user_requests.pop(next(iter(self.user_requests)), None)
+            self._evict_inactive_users(MAX_TRACKED_USERS - 1)
             user_timestamps = self.user_requests[user_id] = deque()
         while (
             user_timestamps and user_timestamps[0] <= current_time - self.rate_limit_period_seconds
@@ -229,6 +225,26 @@ class RateLimiter:
 
     # ---------------- sweep ----------------
 
+    def _evict_inactive_users(self, below: int) -> int:
+        """Drop the least-recently-active entries until at most `below` remain.
+
+        Recency, NOT dict insertion order. Keys are only inserted when absent,
+        so dict order is first-EVER-SEEN order: evicting by it would drop a
+        currently-active user -- someone sitting on a full 5/5 window -- as soon
+        as enough fresh ids arrived, silently handing them a fresh window. An
+        earlier admission-time bound did exactly that.
+
+        One helper for both admission and the sweep, because they previously
+        disagreed: the sweep sorted by recency (with a comment explaining why
+        dict order was wrong) while admission used dict order anyway.
+        """
+        dropped = 0
+        while len(self.user_requests) > below and self.user_requests:
+            victim = min(self.user_requests.items(), key=lambda kv: kv[1][-1] if kv[1] else 0.0)[0]
+            self.user_requests.pop(victim, None)
+            dropped += 1
+        return dropped
+
     async def sweep(self) -> dict[str, int]:
         """Prune stale bookkeeping; called every 5 min from the sweeper task."""
         now = time.time()
@@ -241,15 +257,7 @@ class RateLimiter:
                 self.user_requests.pop(user_id, None)
                 dropped_users += 1
         if len(self.user_requests) > MAX_TRACKED_USERS:
-            # evict least-recently-active first; dict-order eviction could reset an active user's window
-            by_recency = sorted(
-                self.user_requests.items(),
-                key=lambda kv: kv[1][-1] if kv[1] else 0.0,
-            )
-            for user_id, _ in by_recency:
-                if len(self.user_requests) <= MAX_TRACKED_USERS:
-                    break
-                self.user_requests.pop(user_id, None)
+            dropped_users += self._evict_inactive_users(MAX_TRACKED_USERS)
 
         dropped_global = 0
         while self.global_requests and self.global_requests[0] <= now - 60:
