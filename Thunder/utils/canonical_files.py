@@ -198,8 +198,29 @@ async def _flush_pending_touches() -> None:
             _flush_task = asyncio.create_task(_flush_pending_touches())
 
 
-async def _bulk_flush() -> None:
+def _requeue_touches(items: list[tuple[str, tuple[dict[str, Any], int, int]]]) -> None:
+    """Put a flush snapshot back into the buffer after a failed write.
+
+    ``_bulk_flush`` removes the snapshot from ``_pending_touches`` before
+    awaiting, so every failure mode must re-queue it or the deltas are lost.
+    Deltas that arrived while the write was in flight are merged in.
+    """
     global _dropped_touches
+    for h, payload in items:
+        old = _pending_touches.get(h)
+        if old is None:
+            _pending_touches[h] = payload
+        else:
+            _pending_touches[h] = (payload[0], old[1] + payload[1], old[2] + payload[2])
+    # the cap binds here too: repeated failures must not grow the buffer
+    # without limit. Oldest entries drop first (counted, like the
+    # schedule-site overflow).
+    while len(_pending_touches) > _TOUCH_BUFFER_MAX:
+        _pending_touches.popitem(last=False)
+        _dropped_touches += 1
+
+
+async def _bulk_flush() -> None:
     items = list(_pending_touches.items())
     _pending_touches.clear()
     if not items:
@@ -208,22 +229,17 @@ async def _bulk_flush() -> None:
         await db.bulk_touch_file_records(
             [(h, reuse_delta, seen_delta) for h, (_, reuse_delta, seen_delta) in items]
         )
-    except Exception as e:
-        # merge back so the next flush retries; NOTE: a part-way failed
-        # ordered=False bulk re-applies some increments (accepted over-count)
-        logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
-        for h, payload in items:
-            old = _pending_touches.get(h)
-            if old is None:
-                _pending_touches[h] = payload
-            else:
-                _pending_touches[h] = (payload[0], old[1] + payload[1], old[2] + payload[2])
-        # the cap binds here too: repeated failures must not grow the buffer
-        # without limit. Oldest entries drop first (counted, like the
-        # schedule-site overflow).
-        while len(_pending_touches) > _TOUCH_BUFFER_MAX:
-            _pending_touches.popitem(last=False)
-            _dropped_touches += 1
+    except BaseException as e:
+        # CancelledError is a BaseException, not an Exception: shutdown cancels
+        # this task mid-write, and the snapshot is already out of the buffer, so
+        # re-queue before letting the cancellation propagate.
+        _requeue_touches(items)
+        if isinstance(e, Exception):
+            # merge back so the next flush retries; NOTE: a part-way failed
+            # ordered=False bulk re-applies some increments (accepted over-count)
+            logger.error(f"Failed to bulk-flush {len(items)} touches: {e}", exc_info=True)
+            return
+        raise
 
 
 def schedule_touch_file_record(record: dict[str, Any], *, reused: bool = False) -> None:
@@ -273,7 +289,12 @@ async def drain_background_touch_tasks() -> None:
             pass
 
     try:
-        await _bulk_flush()
+        # fresh task + shield: shutdown runs this drain under a bounded timeout,
+        # and a timeout must not abandon the write half-way. Deltas stay in the
+        # buffer regardless -- this only keeps them from being skipped silently.
+        await asyncio.shield(asyncio.ensure_future(_bulk_flush()))
+    except asyncio.CancelledError:
+        logger.warning("Touch drain cancelled mid-flush; deltas stay buffered.")
     except Exception as e:
         logger.error(f"Failed to flush touch buffer at shutdown: {e}", exc_info=True)
 
