@@ -1,4 +1,6 @@
 <p align="center">
+
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/fyaz05/FileToLink)
   <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg" alt="Thunder Logo" width="120">
   <h1 align="center">⚡ Thunder</h1>
 </p>
