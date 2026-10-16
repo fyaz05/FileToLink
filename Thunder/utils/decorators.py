@@ -49,7 +49,15 @@ async def check_banned(client, message: Message) -> bool:
     """Ban gate -- cached, fail-closed."""
     try:
         if not message.from_user:
-            return True
+            # no attributable id -> no ban lookup is possible. Allowing it here
+            # would let a banned user post as the channel or as an anonymous
+            # admin, so fail-closed like the private-mode and token gates.
+            logger.debug("Denied unattributable sender (ban gate, no from_user).")
+            try:
+                await reply_safe(message, MSG_ERROR_ANONYMOUS_SENDER)
+            except Exception:
+                pass
+            return False
         user_id = message.from_user.id
         if user_id == Var.OWNER_ID:
             return True

@@ -6,6 +6,7 @@ from Thunder.utils.decorators import (
     GATES_STANDARD,
     GATES_START,
     PREFLIGHT_GATES,
+    check_banned,
     check_private_mode,
     preflight,
     require_token,
@@ -87,12 +88,16 @@ async def test_owner_bypasses_force_sub(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_anonymous_sender_denied_by_private_mode_and_token_gates(monkeypatch):
+async def test_anonymous_sender_denied_by_every_gate(monkeypatch):
     """Messages with no attributable sender (channel posts, anonymous admins)
     are DENIED fail-closed -- never bypass."""
 
     class _Msg:
         from_user = None
+
+    # ban gate first in the chain: a banned user must not escape by posting as
+    # the channel or as an anonymous admin (AGENTS.md no-sender contract)
+    assert await check_banned(object(), _Msg()) is False
 
     monkeypatch.setattr(Var, "PRIVATE_MODE", True)
     assert await check_private_mode(object(), _Msg()) is False
