@@ -136,9 +136,9 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `MAX_BATCH_FILES` | Maximum files in batch processing | `50` |
 | `CHANNEL` | Allow processing messages from channels | `False` |
 | `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
-| `SLEEP_THRESHOLD` | Client switch threshold | `300` |
+| `SLEEP_THRESHOLD` | Pyrogram flood-wait threshold | `600` |
 | `WORKERS` | Async workers | `8` |
-| `NAME` | Bot name | `ThunderF2L` |
+| `NAME` | Bot name; also the MongoDB database name (unsafe chars become `_`) | `ThunderF2L` |
 | `BIND_ADDRESS` | Bind address | `0.0.0.0` |
 | `PING_INTERVAL` | Ping interval (seconds) | `840` |
 | `TOKEN_ENABLED` | Enable tokens | `False` |
@@ -310,6 +310,8 @@ nano config.env  # Edit your settings
 # 3. Build and run
 docker build -t thunder .
 docker run -d --name thunder -p 8080:8080 thunder
+# Optional: --stop-timeout 30 lets the server's 25s shutdown drain finish (docker stop defaults to 10s)
+docker run -d --stop-timeout 30 --name thunder -p 8080:8080 thunder
 ```
 
 <details>
@@ -386,9 +388,10 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```bash
    heroku ps:scale web=1
    ```
-7. Set `UPSTREAM_REPO` for auto-updates on dyno restart:
+7. Restarts update from `UPSTREAM_REPO` automatically; a failed update rolls back instead of starting a broken tree:
    ```bash
    heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
+   # The dyno filesystem is ephemeral, so a durable change still needs a new slug (step 5).
    ```
 
 > **Note:** Heroku provides HTTPS automatically. Set `FQDN` to `your-app-name.herokuapp.com` and `HAS_SSL` to `True`.
@@ -458,7 +461,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # Settings for file streaming
         proxy_buffering off;
         proxy_request_buffering off;

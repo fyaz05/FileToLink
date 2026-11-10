@@ -10,6 +10,8 @@ from Thunder.utils.logger import logger
 
 class Database:
     def __init__(self, uri: str, database_name: str, *args, **kwargs):
+        kwargs.setdefault("serverSelectionTimeoutMS", 10000)
+        kwargs.setdefault("connectTimeoutMS", 20000)
         self._client = AsyncMongoClient(uri, *args, **kwargs)
         self.db = self._client[database_name]
         self.col: AsyncCollection = self.db.users
@@ -450,4 +452,4 @@ class Database:
         if self._client:
             await self._client.close()
 
-db = Database(Var.DATABASE_URL, Var.NAME)
+db = Database(Var.DATABASE_URL, Var.DATABASE_NAME)

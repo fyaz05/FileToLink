@@ -20,4 +20,6 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
+# Update from UPSTREAM_REPO when it is configured, then start. A failed or
+# skipped update never blocks startup.
 CMD ["bash", "thunder.sh"]

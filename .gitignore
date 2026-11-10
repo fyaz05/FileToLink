@@ -7,6 +7,7 @@ config.env
 log.text
 .vscode/
 **/__pycache__/
+Thunder/logs/
 *.session
 *.session-journal
 *.session-shm

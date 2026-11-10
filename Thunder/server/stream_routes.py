@@ -46,6 +46,8 @@ CORS_HEADERS = {
 
 streamers = {}
 
+HEADERS_SENT_KEY = web.RequestKey("thunder_media_headers_sent", bool)
+
 
 def get_streamer(client_id: int) -> ByteStreamer:
     if client_id not in streamers:
@@ -179,7 +181,6 @@ async def _serve_media_response(
     *,
     file_info: dict,
     streamer: ByteStreamer,
-    client_id: int,
     media_ref: int | str,
     fallback_message_id: int | None = None,
     on_fallback_message=None
@@ -217,50 +218,57 @@ async def _serve_media_response(
     if range_header:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
-    if request.method == 'HEAD':
-        work_loads[client_id] -= 1
-        return web.Response(
-            status=206 if range_header else 200,
-            headers=headers
-        )
-
-    async def stream_generator():
-        try:
-            bytes_sent = 0
-            bytes_to_skip = start % CHUNK_SIZE
-
-            async for chunk in streamer.stream_file(
-                media_ref,
-                offset=start,
-                limit=content_length,
-                fallback_message_id=fallback_message_id,
-                on_fallback_message=on_fallback_message
-            ):
-                if bytes_to_skip > 0:
-                    if len(chunk) <= bytes_to_skip:
-                        bytes_to_skip -= len(chunk)
-                        continue
-                    chunk = chunk[bytes_to_skip:]
-                    bytes_to_skip = 0
-
-                remaining = content_length - bytes_sent
-                if len(chunk) > remaining:
-                    chunk = chunk[:remaining]
-
-                if chunk:
-                    yield chunk
-                    bytes_sent += len(chunk)
-
-                if bytes_sent >= content_length:
-                    break
-        finally:
-            work_loads[client_id] -= 1
-
-    return web.Response(
+    response = web.StreamResponse(
         status=206 if range_header else 200,
-        body=stream_generator(),
-        headers=headers
+        headers=headers,
     )
+    await response.prepare(request)
+    # Once the response is prepared, an HTTPException wedges the connection rather than aborting it.
+    request[HEADERS_SENT_KEY] = True
+
+    if request.method == 'HEAD':
+        await response.write_eof()
+        return response
+
+    bytes_sent = 0
+    bytes_to_skip = start % CHUNK_SIZE
+
+    async for chunk in streamer.stream_file(
+        media_ref,
+        offset=start,
+        limit=content_length,
+        fallback_message_id=fallback_message_id,
+        on_fallback_message=on_fallback_message
+    ):
+        if bytes_to_skip > 0:
+            if len(chunk) <= bytes_to_skip:
+                bytes_to_skip -= len(chunk)
+                continue
+            chunk = chunk[bytes_to_skip:]
+            bytes_to_skip = 0
+
+        remaining = content_length - bytes_sent
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining]
+
+        if chunk:
+            await response.write(chunk)
+            bytes_sent += len(chunk)
+
+        if bytes_sent >= content_length:
+            break
+
+    if bytes_sent < content_length:
+        logger.warning(
+            f"Short transfer: sent {bytes_sent} of {content_length} promised "
+            f"bytes for media {media_ref}; aborting the connection"
+        )
+        response.force_close()
+        raise ConnectionResetError(
+            f"stream ended after {bytes_sent} of {content_length} bytes")
+
+    await response.write_eof()
+    return response
 
 
 @routes.get("/", allow_head=True)
@@ -283,7 +291,10 @@ async def status_endpoint(request):
                 "uptime": get_readable_time(uptime)
             },
             "telegram_bot": {
-                "username": f"@{StreamBot.username}",
+                "username": (
+                    f"@{StreamBot.username}"
+                    if getattr(StreamBot, "username", None) else None
+                ),
                 "active_clients": len(multi_clients)
             },
             "resources": {
@@ -387,7 +398,6 @@ async def canonical_media_delivery(request: web.Request):
 
         client_id, streamer = select_optimal_client()
         work_loads[client_id] += 1
-
         try:
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
@@ -407,35 +417,48 @@ async def canonical_media_delivery(request: web.Request):
                             exc_info=True
                         )
 
-            return await _serve_media_response(
+            response = await _serve_media_response(
                 request,
                 file_info=file_record,
                 streamer=streamer,
-                client_id=client_id,
                 media_ref=media_ref,
                 fallback_message_id=fallback_message_id,
                 on_fallback_message=persist_refreshed_file_id
             )
+            return response
         except (FileNotFound, InvalidHash):
-            work_loads[client_id] -= 1
             raise
         except web.HTTPException as e:
-            work_loads[client_id] -= 1
             logger.debug(f"Client HTTP error in canonical stream: {e}")
             raise
         except Exception as e:
-            work_loads[client_id] -= 1
+            if request.get(HEADERS_SENT_KEY):
+                logger.debug(
+                    f"Canonical stream failed after headers sent: "
+                    f"{type(e).__name__} - {e}")
+                raise
             error_id = secrets.token_hex(6)
             logger.error(f"Canonical stream error {error_id}: {e}", exc_info=True)
             raise web.HTTPInternalServerError(
                 text=f"Server error during streaming: {error_id}") from e
+        finally:
+            work_loads[client_id] -= 1
     except (InvalidHash, FileNotFound) as e:
+        if request.get(HEADERS_SENT_KEY):
+            logger.debug(
+                f"Canonical stream raised {type(e).__name__} after headers "
+                f"sent: {e}")
+            raise
         logger.debug(f"Canonical client error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except web.HTTPException as e:
+        if request.get(HEADERS_SENT_KEY):
+            raise
         logger.warning(f"HTTP exception in canonical stream: {e}")
         raise
     except Exception as e:
+        if request.get(HEADERS_SENT_KEY):
+            raise
         error_id = secrets.token_hex(6)
         logger.error(f"Canonical server error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
@@ -451,7 +474,6 @@ async def media_delivery(request: web.Request):
         client_id, streamer = select_optimal_client()
 
         work_loads[client_id] += 1
-
         try:
             file_info = await streamer.get_file_info(message_id)
             unique_id = _resolve_unique_id(file_info)
@@ -463,33 +485,43 @@ async def media_delivery(request: web.Request):
                 request,
                 file_info=file_info,
                 streamer=streamer,
-                client_id=client_id,
                 media_ref=message_id
             )
 
         except (FileNotFound, InvalidHash):
-            work_loads[client_id] -= 1
             raise
         except web.HTTPException as e:
-            work_loads[client_id] -= 1
             logger.debug(f"Client HTTP error in media stream: {e}")
             raise
         except Exception as e:
-            work_loads[client_id] -= 1
+            if request.get(HEADERS_SENT_KEY):
+                logger.debug(
+                    f"Stream failed after headers sent: {type(e).__name__} - {e}")
+                raise
             error_id = secrets.token_hex(6)
             logger.error(
                 f"Stream error {error_id}: {e}",
                 exc_info=True)
             raise web.HTTPInternalServerError(
                 text=f"Server error during streaming: {error_id}") from e
+        finally:
+            work_loads[client_id] -= 1
 
     except (InvalidHash, FileNotFound) as e:
+        if request.get(HEADERS_SENT_KEY):
+            logger.debug(
+                f"Stream raised {type(e).__name__} after headers sent: {e}")
+            raise
         logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
         raise web.HTTPNotFound(text="Resource not found") from e
     except web.HTTPException as e:
+        if request.get(HEADERS_SENT_KEY):
+            raise
         logger.warning(f"HTTP exception in media stream: {e}")
         raise
     except Exception as e:
+        if request.get(HEADERS_SENT_KEY):
+            raise
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(

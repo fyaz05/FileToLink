@@ -1,4 +1,5 @@
-aiohttp
+# 3.14 adds web.RequestKey; the stream routes use it for the headers-sent flag.
+aiohttp>=3.14
 cloudscraper
 Jinja2
 pyrofork
@@ -7,4 +8,7 @@ psutil
 python-dotenv
 speedtest-cli
 tgcrypto
-uvloop==0.21.0
+# uvloop cannot be built on Windows, so it is only installed on other
+# platforms. The bot falls back to the standard asyncio loop when it is
+# missing.
+uvloop==0.21.0; sys_platform != "win32" and sys_platform != "cygwin"

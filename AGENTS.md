@@ -6,14 +6,16 @@ Python 3.13+ Telegram bot converting files to direct HTTP links. Uses Pyrofork, 
 
 ```bash
 python -m Thunder          # Primary entry point
-bash thunder.sh            # Runs python3 update.py && python3 -m Thunder
+bash thunder.sh            # Updates from UPSTREAM_REPO, then runs the bot
+python3 update.py          # Update only (rolls back if the new tree is unusable)
 ```
 
 ## Dependencies
 
 ```bash
 pip install -r requirements.txt
-# aiohttp, cloudscraper, Jinja2, pyrofork, pymongo, psutil, python-dotenv, speedtest-cli, tgcrypto, uvloop==0.21.0
+# aiohttp, cloudscraper, Jinja2, pyrofork, pymongo, psutil, python-dotenv, speedtest-cli, tgcrypto
+# uvloop==0.21.0 only on non-Windows/Cygwin (requirements.txt marker); asyncio loop elsewhere
 ```
 
 ## Project Structure

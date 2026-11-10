@@ -8,14 +8,17 @@ from datetime import datetime
 
 from pathlib import Path
 
-if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
+# Pyrofork binds a client to the loop current at creation and Thunder.bot
+# creates it on import, so the loop has to exist before these imports.
 try:
     from uvloop import install
     install()
 except ImportError:
     pass
+
+LOOP = asyncio.new_event_loop()
+asyncio.set_event_loop(LOOP)
+
 from aiohttp import web
 from pyrogram import idle
 from pyrogram.errors import FloodWait, MessageNotModified
@@ -132,14 +135,14 @@ async def start_services():
             logger.debug(f"FloodWait in bot start, sleeping for {e.value}s")
             await asyncio.sleep(e.value)
             await StreamBot.start()
-        
+
         try:
             bot_info = await StreamBot.get_me()
         except FloodWait as e:
             logger.debug(f"FloodWait in get_me, sleeping for {e.value}s")
             await asyncio.sleep(e.value)
             bot_info = await StreamBot.get_me()
-        
+
         StreamBot.username = bot_info.username
         print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
@@ -180,14 +183,14 @@ async def start_services():
         logger.error(
             f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
         )
-        return
+        raise SystemExit(1)
 
     print("   ▶ Starting Client initialization...")
     try:
         await initialize_clients()
     except Exception as e:
         logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
-        return
+        raise SystemExit(1)
 
     await import_plugins()
 
@@ -201,11 +204,16 @@ async def start_services():
         logger.error(
             f"   ✖ Failed to start request executor: {e}", exc_info=True
         )
-        return
+        raise SystemExit(1)
 
     print("   ▶ Starting Web Server initialization...")
     try:
-        app_runner = web.AppRunner(await web_server())
+        # shutdown_timeout belongs on AppRunner, not TCPSite, where the kwarg is deprecated.
+        app_runner = web.AppRunner(
+            await web_server(),
+            handler_cancellation=True,
+            shutdown_timeout=25,
+        )
         await app_runner.setup()
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
@@ -221,6 +229,14 @@ async def start_services():
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
+        if 'app_runner' in locals() and app_runner is not None:
+            try:
+                await app_runner.cleanup()
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Error during web server cleanup after startup failure: {cleanup_error}",
+                    exc_info=True
+                )
         if 'request_executor_task' in locals() and not request_executor_task.done():
             request_executor_task.cancel()
             try:
@@ -247,7 +263,7 @@ async def start_services():
             await drain_background_touch_tasks()
         except Exception as e:
             logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
-        return
+        raise SystemExit(1)
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
     print("╠═══════════════════════════════════════════════════════════╣")
@@ -268,6 +284,13 @@ async def start_services():
         await idle()
     finally:
         print("   ▶ Shutting down services...")
+
+        # Must run before the clients and database close, so in-flight downloads can drain.
+        if 'app_runner' in locals() and app_runner is not None:
+            try:
+                await app_runner.cleanup()
+            except Exception as e:
+                logger.error(f"Error during web server cleanup: {e}")
 
         for task in background_tasks:
             if not task.done():
@@ -292,12 +315,6 @@ async def start_services():
         except Exception as e:
             logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
 
-        if 'app_runner' in locals() and app_runner is not None:
-            try:
-                await app_runner.cleanup()
-            except Exception as e:
-                logger.error(f"Error during web server cleanup: {e}")
-
         try:
             await db.close()
             print("   ✓ Database connection closed")
@@ -318,11 +335,22 @@ async def schedule_token_cleanup():
 
 if __name__ == '__main__':
     try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(start_services())
+        LOOP.run_until_complete(start_services())
     except KeyboardInterrupt:
         print("╔═══════════════════════════════════════════════════════════╗")
         print("║                   Bot stopped by user (CTRL+C)            ║")
         print("╚═══════════════════════════════════════════════════════════╝")
+    except SystemExit:
+        raise
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+        raise SystemExit(1)
+    finally:
+        try:
+            LOOP.run_until_complete(LOOP.shutdown_asyncgens())
+        except Exception:
+            pass
+        try:
+            LOOP.close()
+        except Exception:
+            pass

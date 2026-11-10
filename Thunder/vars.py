@@ -34,6 +34,13 @@ class Var:
         raise ValueError("Missing required Telegram API configuration")
 
     NAME: str = os.getenv("NAME", "ThunderF2L")
+
+    # NAME permits characters MongoDB rejects in a database name (pymongo InvalidName).
+    DATABASE_NAME: str = "".join(
+        char if char.isalnum() or char in "-_" else "_"
+        for char in NAME.strip()
+    ) or "Thunder"
+
     SLEEP_THRESHOLD: int = int(os.getenv("SLEEP_THRESHOLD", "600"))
     WORKERS: int = int(os.getenv("WORKERS", "8"))
 
