@@ -29,22 +29,23 @@ class TestParseMediaRequest:
         assert message_id == 12345
         assert secure_hash == "AbCdEf"
 
-    def test_id_first_with_query_hash(self):
-        message_id, secure_hash = parse_media_request("12345", {"hash": "AbCdEf"})
-        assert message_id == 12345
-        assert secure_hash == "AbCdEf"
+    def test_rejects_bare_id(self):
+        """The id?hash= form was removed; links always carry the hash in the path."""
+        with pytest.raises(InvalidHash):
+            parse_media_request("12345", {"hash": "AbCdEf"})
 
     def test_rejects_missing_hash(self):
         with pytest.raises(InvalidHash):
             parse_media_request("12345", {})
 
-    def test_rejects_short_hash(self):
+    def test_rejects_hash_with_no_message_id(self):
+        # A bare 6-character hash has no id to extract.
         with pytest.raises(InvalidHash):
-            parse_media_request("12345", {"hash": "abc"})
+            parse_media_request("AbCd12", {})
 
-    def test_rejects_illegal_characters(self):
+    def test_rejects_illegal_hash_characters(self):
         with pytest.raises(InvalidHash):
-            parse_media_request("12345", {"hash": "ab/def"})
+            parse_media_request("ab.cd12345", {})
 
     def test_unquotes_path(self):
         message_id, secure_hash = parse_media_request("AbCdEf12345/my%20file.mp4", {})

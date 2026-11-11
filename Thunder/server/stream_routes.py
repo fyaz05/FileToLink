@@ -32,7 +32,6 @@ OVERLOAD_RETRY_AFTER_SECONDS = 2
 RANGE_REGEX = re.compile(r"^bytes=(?P<start>\d*)-(?P<end>\d*)$")
 PATTERN_HASH_FIRST = re.compile(
     rf"^([a-zA-Z0-9_-]{{{SECURE_HASH_LENGTH}}})(\d+)(?:/.*)?$")
-PATTERN_ID_FIRST = re.compile(r"^(\d+)(?:/.*)?$")
 VALID_HASH_REGEX = re.compile(r'^[a-zA-Z0-9_-]+$')
 VALID_PUBLIC_HASH_REGEX = re.compile(rf'^[0-9a-f]{{{PUBLIC_HASH_LENGTH}}}$')
 VALID_DISPOSITIONS = {"inline", "attachment"}
@@ -66,19 +65,6 @@ def parse_media_request(path: str, query: dict) -> tuple[int, str]:
             if (len(secure_hash) == SECURE_HASH_LENGTH and
                     VALID_HASH_REGEX.match(secure_hash)):
                 return message_id, secure_hash
-        except ValueError as e:
-            raise InvalidHash(f"Invalid message ID format in path: {e}") from e
-
-    match = PATTERN_ID_FIRST.match(clean_path)
-    if match:
-        try:
-            message_id = int(match.group(1))
-            secure_hash = query.get("hash", "").strip()
-            if (len(secure_hash) == SECURE_HASH_LENGTH and
-                    VALID_HASH_REGEX.match(secure_hash)):
-                return message_id, secure_hash
-            else:
-                raise InvalidHash("Invalid or missing hash in query parameter")
         except ValueError as e:
             raise InvalidHash(f"Invalid message ID format in path: {e}") from e
 

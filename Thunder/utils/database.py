@@ -1,5 +1,6 @@
 # Thunder/utils/database.py
 
+import asyncio
 import datetime
 from typing import Any, Dict, Optional
 from pymongo import AsyncMongoClient
@@ -449,7 +450,19 @@ class Database:
             raise
 
     async def close(self):
-        if self._client:
-            await self._client.close()
+        if not self._client:
+            return
+        await self._client.close()
+        # pymongo can leave its cursor task pending; drain it, bounded.
+        current = asyncio.current_task()
+        pending = [
+            task for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+            and "pymongo" in task.get_name()
+        ]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.wait(pending, timeout=2)
 
 db = Database(Var.DATABASE_URL, Var.DATABASE_NAME)
