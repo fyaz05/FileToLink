@@ -27,3 +27,6 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
+__pycache__/
+*.pyc

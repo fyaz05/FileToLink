@@ -74,9 +74,19 @@ Two-tier deque system in `rate_limiter.py`:
 
 Copy `config_sample.env` → `config.env`. Required vars: `API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`.
 
+## Testing
+
+```bash
+pip install pytest pytest-asyncio
+python -m pytest -q          # ~60s; no network or Telegram credentials needed
+```
+
+Covers request parsing, slot conservation and truncation on the streaming
+routes, the import cycle, database naming, /status before startup, and
+update.py preconditions and rollback.
+
 ## Debugging
 
-- Logs: `Thunder/logs/bot.txt`
-- Health check: admin `/status` command
-- No linting/formatting tools configured — follow conventions manually
-- No formal test suite — verify via bot interaction and link streaming
+- Logs: Thunder/logs/bot.txt
+- Health check: admin /status command, or GET /status on the web port
+- No linting/formatting tools configured - follow conventions manually
