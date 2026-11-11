@@ -1,4 +1,4 @@
-from os import chmod, environ, listdir, path, remove, rename, walk
+from os import chmod, environ, getpid, listdir, path, remove, rename, walk
 from shutil import copytree, ignore_patterns, rmtree
 from stat import S_IWRITE
 from subprocess import run as srun
@@ -14,7 +14,6 @@ UPSTREAM_REPO = environ.get("UPSTREAM_REPO", "")
 UPSTREAM_BRANCH = environ.get("UPSTREAM_BRANCH", "main")
 
 _BACKUP = path.join("..", "thunder_rollback")
-_CONFIG = path.join("..", "config.env.thunder.tmp")
 _SKIP = (".git", "config.env", "logs", "__pycache__", "*.session", "*.session-journal")
 
 
@@ -165,8 +164,14 @@ def _run_update(repo: str, branch: str) -> bool:
     _snapshot()
 
     # config.env is normally gitignored, but keep it safe either way.
+    # Move config aside for the reset. The backup lives beside the tree and is
+    # removed on the way out, so a stale one from a killed run cannot block
+    # the next update.
+    config_backup = path.join("..", f".config.env.{getpid()}.tmp")
+    if path.exists(config_backup):
+        remove(config_backup)
     if path.exists("config.env"):
-        rename("config.env", _CONFIG)
+        rename("config.env", config_backup)
 
     try:
         ok = _apply_upstream(repo, branch)
@@ -180,8 +185,8 @@ def _run_update(repo: str, branch: str) -> bool:
         logger.info("Successfully updated with Latest Updates!")
         return True
     finally:
-        if path.exists(_CONFIG):
-            rename(_CONFIG, "config.env")
+        if path.exists(config_backup):
+            rename(config_backup, "config.env")
 
 
 def main() -> int:
