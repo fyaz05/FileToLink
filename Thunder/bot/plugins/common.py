@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait, MessageNotModified
@@ -73,7 +73,7 @@ async def start_command(bot: Client, msg: Message):
                             error_id=str(int(time.time()))[-8:]
                         ))
                 
-                now = datetime.utcnow()
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
                 exp = now + timedelta(hours=Var.TOKEN_TTL_HOURS)
                 
                 await db.token_col.update_one(

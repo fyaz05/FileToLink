@@ -1,7 +1,7 @@
 # Thunder/utils/tokens.py
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 import asyncio
 import random
@@ -9,6 +9,11 @@ import pyrogram.errors
 from Thunder.utils.database import db
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
+
+
+def _utcnow() -> datetime:
+    """Naive UTC timestamp, matching the values already stored in MongoDB."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 async def check(user_id: int) -> bool:
     try:
@@ -19,7 +24,7 @@ async def check(user_id: int) -> bool:
         if user_id == Var.OWNER_ID:
             logger.debug("Owner access granted")
             return True
-        current_time = datetime.utcnow()
+        current_time = _utcnow()
         auth_result = await db.authorized_users_col.find_one(
             {"user_id": user_id},
             {"_id": 1}
@@ -41,7 +46,7 @@ async def generate(user_id: int) -> str:
     try:
         logger.debug(f"Token generation started for user: {user_id}")
         existing_token_doc = await db.token_col.find_one(
-            {"user_id": user_id, "activated": False, "expires_at": {"$gt": datetime.utcnow()}},
+            {"user_id": user_id, "activated": False, "expires_at": {"$gt": _utcnow()}},
             {"token": 1}
         )
         if existing_token_doc:
@@ -55,7 +60,7 @@ async def generate(user_id: int) -> str:
         for attempt in range(max_retries):
             try:
                 ttl_hours = getattr(Var, "TOKEN_TTL_HOURS", 24)
-                created_at = datetime.utcnow()
+                created_at = _utcnow()
                 expires_at = created_at + timedelta(hours=ttl_hours)
                 await db.save_main_token(
                     user_id=user_id,
@@ -98,7 +103,7 @@ async def authorize(user_id: int, authorized_by: int) -> bool:
         auth_data = {
             "user_id": user_id,
             "authorized_by": authorized_by,
-            "authorized_at": datetime.utcnow()
+            "authorized_at": _utcnow()
         }
         await db.authorized_users_col.update_one(
             {"user_id": user_id},
@@ -138,7 +143,7 @@ async def list_allowed() -> List[Dict[str, Any]]:
 
 async def list_tokens() -> List[Dict[str, Any]]:
     try:
-        current_time = datetime.utcnow()
+        current_time = _utcnow()
         cursor = db.token_col.find(
             {"expires_at": {"$gt": current_time}},
             {"user_id": 1, "expires_at": 1, "created_at": 1, "activated": 1}
@@ -150,7 +155,7 @@ async def list_tokens() -> List[Dict[str, Any]]:
 
 async def cleanup_expired_tokens() -> int:
     try:
-        current_time = datetime.utcnow()
+        current_time = _utcnow()
         logger.debug("Cleaning up expired tokens")
         result = await db.token_col.delete_many({"expires_at": {"$lte": current_time}})
         logger.debug(f"Cleaned up {result.deleted_count} expired tokens")

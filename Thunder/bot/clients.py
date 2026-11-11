@@ -12,6 +12,8 @@ from Thunder.vars import Var
 
 async def cleanup_clients():
     for client in multi_clients.values():
+        if not client.is_initialized:
+            continue
         try:
             try:
                 await client.stop()

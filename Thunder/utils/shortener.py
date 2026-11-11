@@ -87,8 +87,10 @@ class GenericShortenerPlugin(ShortenerPlugin):
         return True
 
     async def shorten(self, url: str, api_key: str) -> str:
+        # Accept a configured value with or without a scheme.
+        host = self.domain.split("://", 1)[-1].rstrip("/")
         response = await asyncio.to_thread(
-            self.session.get, f"https://{self.domain}/api?api={api_key}&url={quote(url)}"
+            self.session.get, f"https://{host}/api?api={api_key}&url={quote(url)}"
         )
         if response.status_code == 200:
             return response.json().get("shortenedUrl", url)
