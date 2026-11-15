@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs, so they need updates to move.
+  # Application dependencies are deliberately left floating.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

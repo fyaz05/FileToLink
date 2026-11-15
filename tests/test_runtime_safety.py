@@ -121,3 +121,21 @@ def test_thunder_script_resolves_python_from_its_own_directory():
     script = (REPO / "thunder.sh").read_text(encoding="utf-8")
     assert "BASH_SOURCE" in script
     assert ".venv/bin/python" in script
+
+
+def test_restart_never_execs_a_path_that_does_not_exist():
+    """`/restart` replaced the process with /bin/bash unconditionally.
+
+    On Windows that raised FileNotFoundError after telling the user the bot was
+    restarting, and it would do the same in an image that has no bash. The
+    handler must fall back to restarting the interpreter instead.
+    """
+    source = (REPO / "Thunder" / "bot" / "plugins" / "admin.py").read_text(encoding="utf-8")
+    restart = source.split("async def restart_bot", 1)[1].split("\n@StreamBot", 1)[0]
+
+    assert "os.execv" in restart, "the process is replaced, not retired"
+    assert '"/bin/bash"' not in restart, \
+        "a hardcoded absolute path is not portable"
+    assert "shutil.which" in restart, "the shell must be located, not assumed"
+    assert "sys.executable" in restart, \
+        "there must be a fallback that works without bash"

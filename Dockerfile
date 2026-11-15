@@ -17,5 +17,6 @@ USER 10001:10001
 
 EXPOSE 8080
 
-# Update from UPSTREAM_REPO if set, then start (update failure does not block startup).
+# Start. thunder.sh tries update.py first; with no git or .git in the image that
+# is reported as not applicable and the bot starts on the code baked in here.
 CMD ["bash", "thunder.sh"]

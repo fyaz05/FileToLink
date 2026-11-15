@@ -23,7 +23,7 @@ __pycache__
 .coverage.json
 tests
 requirements-dev.txt
-pytest.ini
+pyproject.toml
 .github
 .gitignore
 .python-version
