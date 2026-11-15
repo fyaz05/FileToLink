@@ -47,7 +47,9 @@ def _generated_relative(relative: str) -> bool:
 
 
 def _on_rmtree_error(func, target, exc):
-    # git pack files are read-only on Windows; clear the bit and retry once.
+    # Windows refuses to delete a read-only file, and copytree preserves that bit,
+    # so a read-only file anywhere in the tree blocks the rollback cleanup. Clear
+    # the bit and retry once.
     try:
         chmod(target, S_IWRITE)
     except OSError:
