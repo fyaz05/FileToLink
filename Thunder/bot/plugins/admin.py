@@ -4,7 +4,6 @@ import asyncio
 import html
 import os
 import shutil
-import sys
 import time
 from io import BytesIO
 

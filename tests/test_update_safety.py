@@ -10,8 +10,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parent.parent
 
 # update.py reads configuration at import, so give it placeholders.

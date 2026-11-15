@@ -42,7 +42,6 @@ MSG_ERROR_NOT_ADMIN = "⚠️ **Admin Required:** I need admin privileges to wor
 MSG_DC_INVALID_USAGE = "🤔 **Invalid Usage:** Please reply to a user's message or a media file to get DC info."
 MSG_DC_ANON_ERROR = "😥 **Cannot Get Your DC Info:** Unable to identify you. This command might not work for anonymous users."
 MSG_DC_FILE_ERROR = "⚙️ **Error Getting File DC Info:** Could not fetch details. File might be inaccessible."
-MSG_STATS_ERROR = "❌ **Stats Error:** Could not retrieve system statistics."
 MSG_STATUS_ERROR = "❌ **Status Error:** Could not retrieve system status."
 MSG_DB_ERROR = "❌ **Database Error:** Could not retrieve user count."
 MSG_CRITICAL_ERROR = (

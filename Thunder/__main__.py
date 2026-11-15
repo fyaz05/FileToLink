@@ -318,7 +318,7 @@ async def start_services():
         try:
             await db.close()
             print("   ✓ Database connection closed")
-        except Exception as e:
+        except Exception:
             logger.error("Error during database cleanup", exc_info=True)
 
 

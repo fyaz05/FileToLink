@@ -31,7 +31,7 @@ class Database:
             {"$project": {"_id": "$doc_id"}}
         ]
         keep_ids = []
-        async for doc in self.col.aggregate(pipeline):
+        async for doc in await self.col.aggregate(pipeline):
             keep_ids.append(doc["_id"])
         if keep_ids:
             result = await self.col.delete_many({"_id": {"$nin": keep_ids}})
