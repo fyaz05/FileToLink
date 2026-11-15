@@ -50,5 +50,13 @@ def test_gitignore_keeps_generated_env_files_out_of_a_self_update_commit():
 
         (tmp / ".env").write_text("API_HASH=secret\n")
         assert is_git_ignored(tmp, ".env"), "a bare .env must be ignored too"
+
+        # Tool caches are created by commands AGENTS.md tells developers to run,
+        # and update.py runs `git add .`, so neither may be committable.
+        for cache in (".ruff_cache/0.0.1/index", ".pytest_cache/v/cache/lastfailed"):
+            target = tmp / cache
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("{}\n")
+            assert is_git_ignored(tmp, cache), f"{cache} is a regenerable tool cache"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

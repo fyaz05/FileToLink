@@ -309,13 +309,19 @@ nano config.env  # Edit your settings
 
 # 3. Build and run (the config is mounted — it is not baked into the image)
 docker build -t thunder .
-sudo chown 10001:10001 config.env
 docker run -d --name thunder -p 8080:8080 \
   -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
 
-Note the `chown`: the container runs as uid `10001`, so it must be able to read
-`config.env`. `--stop-timeout 30` is optional — it lets the server's 25s shutdown drain
+The container runs as uid `10001`, which is not you, so `config.env` must be
+readable by others. A file created with a normal umask (`cp` gives `644`) already
+is; if yours is `600`, widen it without changing ownership:
+
+```bash
+chmod 644 config.env
+```
+
+`--stop-timeout 30` is optional — it lets the server's 25s shutdown drain
 finish, since `docker stop` defaults to 10s:
 
 ```bash
@@ -419,10 +425,10 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```bash
    heroku ps:scale web=1
    ```
-7. Restarts update from `UPSTREAM_REPO` automatically; a failed update rolls back instead of starting a broken tree:
+7. Restarts update from `UPSTREAM_REPO` only when the deployment has a git checkout. A Heroku slug is built from a tarball (step 5) and carries no `.git`, so the update is skipped and the dyno starts on the code in the slug. Durable changes need a new slug:
    ```bash
+   # Only takes effect on a deployment that has a .git directory (e.g. a VM checkout).
    heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
-   # The dyno filesystem is ephemeral, so a durable change still needs a new slug (step 5).
    ```
 
 > **Note:** Heroku provides HTTPS automatically. Set `FQDN` to `your-app-name.herokuapp.com` and `HAS_SSL` to `True`.
@@ -590,9 +596,18 @@ Contributions are welcome! Please follow these steps:
 
 1. Fork the repository.
 2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to the branch (`git push origin feature/amazing-feature`).
-5. Open a Pull Request.
+3. Make your change and run the suite and linter:
+   ```bash
+   pip install -r requirements-dev.txt
+   python -m pytest -q
+   python -m ruff check .
+   ```
+4. Commit your changes (`git commit -m 'Add some amazing feature'`).
+5. Push to the branch (`git push origin feature/amazing-feature`).
+6. Open a Pull Request.
+
+CI runs the suite on Linux and Windows, then builds the image only once those
+pass.
 
 ## License
 

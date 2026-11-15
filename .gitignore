@@ -34,5 +34,6 @@ wheels/
 .installed.cfg
 *.egg
 .pytest_cache/
+.ruff_cache/
 __pycache__/
 *.pyc

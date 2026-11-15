@@ -30,7 +30,7 @@ Thunder/
 │   ├── __init__.py          # StreamBot client, multi_clients, work_loads
 │   ├── clients.py           # Multi-client management
 │   └── plugins/
-│       ├── admin.py         # Owner commands: /users /broadcast /status /stats /restart /log /authorize /deauthorize /ban /unban /shell /speedtest
+│       ├── admin.py         # Owner commands: /users /broadcast /status /stats /restart /log /authorize /deauthorize /listauth /ban /unban /shell /speedtest
 │       ├── callbacks.py     # Inline keyboard handlers
 │       ├── common.py        # User commands: /start /help /about /dc /ping
 │       └── stream.py        # /link (groups), private/channel media handlers
@@ -49,11 +49,15 @@ dependencies provide wheels). `.dockerignore` excludes env files, session files,
 virtualenvs, dev tools, and tests; supply `config.env` at runtime.
 
 Two gotchas:
-- A mounted `config.env` must be readable by uid `10001` (`chown 10001:10001` or `644`;
-  a root-only `600` fails).
+- A mounted `config.env` must be readable by uid `10001` (`chmod 644`; a
+  root-only `600` fails). Do not `chown` it — that hands the file to a host-unknown
+  uid you can no longer edit.
 - Docker's `--env-file` passes values verbatim, so inline comments and quotes in
   `config_sample.env` corrupt variables (`PORT` becomes `8080 # Web server port`).
   Generate the file with `python-dotenv` outside the repo (see README), or mount `config.env`.
+
+Self-update is skipped inside the image: there is no `git` and no `.git`, so
+`UPSTREAM_REPO` has no effect there. Update a container by building a new image.
 
 ## Key Imports
 
@@ -91,16 +95,19 @@ Copy `config_sample.env` → `config.env`. Required vars: `API_ID`, `API_HASH`, 
 ## Testing
 
 ```bash
-pip install pytest pytest-asyncio
-python -m pytest -q          # ~60s; no network or Telegram credentials needed
+pip install -r requirements-dev.txt
+python -m pytest -q          # ~20s; no network or Telegram credentials needed
+python -m ruff check .       # config lives in pyproject.toml
 ```
 
 Covers request parsing, slot conservation and truncation on the streaming
 routes, the import cycle, database naming, /status before startup,
-update.py preconditions and rollback, and .gitignore hygiene.
+update.py preconditions and rollback, plugin handler registration, the CI
+workflow's invariants, and .gitignore hygiene.
+
+`pytest` and `ruff` both read `pyproject.toml`; there is no `pytest.ini`.
 
 ## Debugging
 
 - Logs: Thunder/logs/bot.txt
 - Health check: admin /status command, or GET /status on the web port
-- No linting/formatting tools configured - follow conventions manually

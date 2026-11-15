@@ -1,13 +1,13 @@
 """Owner commands: users, broadcast, status, stats, restart, logs, shell.
 
-Every handler here is registered with ``filters.user(Var.OWNER_ID)``, so the
-file is the bot's administrative surface.
+Every handler here is registered with ``filters.user(Var.OWNER_ID)``.
 """
 
 import asyncio
 import html
 import os
 import shutil
+import sys
 import time
 from io import BytesIO
 
@@ -181,7 +181,14 @@ async def show_stats(client: Client, message: Message):
 async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
-    os.execv("/bin/bash", ["bash", "thunder.sh"])
+
+    # thunder.sh runs update.py before starting, so prefer it where it can run.
+    # It is a bash script, so Windows restarts the interpreter directly and skips
+    # the update step rather than crashing on a path that does not exist.
+    bash = shutil.which("bash")
+    if os.name != "nt" and bash:
+        os.execv(bash, ["bash", "thunder.sh"])
+    os.execv(sys.executable, [sys.executable, "-m", "Thunder"])
 
 
 @StreamBot.on_message(filters.command("log") & owner_filter)

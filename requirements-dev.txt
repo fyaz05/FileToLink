@@ -1,3 +1,7 @@
 -r requirements.txt
 pytest
 pytest-asyncio
+# Lint gate (config in pyproject.toml), run locally and in CI.
+ruff
+# tests/test_ci_workflow.py parses the workflow files to check their invariants.
+pyyaml
