@@ -5,21 +5,17 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        git \
-        build-essential \
-        libssl-dev \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
+# No build toolchain needed: dependencies provide prebuilt wheels (see requirements.txt).
 COPY requirements.txt .
 
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Owned by unprivileged user so Thunder/logs and session file can be written at runtime.
+COPY --chown=10001:10001 . .
 
-# Update from UPSTREAM_REPO when it is configured, then start. A failed or
-# skipped update never blocks startup.
+USER 10001:10001
+
+EXPOSE 8080
+
+# Update from UPSTREAM_REPO if set, then start (update failure does not block startup).
 CMD ["bash", "thunder.sh"]

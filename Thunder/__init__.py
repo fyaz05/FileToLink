@@ -1,4 +1,3 @@
-# Thunder/__init__.py
 
 import time
 

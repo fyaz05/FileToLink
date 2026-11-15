@@ -1,4 +1,4 @@
-# Thunder/utils/time_format.py
+"""Human-readable durations ("2h 15m")."""
 
 from Thunder.utils.logger import logger
 

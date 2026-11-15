@@ -1,4 +1,4 @@
-# Thunder/utils/human_readable.py
+"""Byte and duration formatting for display."""
 
 from Thunder.utils.logger import logger
 

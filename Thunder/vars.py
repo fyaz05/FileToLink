@@ -1,4 +1,8 @@
-# Thunder/vars.py
+"""Environment configuration, validated at import.
+
+A missing requirement stops startup here rather than failing later, so any
+import of this module implies usable settings.
+"""
 
 import os
 

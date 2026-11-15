@@ -1,4 +1,8 @@
-# Thunder/bot/clients.py
+"""Starts the extra bot clients from MULTI_TOKEN* and spreads the load.
+
+The primary client is created in Thunder.bot; this module adds the rest and
+is what the /stats and /status commands report against.
+"""
 
 import asyncio
 

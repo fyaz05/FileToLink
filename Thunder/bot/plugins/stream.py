@@ -1,4 +1,8 @@
-# Thunder/bot/plugins/stream.py
+"""Link generation: /link in groups, and media sent to the bot in private.
+
+Forwards media to the storage channel, records the canonical file entry, and
+replies with the direct download and streaming links.
+"""
 
 import asyncio
 import secrets

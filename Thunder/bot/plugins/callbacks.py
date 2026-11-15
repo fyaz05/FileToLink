@@ -1,4 +1,8 @@
-# Thunder/bot/plugins/callbacks.py
+"""Inline keyboard handlers: help, about, broadcast cancel and panel close.
+
+Callback data is the only trusted input here, since the message it arrives on
+was sent by the bot.
+"""
 
 import asyncio
 

@@ -1,14 +1,16 @@
-# Thunder/utils/messages.py
+"""Every user-facing string, grouped by where it appears.
 
-# =====================================================================================
-# ====== ERROR MESSAGES ======
-# =====================================================================================
+Kept in one module so wording and formatting can be changed without touching
+the handlers that send them.
+"""
 
-# ------ General Errors ------
+# ERROR MESSAGES
+
+# General Errors
 MSG_ERROR_GENERIC = "⚠️ **Oops!** Something went wrong. Please try again. If the issue persists, contact support."
 MSG_ERROR_USER_INFO = "❗ **User Not Found:** Couldn't find user. Please check the ID or Username."
 
-# ------ User Input & Validation Errors ------
+# User Input & Validation Errors
 MSG_INVALID_USER_ID = "❌ **Invalid User ID:** Please provide a numeric user ID."
 MSG_ERROR_START_BOT = "⚠️ You need to start the bot in private first to use this command.\n👉 [Click here]({invite_link}) to start a private chat."
 MSG_ERROR_REPLY_FILE = "⚠️ Please use the /link command in reply to a file."
@@ -17,10 +19,10 @@ MSG_ERROR_INVALID_NUMBER = "⚠️ **Invalid number specified.**"
 MSG_ERROR_NUMBER_RANGE = "⚠️ **Please specify a number between 1 and {max_files}.**"
 MSG_ERROR_DM_FAILED = "⚠️ I couldn't send you a Direct Message. Please start the bot first."
 
-# ------ File & Media Errors ------
+# File & Media Errors
 MSG_ERROR_PROCESSING_MEDIA = "⚠️ **Oops!** Something went wrong while processing your media. Please try again. If the issue persists, contact support."
 
-# ------ Admin Action Errors (Ban, Auth, etc.) ------
+# Admin Action Errors (Ban, Auth, etc.)
 MSG_AUTHORIZE_FAILED = (
     "❌ **Authorization Failed:** "
     "Could not authorize user `{user_id}`."
@@ -37,7 +39,7 @@ MSG_TOKEN_FAILED = (
 MSG_SHELL_ERROR = """**❌ Shell Command Error ❌**
 <pre>{error}</pre>"""
 
-# ------ System & Bot Errors ------
+# System & Bot Errors
 MSG_ERROR_NOT_ADMIN = "⚠️ **Admin Required:** I need admin privileges to work here."
 MSG_DC_INVALID_USAGE = "🤔 **Invalid Usage:** Please reply to a user's message or a media file to get DC info."
 MSG_DC_ANON_ERROR = "😥 **Cannot Get Your DC Info:** Unable to identify you. This command might not work for anonymous users."
@@ -50,11 +52,9 @@ MSG_CRITICAL_ERROR = (
     "Please investigate immediately! (ID: {error_id})"
 )
 
-# =====================================================================================
-# ====== ADMIN MESSAGES ======
-# =====================================================================================
+# ADMIN MESSAGES
 
-# ------ Ban/Unban ------
+# Ban/Unban
 MSG_DECORATOR_BANNED = "You are currently banned and cannot use this bot.\nReason: {reason}\nBanned on: {ban_time}"
 MSG_BAN_USAGE = "⚠️ **Usage:** /ban [user_id] [reason]"
 MSG_CANNOT_BAN_OWNER = "❌ **Cannot ban an owner.**"
@@ -71,7 +71,7 @@ MSG_CHANNEL_BANNED_REASON_SUFFIX = "\n📝 **Reason:** {reason}"
 MSG_CHANNEL_UNBANNED = "✅ **Channel {channel_id} has been unbanned.**"
 MSG_CHANNEL_NOT_BANNED = "ℹ️ **Channel {channel_id} was not found in the ban list.**"
 
-# ------ Token & Authorization ------
+# Token & Authorization
 MSG_AUTHORIZE_USAGE = "🔑 **Usage:** `/authorize <user_id>`"
 MSG_DEAUTHORIZE_USAGE = "🔒 **Usage:** `/deauthorize <user_id>`"
 MSG_AUTHORIZE_SUCCESS = (
@@ -93,7 +93,7 @@ MSG_AUTH_USER_INFO = """{i}. 👤: {display_name}
    • Date: `{auth_time}`\n\n"""
 MSG_ADMIN_AUTH_LIST_HEADER = "🔐 **Authorized Users List**\n\n"
 
-# ------ Shell Commands ------
+# Shell Commands
 MSG_SHELL_USAGE = (
     "<b>Usage:</b>\n"
     "/shell <command>\n\n"
@@ -107,7 +107,7 @@ MSG_SHELL_OUTPUT_STDOUT = "<b>[stdout]:</b>\n<pre>{output}</pre>"
 MSG_SHELL_OUTPUT_STDERR = "<b>[stderr]:</b>\n<pre>{error}</pre>"
 MSG_SHELL_NO_OUTPUT = "✅ <b>Command Executed:</b> No output."
 
-# ------ Admin View & Control ------
+# Admin View & Control
 
 MSG_WORKLOAD_ITEM = "   {bot_name}: {load}\n"
 MSG_ADMIN_RESTART_DONE = "✅ **Restart Successful!**"
@@ -117,9 +117,7 @@ MSG_LOG_FILE_CAPTION = "📄 **System Logs**"
 MSG_LOG_FILE_EMPTY = "ℹ️ **Log File Empty:** No data found in the log file."
 MSG_LOG_FILE_MISSING = "⚠️ **Log File Missing:** Could not find the log file."
 
-# =====================================================================================
-# ====== BUTTON TEXTS (User-facing) ======
-# =====================================================================================
+# BUTTON TEXTS (User-facing)
 
 MSG_BUTTON_STREAM_NOW = "🖥️ Stream"
 MSG_BUTTON_DOWNLOAD = "🚀 Download"
@@ -133,9 +131,7 @@ MSG_BUTTON_START_CHAT = "📩 Start Chat"
 MSG_BUTTON_CLOSE = "✖ Close"
 
 
-# =====================================================================================
-# ====== COMMAND RESPONSES (User-facing) ======
-# =====================================================================================
+# COMMAND RESPONSES (User-facing)
 
 MSG_WELCOME = (
     "🌟 **Welcome, {user_name}!** 🌟\n\n"
@@ -196,7 +192,7 @@ MSG_ABOUT = (
     "💖 If you find me useful, please consider sharing me with your friends!"
 )
 
-# ------ Ping ------
+# Ping
 MSG_PING_START = "🛰️ **Pinging...** Please wait."
 MSG_PING_RESPONSE = (
     "☁️ **PONG! Bot is Online!** ⚡\n\n"
@@ -204,7 +200,7 @@ MSG_PING_RESPONSE = (
     "> 🤖 **Bot Status:** `Active`"
 )
 
-# ------ DC Info ------
+# DC Info
 MSG_DC_USER_INFO = (
     "📍 **Information**\n"
     "> 👤 **User:** [{user_name}](tg://user?id={user_id})\n"
@@ -222,7 +218,7 @@ MSG_DC_FILE_INFO = (
 
 MSG_DC_UNKNOWN = "Unknown"
 
-# ------ File Link Generation ------
+# File Link Generation
 MSG_DM_SINGLE_PREFIX = "📬 **From {chat_title}**\n"
 MSG_LINKS = (
     "✨ **Your Links are Ready!** ✨\n\n"
@@ -233,9 +229,7 @@ MSG_LINKS = (
     "⌛️ **Note: Links remain active while the bot is running and the file is accessible.**"
 )
 
-# =====================================================================================
-# ====== USER NOTIFICATIONS ======
-# =====================================================================================
+# USER NOTIFICATIONS
 
 MSG_NEW_USER = (
     "✨ **New User Alert!** ✨\n"
@@ -244,11 +238,9 @@ MSG_NEW_USER = (
 )
 MSG_COMMUNITY_CHANNEL = "📢 **{channel_title}:** 🔒 Join this channel to use the bot."
 
-# =====================================================================================
-# ====== PROCESSING MESSAGES ======
-# =====================================================================================
+# PROCESSING MESSAGES
 
-# ------ General File Processing ------
+# General File Processing
 MSG_PROCESSING_REQUEST = "⏳ **Processing your request...**"
 MSG_PROCESSING_FILE = "⏳ **Processing your file...**"
 MSG_NEW_FILE_REQUEST = (
@@ -258,16 +250,14 @@ MSG_NEW_FILE_REQUEST = (
     "🖥️ **Stream:** `{stream_link}`"
 )
 
-# ------ Batch Processing ------
+# Batch Processing
 MSG_PROCESSING_BATCH = "♻️ **Processing Batch {batch_number}/{total_batches}** ({file_count} files)"
 MSG_PROCESSING_STATUS = "📊 **Processing Files:** {processed}/{total} complete, {failed} failed"
 MSG_BATCH_LINKS_READY = "🔗 Here are your {count} download links:"
 MSG_DM_BATCH_PREFIX = "📬 **Batch Links from {chat_title}**\n"
 MSG_PROCESSING_RESULT = "✅ **Process Complete:** {processed}/{total} files processed successfully, {failed} failed"
 
-# =====================================================================================
-# ====== BROADCAST MESSAGES ======
-# =====================================================================================
+# BROADCAST MESSAGES
 
 MSG_BROADCAST_START = "📣 **Starting Broadcast...**\n\n> ⏳ Please wait for completion."
 MSG_BROADCAST_COMPLETE = (
@@ -288,18 +278,14 @@ MSG_BROADCAST_USAGE = (
     "**Note:** Reply to the message you want to broadcast."
 )
 
-# =====================================================================================
-# ====== PERMISSION MESSAGES ======
-# =====================================================================================
+# PERMISSION MESSAGES
 
 MSG_ERROR_UNAUTHORIZED = "You are not authorized to view this information."
 MSG_ERROR_BROADCAST_RESTART = "Please use the /broadcast command to start a new broadcast."
 MSG_ERROR_BROADCAST_INSTRUCTION = "To start a new broadcast, use the /broadcast command and reply to the message you want to broadcast."
 MSG_ERROR_CALLBACK_UNSUPPORTED = "This button is not active or no longer supported."
 
-# =====================================================================================
-# ====== RATE LIMITING MESSAGES ======
-# =====================================================================================
+# RATE LIMITING MESSAGES
 
 MSG_RATE_LIMIT_QUEUE_PRIORITY = (
     "⚡ You're in the **Priority Queue!**\n\n"
@@ -321,9 +307,7 @@ MSG_RATE_LIMIT_QUEUE_FULL = (
 )
 
 
-# =====================================================================================
-# ====== FILE TYPE DESCRIPTIONS ======
-# =====================================================================================
+# FILE TYPE DESCRIPTIONS
 MSG_FILE_TYPE_DOCUMENT = "📄 Document"
 MSG_FILE_TYPE_PHOTO = "🖼️ Photo"
 MSG_FILE_TYPE_VIDEO = "🎬 Video"
@@ -334,9 +318,7 @@ MSG_FILE_TYPE_ANIMATION = "🎞️ Animation (GIF)"
 MSG_FILE_TYPE_VIDEO_NOTE = "📹 Video Note"
 MSG_FILE_TYPE_UNKNOWN = "❓ Unknown File Type"
 
-# =====================================================================================
-# ====== SYSTEM & STATUS MESSAGES ======
-# =====================================================================================
+# SYSTEM & STATUS MESSAGES
 
 MSG_SYSTEM_STATUS = (
     "✅ **System Status:** Operational\n\n"
@@ -348,7 +330,7 @@ MSG_SYSTEM_STATUS = (
     "> ♻️ **Version:** `{version}`"
 )
 
-# ------ Speedtest Messages ------
+# Speedtest Messages
 MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...**"
 MSG_SPEEDTEST_ERROR = "❌ **Speed Test Failed!**\n\n> Unable to complete the speed test. Please try again later."
 MSG_SPEEDTEST_RESULT = (

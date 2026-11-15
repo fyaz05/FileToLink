@@ -1,4 +1,8 @@
-# Thunder/server/stream_routes.py
+"""HTTP surface: direct downloads, streaming, and the player page.
+
+Serves /f/<hash>/<name> and the short-hash form, honouring Range requests so
+large files seek, plus the /watch pages that wrap a file in a player.
+"""
 
 import re
 import secrets

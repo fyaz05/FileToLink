@@ -1,4 +1,8 @@
-# Thunder/utils/rate_limiter.py
+"""Two-tier request queues: owners bypass, authorized users get priority.
+
+Counts per-user and global requests inside a sliding window and re-queues a
+request that arrives over the limit instead of rejecting it.
+"""
 
 import time
 import math

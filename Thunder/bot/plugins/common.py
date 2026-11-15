@@ -1,4 +1,4 @@
-# Thunder/bot/plugins/common.py
+"""User commands: /start /help /about /dc /ping."""
 
 import asyncio
 import time

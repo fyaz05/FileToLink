@@ -1,4 +1,4 @@
-# Thunder/utils/keepalive.py
+"""Periodically pings the public URL so a host that idles on traffic stays up."""
 
 import asyncio
 import aiohttp

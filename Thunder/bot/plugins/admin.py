@@ -1,4 +1,8 @@
-# Thunder/bot/plugins/admin.py
+"""Owner commands: users, broadcast, status, stats, restart, logs, shell.
+
+Every handler here is registered with ``filters.user(Var.OWNER_ID)``, so the
+file is the bot's administrative surface.
+"""
 
 import asyncio
 import html

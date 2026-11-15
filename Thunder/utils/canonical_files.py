@@ -1,3 +1,10 @@
+"""Canonical file records: one entry per file, keyed by a public hash.
+
+Storage and lookup layer for the files collection, plus a bounded in-process
+cache and the ingest claim that stops two concurrent uploads of the same file
+from writing two records.
+"""
+
 import asyncio
 import datetime
 import hashlib

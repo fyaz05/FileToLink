@@ -1,4 +1,8 @@
-# Thunder/__main__.py
+"""Entry point: builds the event loop, then starts clients and the web server.
+
+The loop is created before the Pyrogram imports on purpose; see the comment
+below. Run with ``python -m Thunder``.
+"""
 
 import asyncio
 import glob

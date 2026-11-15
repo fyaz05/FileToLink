@@ -1,4 +1,8 @@
-# Thunder/utils/broadcast.py
+"""Owner-only mass messaging, with per-recipient retry and progress reporting.
+
+Sends to users in batches, tolerates FloodWait, and drops recipients Telegram
+says can no longer be reached.
+"""
 
 import asyncio
 import os

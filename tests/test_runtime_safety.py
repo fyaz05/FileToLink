@@ -1,8 +1,4 @@
-"""Import hygiene and configuration handling.
-
-These cover the three defects found by running the bot: the file_properties
-import cycle, the database name derived from NAME, and /status during startup.
-"""
+"""Verify import hygiene, database name sanitization, and pre-startup /status handling."""
 import pathlib
 import subprocess
 import sys
@@ -15,8 +11,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 
 
 def test_file_properties_importable_first():
-    """Importing file_properties before anything else used to raise
-    ImportError because server/__init__ eagerly imported stream_routes."""
+    """Verify file_properties is importable independently without eager server imports."""
     code = "from Thunder.utils.file_properties import get_media; print('ok')"
     result = subprocess.run([sys.executable, "-c", code], cwd=REPO,
                             capture_output=True, text=True, timeout=120)
@@ -47,8 +42,7 @@ class TestDatabaseName:
         _check_name(Var.DATABASE_NAME)
 
     def test_database_is_constructed_with_the_derived_name(self):
-        """Guards the regression where Database() was passed Var.NAME, which
-        crashes for any NAME MongoDB rejects (for example one with a space)."""
+        """Ensure Database uses sanitized DATABASE_NAME rather than unescaped Var.NAME."""
         import inspect
 
         from Thunder.utils import database as database_module

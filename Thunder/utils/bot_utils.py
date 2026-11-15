@@ -1,4 +1,8 @@
-# Thunder/utils/bot_utils.py
+"""Link generation and the small bot actions the plugins share.
+
+Builds canonical and shortened links, checks channel membership, and sends the
+notifications that go to the owner or the log channel.
+"""
 
 import asyncio
 from typing import Any, Dict, Optional
