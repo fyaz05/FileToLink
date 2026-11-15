@@ -138,19 +138,19 @@ def test_install_requirements_does_not_assume_pip_exists():
         "the warning must tell the operator how to get a pip-bearing environment"
 
 
-def _sandbox_skip(name):
-    """The real SKIP object from one of the update test files."""
+def _sandbox_skip(module_name="update_helpers"):
+    """The real SKIP object the update tests use to copy their sandboxes."""
     import importlib.util
 
-    path = REPO / "tests" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(f"_sandbox_skip_{name}", path)
+    path = REPO / "tests" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(f"_sandbox_skip_{module_name}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.SKIP
 
 
 def test_sandbox_copies_exclude_generated_state_and_nothing_else():
-    """Both update test files copy the whole project, once per test case.
+    """The update tests copy the whole project into a sandbox, once per test case.
 
     A venv lives inside the checkout (the README sets one up there) and this
     project's runs to tens of thousands of files, so leaving it in the copy
@@ -164,17 +164,19 @@ def test_sandbox_copies_exclude_generated_state_and_nothing_else():
     """
     names = ["Thunder", "tests", "update.py", "requirements.txt", "config.env",
              ".venv", "venv", ".pytest_cache", ".ruff_cache", "logs", "__pycache__"]
-    for name in ("test_update_safety", "test_update_recovery"):
-        ignored = set(_sandbox_skip(name)(str(REPO), list(names)))
+    ignored = set(_sandbox_skip()(str(REPO), list(names)))
 
-        for generated in (".venv", "venv", ".pytest_cache", ".ruff_cache"):
-            assert generated in ignored, (
-                f"{name}: {generated}/ is copied into every sandbox"
-            )
-        for real in ("Thunder", "tests", "update.py", "requirements.txt"):
-            assert real not in ignored, (
-                f"{name} would exclude real content: {real}"
-            )
+    for generated in (".venv", "venv", ".pytest_cache", ".ruff_cache"):
+        assert generated in ignored, f"{generated}/ is copied into every sandbox"
+    for real in ("Thunder", "tests", "update.py", "requirements.txt"):
+        assert real not in ignored, f"real content would be excluded: {real}"
+
+    # The two update test files must actually use that shared set, or the
+    # assertion above would be checking a module nothing calls.
+    for name in ("test_update_safety", "test_update_recovery"):
+        source = (REPO / "tests" / f"{name}.py").read_text(encoding="utf-8")
+        assert "from update_helpers import" in source, \
+            f"{name} no longer copies a sandbox using the shared patterns"
 
 
 def test_thunder_script_resolves_python_from_its_own_directory():

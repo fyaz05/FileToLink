@@ -1,115 +1,11 @@
 """Regression tests for the update.py defects found in review."""
 import os
-import shutil
-import stat
 import subprocess
-import sys
-import tempfile
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parent.parent
-
-BASE_ENV = {k: v for k, v in os.environ.items() if not k.startswith("UPSTREAM")}
-BASE_ENV.update({
-    "API_ID": "123456",
-    "API_HASH": "0" * 32,
-    "BOT_TOKEN": "123456:AA" + "x" * 30,
-    "BIN_CHANNEL": "-1001234567890",
-    "OWNER_ID": "1",
-    "DATABASE_URL": "mongodb://localhost:27017/t",
-})
-
-# Every test copies the project into a sandbox. Virtualenvs and tool caches are
-# excluded because they are large (a .venv of this project is ~75 MB) and
-# irrelevant to what is being tested; without this a suite run copies them once
-# per test and takes minutes instead of seconds.
-SKIP = shutil.ignore_patterns("__pycache__", "logs", "*.session*", "config.env", ".git",
-                              ".venv", "venv", ".pytest_cache", ".ruff_cache")
-
-
-def force_rmtree(target):
-    """Remove a tree that may contain read-only files.
-
-    A real git repository keeps loose objects and pack files read-only, and
-    Windows refuses to delete those, so the tests need the same retry update.py
-    applies to itself.
-    """
-    def on_error(func, path_, _exc):
-        try:
-            os.chmod(path_, stat.S_IWRITE)
-        except OSError:
-            pass
-        try:
-            func(path_)
-        except OSError:
-            pass
-
-    shutil.rmtree(target, onexc=on_error)
-
-
-def make_deployment(history: bool = True):
-    """A copy of the project with a real git repository and a config.env to protect.
-
-    The repository must be genuine: update.py fetches and resets in place rather
-    than re-initialising one, so a stub .git directory would not exercise the
-    real path. Making it real also means the assertions can check the things a
-    user actually cares about -- branches, stash, remotes -- and not just that
-    some files still exist.
-    """
-    root = Path(tempfile.mkdtemp(prefix="thunder_deploy_"))
-    app = root / "app"
-    shutil.copytree(REPO, app, ignore=SKIP)
-    force_rmtree(app / ".git")
-    (app / "config.env").write_text("KEEP_ME=1\n")
-    (app / "Thunder" / "logs").mkdir(parents=True, exist_ok=True)
-    (app / "Thunder" / "logs" / "bot.txt").write_text("live log\n")
-
-    if history:
-        def git(*args):
-            return subprocess.run(["git", *args], cwd=app, capture_output=True,
-                                  timeout=120)
-
-        git("init", "-q")
-        git("config", "user.email", "deploy@example.invalid")
-        git("config", "user.name", "Deploy")
-        git("add", "-A")
-        git("commit", "-qm", "deployment state")
-        git("branch", "-M", "main")
-        git("remote", "add", "origin", "https://example.invalid/deploy.git")
-        (app / ".git" / "CANARY").write_text("private history that must survive\n")
-    return root, app
-
-
-def make_upstream(broken=False):
-    root = Path(tempfile.mkdtemp(prefix="thunder_ups_"))
-    src, bare = root / "src", root / "up.git"
-    shutil.copytree(REPO, src, ignore=SKIP)
-    (src / "UPSTREAM_MARKER.txt").write_text("from upstream\n")
-    if broken:
-        (src / "Thunder" / "broken_syntax.py").write_text("def oops(:\n    pass\n")
-    for command in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "test@example.invalid"],
-        ["git", "config", "user.name", "Test"],
-        ["git", "add", "."],
-        ["git", "commit", "-sm", "upstream", "-q"],
-        ["git", "branch", "-M", "main"],
-    ):
-        subprocess.run(command, cwd=src, capture_output=True, timeout=120)
-    subprocess.run(["git", "clone", "-q", "--bare", str(src), str(bare)],
-                   cwd=root, capture_output=True, timeout=120)
-    return root, bare
-
-
-def run_update(app, upstream, branch="main", timeout=400):
-    env = dict(BASE_ENV)
-    env["UPSTREAM_REPO"] = str(upstream)
-    env["UPSTREAM_BRANCH"] = branch
-    return subprocess.run([sys.executable, "update.py"], cwd=app, env=env,
-                          capture_output=True, text=True, timeout=timeout,
-                          encoding="utf-8", errors="replace")
+from update_helpers import (force_rmtree, make_deployment, make_upstream,
+                            run_update)
 
 
 def test_a_failed_update_restores_the_original_git_history():

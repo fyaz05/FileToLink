@@ -77,16 +77,6 @@ async def gen_canonical_links(
 
 
 
-async def notify_ch(cli: Client, txt: str):
-    if not (hasattr(Var, 'BIN_CHANNEL') and isinstance(Var.BIN_CHANNEL, int) and Var.BIN_CHANNEL != 0):
-        return
-    try:
-        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await cli.send_message(chat_id=Var.BIN_CHANNEL, text=txt)
-
-
 async def notify_own(cli: Client, txt: str):
     o_ids = Var.OWNER_ID if isinstance(Var.OWNER_ID, (list, tuple, set)) else [Var.OWNER_ID]
     
