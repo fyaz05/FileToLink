@@ -1,6 +1,7 @@
 """Verify update.py preconditions and rollback in isolated project copies."""
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,17 +20,55 @@ BASE_ENV.update({
     "DATABASE_URL": "mongodb://localhost:27017/t",
 })
 
-SKIP = shutil.ignore_patterns("__pycache__", "logs", "*.session*", "config.env", ".git")
+# Generated state is excluded; see test_update_recovery.py for why.
+SKIP = shutil.ignore_patterns("__pycache__", "logs", "*.session*", "config.env", ".git",
+                              ".venv", "venv", ".pytest_cache", ".ruff_cache")
+
+
+def force_rmtree(target):
+    """Remove a tree that may contain read-only files.
+
+    A real git repository keeps its loose objects and pack files read-only, and
+    Windows refuses to delete those, so the tests need the same retry update.py
+    uses on itself.
+    """
+    def on_error(func, path_, _exc):
+        try:
+            os.chmod(path_, stat.S_IWRITE)
+        except OSError:
+            pass
+        try:
+            func(path_)
+        except OSError:
+            pass
+
+    shutil.rmtree(target, onexc=on_error)
 
 
 def make_sandbox():
-    """A copy of the project with a canary .git and a config.env to protect."""
+    """A copy of the project with a real git repository and a config.env to protect.
+
+    The repository has to be genuine: update.py fetches and resets in place
+    rather than re-initialising, so a stub .git directory is not enough. A real
+    repository also makes the canary meaningful -- the history it protects is one
+    git can actually read.
+    """
     target = Path(tempfile.mkdtemp(prefix="thunder_upd_"))
     shutil.copytree(REPO, target, dirs_exist_ok=True, ignore=SKIP)
-    shutil.rmtree(target / ".git", ignore_errors=True)
-    (target / ".git").mkdir()
-    (target / ".git" / "CANARY").write_text("history that must survive\n")
+    force_rmtree(target / ".git")
     (target / "config.env").write_text("KEEP_ME=1\n")
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=target, capture_output=True,
+                              timeout=120)
+
+    git("init", "-q")
+    git("config", "user.email", "deploy@example.invalid")
+    git("config", "user.name", "Deploy")
+    git("add", "-A")
+    git("commit", "-qm", "deployment state")
+    git("branch", "-M", "main")
+    (target / ".git" / "CANARY").write_text("history that must survive\n")
     return target
 
 
@@ -70,7 +109,7 @@ def test_refuses_when_upstream_unset():
         assert result.returncode == 0
         assert (sandbox / ".git" / "CANARY").exists()
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        force_rmtree(sandbox)
 
 
 def test_refuses_when_git_is_missing():
@@ -85,14 +124,14 @@ def test_refuses_when_git_is_missing():
         assert result.returncode == 1
         assert (sandbox / ".git" / "CANARY").exists(), "history must survive"
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        force_rmtree(sandbox)
 
 
 def test_no_git_and_no_checkout_is_not_an_error():
     """In container environments without git, update is skipped without error."""
     sandbox = make_sandbox()
     try:
-        shutil.rmtree(sandbox / ".git", ignore_errors=True)
+        force_rmtree(sandbox / ".git")
         assert not (sandbox / ".git").exists()
 
         env = dict(BASE_ENV)
@@ -105,7 +144,7 @@ def test_no_git_and_no_checkout_is_not_an_error():
         assert (sandbox / "config.env").exists(), "nothing may be touched"
         assert (sandbox / "update.py").exists(), "code must be left intact"
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        force_rmtree(sandbox)
 
 
 def test_refuses_unreachable_remote():
@@ -115,7 +154,7 @@ def test_refuses_unreachable_remote():
         assert result.returncode == 1
         assert (sandbox / ".git" / "CANARY").exists(), "history must survive"
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
+        force_rmtree(sandbox)
 
 
 def test_refuses_missing_branch():
@@ -126,22 +165,29 @@ def test_refuses_missing_branch():
         assert result.returncode == 1
         assert (sandbox / ".git" / "CANARY").exists()
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
-        shutil.rmtree(root, ignore_errors=True)
+        force_rmtree(sandbox)
+        force_rmtree(root)
 
 
-def test_successful_update_applies_upstream_and_keeps_config():
+def test_successful_update_applies_upstream_and_keeps_config_and_history():
     root, bare = make_upstream()
     sandbox = make_sandbox()
     try:
         result = run_update(sandbox, upstream=str(bare))
         assert result.returncode == 0, result.stderr[-500:]
         assert (sandbox / "UPSTREAM_MARKER.txt").exists()
-        assert not (sandbox / ".git" / "CANARY").exists(), "history replaced"
         assert (sandbox / "config.env").read_text().startswith("KEEP_ME")
+
+        # The update applies new code without replacing the repository, so the
+        # user's own remote and branches are still there afterwards.
+        assert (sandbox / ".git" / "CANARY").exists(), \
+            "a successful update must not replace the user's repository"
+        remotes = subprocess.run(["git", "remote", "-v"], cwd=sandbox,
+                                 capture_output=True, text=True, timeout=120)
+        assert "example.invalid" in remotes.stdout or "origin" in remotes.stdout
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
-        shutil.rmtree(root, ignore_errors=True)
+        force_rmtree(sandbox)
+        force_rmtree(root)
 
 
 def test_update_is_idempotent():
@@ -152,8 +198,8 @@ def test_update_is_idempotent():
         assert run_update(sandbox, upstream=str(bare)).returncode == 0
         assert (sandbox / "config.env").exists()
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
-        shutil.rmtree(root, ignore_errors=True)
+        force_rmtree(sandbox)
+        force_rmtree(root)
 
 
 def test_broken_upstream_rolls_back():
@@ -168,5 +214,5 @@ def test_broken_upstream_rolls_back():
         assert (sandbox / "config.env").exists()
         assert (sandbox / "update.py").exists(), "original code restored"
     finally:
-        shutil.rmtree(sandbox, ignore_errors=True)
-        shutil.rmtree(root, ignore_errors=True)
+        force_rmtree(sandbox)
+        force_rmtree(root)

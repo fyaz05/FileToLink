@@ -79,27 +79,21 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
-          # Public and private repositories default differently, so it is set
-          # explicitly.
-          provenance: mode=max
-          # The smoke test runs the image below. With the container driver that
-          # build-push-action uses, the result stays in the build cache unless it
-          # is loaded, so without this `docker run` would find nothing. On a push
-          # the image is in the registry instead, so loading is unnecessary.
-          load: ${{ github.event_name != 'push' }}
-          push: ${{ github.event_name == 'push' }}
-          tags: fyaz05/thunder:latest
+          # Loaded, not pushed, and without attestations: this build exists to be
+          # tested, and the publish step below rebuilds from the same cache. An
+          # attestation cannot be loaded into the daemon's image store, so asking
+          # for one here would fail before the test ever ran. Passing no tag keeps
+          # this image out of the registry entirely.
+          load: true
+          tags: fyaz05/thunder:test
       - name: Smoke test the built image
         # Building is not the same as working: a missing dependency or a broken
         # import still produces a valid image that fails the moment it starts.
-        # Importing the entry point is the strongest check that needs no real
-        # credentials -- Thunder.vars validates its configuration at import, so
-        # placeholders stand in for a deployment's own values. That also means
-        # this proves the dependencies and the code, not the configuration.
-        env:
-          # A pull request has the image loaded locally; a push has it in the
-          # registry, addressed by the digest the build step just produced.
-          IMAGE: ${{ github.event_name == 'push' && format('fyaz05/thunder@{0}', steps.build.outputs.digest) || 'fyaz05/thunder:latest' }}
+        # This runs BEFORE anything is published, so a broken image is never the
+        # one tagged latest. Importing the entry point is the strongest check that
+        # needs no real credentials -- Thunder.vars validates its configuration at
+        # import, so placeholders stand in for a deployment's own values. That
+        # also means this proves the dependencies and the code, not the config.
         run: |
           docker run --rm \
             -e API_ID=123456 \
@@ -108,5 +102,18 @@ jobs:
             -e BIN_CHANNEL=-1001234567890 \
             -e OWNER_ID=1 \
             -e DATABASE_URL=mongodb://localhost:27017/smoke \
-            "$IMAGE" python -c \
+            fyaz05/thunder:test python -c \
             "import Thunder, Thunder.__main__, uvloop, tgcrypto, aiohttp; print('ok', Thunder.__version__)"
+      - name: Publish
+        # Only reached once the smoke test passed, and only for a push event: a
+        # pull request never receives secrets. Rebuilds from the cache the tested
+        # build populated, so this is the same image, now with attestations.
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          # Public and private repositories default differently, so it is set
+          # explicitly.
+          provenance: mode=max
+          push: true
+          tags: fyaz05/thunder:latest

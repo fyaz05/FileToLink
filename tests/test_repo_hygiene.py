@@ -1,4 +1,9 @@
-"""Verify .gitignore prevents credential leaks during self-update (`update.py` runs `git add .`)."""
+"""Verify .gitignore keeps credentials and local state out of a commit.
+
+update.py no longer stages anything, so the risk is a person running `git add -A`
+in a working checkout, and `git commit -a` on modified tracked files. Both are
+ordinary things to do, and `config.env` must not be among what they pick up.
+"""
 import os
 import shutil
 import subprocess
@@ -51,12 +56,13 @@ def test_gitignore_keeps_generated_env_files_out_of_a_self_update_commit():
         (tmp / ".env").write_text("API_HASH=secret\n")
         assert is_git_ignored(tmp, ".env"), "a bare .env must be ignored too"
 
-        # Tool caches are created by commands AGENTS.md tells developers to run,
-        # and update.py runs `git add .`, so neither may be committable.
-        for cache in (".ruff_cache/0.0.1/index", ".pytest_cache/v/cache/lastfailed"):
+        # Tool caches and coverage files are created by commands the docs tell
+        # developers to run, and none of them may be committable.
+        for cache in (".ruff_cache/0.0.1/index", ".pytest_cache/v/cache/lastfailed",
+                      ".coverage"):
             target = tmp / cache
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("{}\n")
-            assert is_git_ignored(tmp, cache), f"{cache} is a regenerable tool cache"
+            assert is_git_ignored(tmp, cache), f"{cache} must not be committable"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

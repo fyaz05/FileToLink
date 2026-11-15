@@ -313,6 +313,8 @@ docker run -d --name thunder -p 8080:8080 \
   -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
 
+(PowerShell: `-v "${PWD}\config.env:/app/config.env:ro"`.)
+
 The container runs as uid `10001`, which is not you, so `config.env` must be
 readable by others. A file created with a normal umask (`cp` gives `644`) already
 is; if yours is `600`, widen it without changing ownership:
@@ -432,6 +434,11 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```
 
 > **Note:** Heroku provides HTTPS automatically. Set `FQDN` to `your-app-name.herokuapp.com` and `HAS_SSL` to `True`.
+
+> **Note:** `heroku.yml` builds this repo's `Dockerfile`, so the dyno runs as uid `10001`
+> and cannot read a root-only `config.env`. Config vars avoid the file entirely, which is
+> why this path uses them; the container's own `Thunder/logs` is already writable from the
+> image, so no `chmod` step is needed here.
 
 > **Note:** See the [Configuration](#configuration) section for required environment variables.
 

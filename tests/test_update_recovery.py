@@ -1,10 +1,7 @@
-"""Regression tests for the update.py defects found in review.
-
-Two of the defects covered here destroy data; the test that guards new
-behaviour rather than a defect says so in its own docstring.
-"""
+"""Regression tests for the update.py defects found in review."""
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -24,31 +21,64 @@ BASE_ENV.update({
     "DATABASE_URL": "mongodb://localhost:27017/t",
 })
 
-SKIP = shutil.ignore_patterns("__pycache__", "logs", "*.session*", "config.env", ".git")
+# Every test copies the project into a sandbox. Virtualenvs and tool caches are
+# excluded because they are large (a .venv of this project is ~75 MB) and
+# irrelevant to what is being tested; without this a suite run copies them once
+# per test and takes minutes instead of seconds.
+SKIP = shutil.ignore_patterns("__pycache__", "logs", "*.session*", "config.env", ".git",
+                              ".venv", "venv", ".pytest_cache", ".ruff_cache")
+
+
+def force_rmtree(target):
+    """Remove a tree that may contain read-only files.
+
+    A real git repository keeps loose objects and pack files read-only, and
+    Windows refuses to delete those, so the tests need the same retry update.py
+    applies to itself.
+    """
+    def on_error(func, path_, _exc):
+        try:
+            os.chmod(path_, stat.S_IWRITE)
+        except OSError:
+            pass
+        try:
+            func(path_)
+        except OSError:
+            pass
+
+    shutil.rmtree(target, onexc=on_error)
 
 
 def make_deployment(history: bool = True):
-    """A checkout-shaped copy with private history and a config.env to protect.
+    """A copy of the project with a real git repository and a config.env to protect.
 
-    The .git directory is a realistic stub: a rollback test needs to prove the
-    real thing came back, so it has the files a real repository would have.
+    The repository must be genuine: update.py fetches and resets in place rather
+    than re-initialising one, so a stub .git directory would not exercise the
+    real path. Making it real also means the assertions can check the things a
+    user actually cares about -- branches, stash, remotes -- and not just that
+    some files still exist.
     """
     root = Path(tempfile.mkdtemp(prefix="thunder_deploy_"))
     app = root / "app"
     shutil.copytree(REPO, app, ignore=SKIP)
-    shutil.rmtree(app / ".git", ignore_errors=True)
-    if history:
-        git = app / ".git"
-        (git / "refs" / "heads").mkdir(parents=True)
-        (git / "HEAD").write_text("ref: refs/heads/main\n")
-        (git / "config").write_text(
-            '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n'
-            '\turl = https://example.invalid/private.git\n')
-        (git / "refs" / "heads" / "main").write_text("0" * 40 + "\n")
-        (git / "CANARY").write_text("private history that must survive\n")
+    force_rmtree(app / ".git")
     (app / "config.env").write_text("KEEP_ME=1\n")
     (app / "Thunder" / "logs").mkdir(parents=True, exist_ok=True)
     (app / "Thunder" / "logs" / "bot.txt").write_text("live log\n")
+
+    if history:
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=app, capture_output=True,
+                                  timeout=120)
+
+        git("init", "-q")
+        git("config", "user.email", "deploy@example.invalid")
+        git("config", "user.name", "Deploy")
+        git("add", "-A")
+        git("commit", "-qm", "deployment state")
+        git("branch", "-M", "main")
+        git("remote", "add", "origin", "https://example.invalid/deploy.git")
+        (app / ".git" / "CANARY").write_text("private history that must survive\n")
     return root, app
 
 
@@ -83,38 +113,64 @@ def run_update(app, upstream, branch="main", timeout=400):
 
 
 def test_a_failed_update_restores_the_original_git_history():
-    """The tree must never come back without the history it had before.
-
-    _apply_upstream re-initialises the repository to fetch upstream, so a failure
-    afterwards used to leave the user with a throwaway one-commit repo and their
-    branches, remotes and stashes gone.
-    """
+    """A failed update must leave the user's git history intact."""
     upstream_root, bare = make_upstream(broken=True)
     deploy_root, app = make_deployment()
     try:
         result = run_update(app, bare)
         assert result.returncode == 1, "a broken upstream must fail"
         assert (app / ".git" / "CANARY").exists(), \
-            "the original .git must be back after a rollback"
+            "the original .git must be intact after a rollback"
         assert (app / ".git" / "refs" / "heads" / "main").exists(), \
             "branches must survive too, not just a placeholder repository"
         config = (app / ".git" / "config").read_text(encoding="utf-8", errors="replace")
-        assert "example.invalid/private.git" in config, \
-            "the original remotes must be intact"
+        assert "example.invalid/deploy.git" in config, \
+            "the user's own remote must be untouched"
         assert "thunder@update.local" not in config, \
-            "a rollback must not leave the throwaway repository in place"
+            "no throwaway repository may be created"
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
+
+
+def test_a_successful_update_preserves_branches_stash_and_remotes():
+    """The user's local git work must survive an update that succeeds.
+
+    A rollback test cannot cover this: the damage happened when nothing failed.
+    """
+    upstream_root, bare = make_upstream()
+    deploy_root, app = make_deployment()
+    try:
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=app, capture_output=True,
+                                  text=True, timeout=120).stdout.strip()
+
+        git("checkout", "-qb", "my-local-branch")
+        (app / "NOTES.md").write_text("local work\n")
+        git("add", "NOTES.md")
+        git("commit", "-qm", "local work")
+        (app / "stashme.txt").write_text("stash content\n")
+        git("add", "stashme.txt")
+        git("stash", "push", "-qm", "my stash")
+        git("checkout", "-q", "main")
+
+        assert run_update(app, bare).returncode == 0
+
+        assert "my-local-branch" in git("branch"), "a local branch was lost"
+        assert "my stash" in git("stash", "list"), "the stash was lost"
+        assert "example.invalid/deploy.git" in git("remote", "-v"), "the remote was lost"
+        assert (app / "UPSTREAM_MARKER.txt").exists(), "the update still applied"
+    finally:
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_a_successful_update_leaves_a_workable_checkout():
     """After a successful update the deployment must be a usable git checkout.
 
-    This one is not a regression test for a pre-existing defect: the pre-fix code
-    never preserved history, so it had no backup to leak. It guards the new
-    behaviour -- that the preserved history is cleaned up and the repository left
-    behind still works -- which nothing else covers.
+    The update applies upstream code and resets the working tree onto it, so the
+    repository has to survive that intact: still valid, still resolving to a
+    commit, still the user's own repository rather than a replacement.
     """
     upstream_root, bare = make_upstream()
     deploy_root, app = make_deployment()
@@ -123,18 +179,25 @@ def test_a_successful_update_leaves_a_workable_checkout():
         assert result.returncode == 0, result.stderr[-400:]
         assert (app / "UPSTREAM_MARKER.txt").exists()
         assert (app / "config.env").read_text().startswith("KEEP_ME")
-        assert not (deploy_root / "thunder_git_backup").exists(), \
-            "the preserved history is obsolete once the update succeeded"
 
         status = subprocess.run(["git", "status", "--porcelain"], cwd=app,
                                 capture_output=True, timeout=120)
         assert status.returncode == 0, "the remaining .git must be a valid repository"
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=app,
                               capture_output=True, text=True, timeout=120)
-        assert head.returncode == 0 and len(head.stdout.strip()) == 40
+        assert head.returncode == 0 and len(head.stdout.strip()) == 40, \
+            "the checkout must resolve to a commit"
+
+        # CANARY is a stand-in for private history the original .git holds.
+        assert (app / ".git" / "CANARY").exists(), \
+            "the update replaced the user's repository"
+        remotes = subprocess.run(["git", "remote", "-v"], cwd=app, capture_output=True,
+                                 text=True, timeout=120).stdout
+        assert "example.invalid/deploy.git" in remotes, \
+            "the user's remote was replaced"
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_config_recovered_when_a_previous_update_was_killed():
@@ -156,20 +219,20 @@ def test_config_recovered_when_a_previous_update_was_killed():
             "the stranded config must be recovered, or the bot cannot start"
         assert not (deploy_root / ".config.env.thunder.tmp").exists()
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_no_git_checkout_is_not_updated_even_when_git_is_installed():
     """A tarball deployment on a host that has git must be left alone.
 
-    Previously the missing-.git check only ran when git itself was unusable, so
-    an unpacked archive was re-initialised as a git repository.
+    The check is on the checkout, not on git: without a .git directory there is
+    nothing to update in place, and creating one would replace the deployment.
     """
     upstream_root, bare = make_upstream()
     deploy_root, app = make_deployment()
     try:
-        shutil.rmtree(app / ".git")
+        force_rmtree(app / ".git")
         assert not (app / ".git").exists()
 
         result = run_update(app, bare)
@@ -179,18 +242,17 @@ def test_no_git_checkout_is_not_updated_even_when_git_is_installed():
         assert (app / "config.env").read_text().startswith("KEEP_ME")
         assert not (app / "UPSTREAM_MARKER.txt").exists(), "nothing may be applied"
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_rollback_keeps_the_open_log_file():
     """Thunder/logs is written to while the update runs.
 
-    The rollback used to exempt a top-level "logs" directory, which never exists
-    (the real path is Thunder/logs), so the whole Thunder/ tree was deleted. On
-    Windows the deletion silently failed with WinError 32 and only the log file's
-    in-use status saved it; on Linux it was removed. The assertion therefore has
-    to be that the rollback never tries to remove it, which holds on both.
+    The assertion has to be that the rollback never *attempts* to remove it, not
+    merely that the file survives: on Windows a delete of the open file fails
+    silently, so a check on existence alone would pass even while the rollback
+    was trying to delete the whole directory.
     """
     upstream_root, bare = make_upstream(broken=True)
     deploy_root, app = make_deployment()
@@ -209,8 +271,8 @@ def test_rollback_keeps_the_open_log_file():
         # ...while the code it does not own is still replaced.
         assert (app / "Thunder" / "utils" / "logger.py").exists()
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_an_unusable_rollback_location_is_reported_not_crashed():
@@ -243,8 +305,8 @@ def test_an_unusable_rollback_location_is_reported_not_crashed():
         assert (app / "config.env").read_text().startswith("KEEP_ME")
         assert not (app / "UPSTREAM_MARKER.txt").exists(), "nothing may be applied"
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
 
 
 def test_a_stale_file_where_the_rollback_copy_goes_does_not_stop_the_update():
@@ -265,5 +327,5 @@ def test_a_stale_file_where_the_rollback_copy_goes_does_not_stop_the_update():
         assert (deploy_root / "thunder_rollback").is_dir(), \
             "the rollback copy must be a directory afterwards"
     finally:
-        shutil.rmtree(deploy_root, ignore_errors=True)
-        shutil.rmtree(upstream_root, ignore_errors=True)
+        force_rmtree(deploy_root)
+        force_rmtree(upstream_root)
