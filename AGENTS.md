@@ -14,8 +14,8 @@ python3 update.py          # Update only (rolls back if the new tree is unusable
 
 ```bash
 pip install -r requirements.txt
-# aiohttp, cloudscraper, Jinja2, pyrofork, pymongo, psutil, python-dotenv, speedtest-cli, tgcrypto
-# uvloop==0.21.0 only on non-Windows/Cygwin (requirements.txt marker); asyncio loop elsewhere
+# aiohttp, cloudscraper, Jinja2, pyrofork, pymongo, psutil, python-dotenv, speedtest-cli, tgcrypto-pyrofork
+# uvloop (non-Windows/Cygwin only, requirements.txt marker); asyncio loop elsewhere
 ```
 
 ## Project Structure
@@ -38,7 +38,7 @@ Thunder/
 │   ├── stream_routes.py     # HTTP streaming endpoints
 │   └── exceptions.py        # Custom HTTP exceptions
 ├── utils/                   # 20 modules — see imports below
-└── template/                # dl.html, req.html (Jinja2)
+└── template/                # req.html (Jinja2)
 ```
 
 ## Key Imports

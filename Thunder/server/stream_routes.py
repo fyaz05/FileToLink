@@ -318,7 +318,7 @@ async def canonical_media_preview(request: web.Request):
 
         file_name = file_record.get("file_name") or f"file_{secure_hash}"
         src = f"{Var.URL.rstrip('/')}/f/{secure_hash}/{quote_media_name(file_name)}"
-        rendered_page = await render_media_page(file_name, src, requested_action='stream')
+        rendered_page = await render_media_page(file_name, src)
 
         response = web.Response(
             text=rendered_page,
@@ -347,8 +347,7 @@ async def media_preview(request: web.Request):
         path = request.match_info["path"]
         message_id, secure_hash = parse_media_request(path, request.query)
 
-        rendered_page = await render_page(
-            message_id, secure_hash, requested_action='stream')
+        rendered_page = await render_page(message_id, secure_hash)
 
         response = web.Response(
             text=rendered_page,

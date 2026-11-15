@@ -21,25 +21,18 @@ template_env = Environment(
     optimized=True
 )
 
-async def render_media_page(file_name: str, src: str, requested_action: str | None = None) -> str:
+async def render_media_page(file_name: str, src: str) -> str:
     # NOTE: src must be a pre-encoded URL. Templates use |safe to avoid double-encoding.
-    if requested_action == 'stream':
-        template = template_env.get_template('req.html')
-        context = {
-            'heading': f"View {file_name}",
-            'file_name': file_name,
-            'src': f"{src}?disposition=inline"
-        }
-    else:
-        template = template_env.get_template('dl.html')
-        context = {
-            'file_name': file_name,
-            'src': src
-        }
+    template = template_env.get_template('req.html')
+    context = {
+        'heading': f"View {file_name}",
+        'file_name': file_name,
+        'src': f"{src}?disposition=inline"
+    }
     return await template.render_async(**context)
 
 
-async def render_page(message_id: int, secure_hash: str, requested_action: str | None = None) -> str:
+async def render_page(message_id: int, secure_hash: str) -> str:
     try:
         try:
             message = await StreamBot.get_messages(chat_id=int(Var.BIN_CHANNEL), message_ids=message_id)
@@ -58,7 +51,7 @@ async def render_page(message_id: int, secure_hash: str, requested_action: str |
 
         quoted_filename = urllib.parse.quote(file_name.replace('/', '_'), safe="")
         src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{message_id}/{quoted_filename}')
-        return await render_media_page(file_name, src, requested_action)
+        return await render_media_page(file_name, src)
     except Exception as e:
         logger.error(
             f"Error in render_page for message_id {message_id} and hash {secure_hash}: {e}",

@@ -3,7 +3,6 @@
 These cover the three defects found by running the bot: the file_properties
 import cycle, the database name derived from NAME, and /status during startup.
 """
-import ast
 import pathlib
 import subprocess
 import sys
