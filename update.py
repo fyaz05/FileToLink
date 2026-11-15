@@ -1,5 +1,5 @@
 from fnmatch import fnmatch
-from os import chmod, environ, listdir, path, remove, rename, rmdir
+from os import chmod, environ, listdir, path, remove, replace, rmdir
 from pathlib import PurePath
 from shutil import copytree, ignore_patterns, rmtree
 from stat import S_IWRITE
@@ -12,12 +12,11 @@ from Thunder.utils.logger import logger
 
 # Rollback state lives beside the tree, so replacing the tree cannot overwrite it.
 _BACKUP = path.join("..", "thunder_rollback")
-_GIT_BACKUP = path.join("..", "thunder_git_backup")
 _CONFIG_BACKUP = path.join("..", ".config.env.thunder.tmp")
 
 # Regenerated or machine-specific, so never part of the code the update replaces.
-# "logs" is a directory name: it also covers the live log directory, Thunder/logs,
-# whose file is open while this runs.
+# Matched against every path component, so a bare "logs" also covers the nested
+# Thunder/logs, whose log file is open while this runs.
 _SKIP = (".git", "config.env", "logs", "__pycache__",
          "*.session", "*.session-journal", "*.session-shm", "*.session-wal")
 
@@ -26,7 +25,7 @@ _SKIP = (".git", "config.env", "logs", "__pycache__",
 # per-process precisely so that a later run can find it and recover it.
 if not path.exists("config.env") and path.exists(_CONFIG_BACKUP):
     try:
-        rename(_CONFIG_BACKUP, "config.env")
+        replace(_CONFIG_BACKUP, "config.env")
         logger.warning(f"Recovered config.env from an interrupted update ({_CONFIG_BACKUP}).")
     except OSError as e:
         logger.error(f"Could not restore {_CONFIG_BACKUP}: {e}")
@@ -43,6 +42,7 @@ def _generated(name: str) -> bool:
 
 
 def _generated_relative(relative: str) -> bool:
+    """True when any part of a relative path is local state rather than code."""
     return any(_generated(part) for part in PurePath(relative).parts)
 
 
@@ -129,20 +129,6 @@ def _prune(target: str) -> None:
         logger.warning(f"Could not remove {target} during rollback: {e}")
 
 
-def _restore_git() -> None:
-    """Put the original repository back, discarding the one git init created.
-
-    Only ever called from a failed update. If there is no backup the deployment
-    had no history to begin with, so what is in .git now is disposable.
-    """
-    if not path.exists(_GIT_BACKUP):
-        return
-    if path.exists(".git"):
-        rmtree(".git", onexc=_on_rmtree_error)
-    rename(_GIT_BACKUP, ".git")
-    logger.info("Original git history restored.")
-
-
 def _snapshot() -> None:
     if path.isdir(_BACKUP):
         rmtree(_BACKUP, onexc=_on_rmtree_error)
@@ -165,31 +151,27 @@ def _rollback() -> None:
 
     copytree(_BACKUP, ".", dirs_exist_ok=True)
 
-    _restore_git()
     logger.error("Update failed; rolled back to the previous working code.")
 
 
 def _apply_upstream(repo: str, branch: str) -> bool:
-    # Keep the existing history aside rather than deleting it: a failure after
-    # this point restores it, and the tree itself is replaced by the fetch below.
-    if path.exists(_GIT_BACKUP):
-        rmtree(_GIT_BACKUP, onexc=_on_rmtree_error)
-    if path.isdir(".git"):
-        rename(".git", _GIT_BACKUP)
-    elif path.exists(".git"):
-        remove(".git")
+    """Fetch and reset onto the upstream branch, in the user's own repository.
 
-    # Argument lists, never a shell (no injection); git config is local, not --global.
-    for cmd in (
-        ["git", "init", "-q"],
-        ["git", "config", "user.email", "thunder@update.local"],
-        ["git", "config", "user.name", "Thunder"],
-        ["git", "add", "."],
-        ["git", "commit", "-sm", "update", "-q"],
-        ["git", "remote", "add", "origin", repo],
-        ["git", "fetch", "origin", "-q"],
-        ["git", "reset", "--hard", f"origin/{branch}", "-q"],
-    ):
+    Deliberately never re-initialises the repository. Doing so replaces it, which
+    costs the user their branches, stashes and remotes. Only the working tree
+    changes here, and it is snapshotted for rollback before this runs.
+    """
+    # Argument lists, never a shell (no injection). Anything the user configured
+    # stays configured: only the remote we need is added if it is missing.
+    remotes = srun(["git", "remote"], capture_output=True)
+    known = (remotes.stdout or b"").decode("utf-8", "replace").split()
+
+    commands = [["git", "fetch", "--prune", "--quiet", repo, branch]]
+    if "origin" not in known:
+        commands.append(["git", "remote", "add", "origin", repo])
+    commands.append(["git", "reset", "--hard", "--quiet", "FETCH_HEAD"])
+
+    for cmd in commands:
         try:
             result = srun(cmd)
         except OSError as e:
@@ -199,9 +181,6 @@ def _apply_upstream(repo: str, branch: str) -> bool:
             logger.error(f"git {cmd[1] if len(cmd) > 1 else ''} failed.")
             return False
 
-    # The preserved history stays on disk until the whole update has been
-    # validated: a failure in _validate() afterwards still needs to roll back,
-    # and by then .git holds only the throwaway repository created above.
     return True
 
 
@@ -209,19 +188,32 @@ def _install_requirements() -> bool:
     # A package that will not build here is reported, never a rollback.
     if not path.exists("requirements.txt"):
         return True
-    try:
-        result = srun(
-            [executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
-            capture_output=True,
-        )
-    except OSError as e:
-        logger.warning(f"Could not run pip: {e}")
-        return True
-    if result.returncode != 0:
+
+    # pip is not guaranteed: `uv venv` creates an environment without it, and a
+    # deployment set up that way would otherwise fail here on every update while
+    # still reporting success. Try pip, then uv, and say plainly when neither is
+    # available rather than continuing silently.
+    attempts = (
+        [executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
+        ["uv", "pip", "install", "--python", executable, "-q", "-r", "requirements.txt"],
+    )
+    last_error = ""
+    for command in attempts:
+        try:
+            result = srun(command, capture_output=True)
+        except OSError as e:
+            last_error = f"could not run {command[0]}: {e}"
+            continue
+        if result.returncode == 0:
+            return True
         tail = (result.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-        logger.warning(
-            f"Dependencies could not be fully installed "
-            f"({tail[-1] if tail else 'unknown error'}); continuing.")
+        last_error = tail[-1] if tail else f"{command[0]} exited {result.returncode}"
+
+    logger.warning(
+        f"Dependencies could not be fully installed ({last_error}); continuing. "
+        f"New requirements may be missing, in which case the bot will fail to "
+        f"start: install them yourself, or recreate the environment with "
+        f"`uv venv --seed` so it contains pip.")
     return True
 
 
@@ -253,13 +245,13 @@ def _run_update(repo: str, branch: str) -> bool | None:
             f"Nothing has been changed.")
         return False
 
-    # Move config aside so the reset cannot touch it. The name is fixed, not
-    # per-process: module import already recovered any backup a killed run left,
-    # so a file still here is this run's own, from a previous attempt.
+    # Move config aside: the reset below replaces tracked files, and config.env
+    # is untracked in a user's checkout. The name is fixed, not per-process, so a
+    # leftover from a killed run can be recovered by the next import.
     if path.exists(_CONFIG_BACKUP):
         remove(_CONFIG_BACKUP)
     if path.exists("config.env"):
-        rename("config.env", _CONFIG_BACKUP)
+        replace("config.env", _CONFIG_BACKUP)
 
     try:
         ok = _apply_upstream(repo, branch)
@@ -271,15 +263,14 @@ def _run_update(repo: str, branch: str) -> bool | None:
             _rollback()
             return False
 
-        # The update is complete and valid, so the preserved history is obsolete.
-        if path.exists(_GIT_BACKUP):
-            rmtree(_GIT_BACKUP, onexc=_on_rmtree_error)
-
         logger.info("Successfully updated with Latest Updates!")
         return True
     finally:
+        # replace, not rename: on Windows rename raises FileExistsError if the
+        # destination was recreated during the update, which would escape the
+        # finally block as a crash.
         if path.exists(_CONFIG_BACKUP):
-            rename(_CONFIG_BACKUP, "config.env")
+            replace(_CONFIG_BACKUP, "config.env")
 
 
 def main() -> int:

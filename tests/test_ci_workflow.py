@@ -70,7 +70,37 @@ def test_nothing_publishes_before_the_tests_pass():
     builds = uses_of(doc, "build", "docker/build-push-action")
     assert builds, "the build job must build something"
     for step in builds:
-        assert PUSH_EVENT in str(step["with"]["push"]), "only a push event may publish"
+        push = step.get("with", {}).get("push")
+        if push in (None, "false", False):
+            continue
+        # A publish is either gated on the event directly, or the whole step is.
+        gated = PUSH_EVENT in str(push) or PUSH_EVENT in str(step.get("if", ""))
+        assert gated, f"a publish is not gated on a push event: {step.get('name')}"
+
+
+def test_a_publish_is_reached_only_after_the_image_has_been_run():
+    """Test, then publish -- the other order ships a broken image.
+
+    The step that publishes used to come before the smoke test, so a failure
+    would already have pushed the image tagged latest to Docker Hub. Docker's own
+    "test before push" pattern is build-and-load, test, then push.
+    """
+    steps = workflow()["jobs"]["build"]["steps"]
+
+    smoke = [i for i, step in enumerate(steps)
+             if "docker run" in str(step.get("run", ""))]
+    assert smoke, "the image is never run, so nothing is tested"
+    first_smoke = min(smoke)
+
+    for i, step in enumerate(steps):
+        publishes = (step.get("with") or {}).get("push") in (True, "true") or \
+            str((step.get("with") or {}).get("push", "")).startswith("${{") and \
+            "== 'push'" in str((step.get("with") or {}).get("push"))
+        if publishes:
+            assert i > first_smoke, (
+                f"step {i} ({step.get('name')}) publishes before the smoke test at "
+                f"{first_smoke}, so a broken image can reach latest"
+            )
 
 
 def test_actions_are_pinned_to_commits():
@@ -173,20 +203,15 @@ def test_the_built_image_is_actually_run():
             "Thunder.vars raises without it and the step would fail on a good image"
         )
 
-    # The smoke test can only run an image that is somewhere: loaded into the
-    # local daemon, or pushed to the registry. Pushing covers only the events it
-    # is true for, so a conditional push needs a load for the other events --
-    # without it the container-driver build leaves nothing to run.
-    push = str(with_.get("push", ""))
-    load = str(with_.get("load", ""))
-    pushing_is_conditional = "github.event_name" in push
-
-    assert push in ("true", "false") or pushing_is_conditional, f"unexpected push value: {push!r}"
-    if with_.get("push") in (None, "false", False) or pushing_is_conditional:
-        assert "load" in with_, "no push and no load: the smoke test would find no image"
-        assert load.strip() == "true" or "!= 'push'" in load, (
-            f"load must cover the non-push events, got {load!r}"
-        )
+    # The image under test is the one the build step loaded, not one pulled back
+    # from a registry: the tested build and the publishing build are separate
+    # steps, and only the second one pushes.
+    assert with_.get("load") in (True, "true"), (
+        "the image under test must be loaded into the daemon, or `docker run` "
+        "finds nothing before any pull"
+    )
+    assert with_.get("push") in (None, "false", False), \
+        "the build that gets tested must not also be the one that publishes"
 
     # Any step output the smoke test interpolates must come from a step that
     # declares the matching id, or it silently expands to nothing.

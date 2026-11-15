@@ -117,6 +117,66 @@ def test_update_script_parses():
     assert result.returncode == 0, result.stderr
 
 
+def test_install_requirements_does_not_assume_pip_exists():
+    """`uv venv` creates an environment without pip.
+
+    update.py installs dependencies with `python -m pip`, which fails there and
+    used to surface as a warning inside an otherwise-successful update -- so new
+    requirements would be missing while the update reported success. It now falls
+    back to `uv pip`, and warns actionably when neither is available.
+    """
+    source = (REPO / "update.py").read_text(encoding="utf-8")
+    installer = source.split("def _install_requirements", 1)[1].split("\ndef ", 1)[0]
+
+    assert "-m\", \"pip\"" in installer or "'-m', 'pip'" in installer, \
+        "pip should still be tried first: it is present in the common case"
+    assert '"uv"' in installer and "--python" in installer, \
+        "a venv created by uv venv has no pip, so uv must be tried too"
+
+    # The fallback is useless if a failure is reported without saying what to do.
+    assert "--seed" in installer, \
+        "the warning must tell the operator how to get a pip-bearing environment"
+
+
+def _sandbox_skip(name):
+    """The real SKIP object from one of the update test files."""
+    import importlib.util
+
+    path = REPO / "tests" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"_sandbox_skip_{name}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SKIP
+
+
+def test_sandbox_copies_exclude_generated_state_and_nothing_else():
+    """Both update test files copy the whole project, once per test case.
+
+    A venv lives inside the checkout (the README sets one up there) and this
+    project's runs to tens of thousands of files, so leaving it in the copy
+    patterns costs seconds per sandbox and makes the suite minutes slower for no
+    coverage. Caches cost less but are equally pointless. Real content must still
+    be copied or the tests would be running against a hollow tree.
+
+    Asserted by calling the pattern matcher rather than reading the source: a
+    check on the text passes for `**/.venv`, for `.venv-backup`, and for a
+    comment that merely mentions the names, none of which exclude anything.
+    """
+    names = ["Thunder", "tests", "update.py", "requirements.txt", "config.env",
+             ".venv", "venv", ".pytest_cache", ".ruff_cache", "logs", "__pycache__"]
+    for name in ("test_update_safety", "test_update_recovery"):
+        ignored = set(_sandbox_skip(name)(str(REPO), list(names)))
+
+        for generated in (".venv", "venv", ".pytest_cache", ".ruff_cache"):
+            assert generated in ignored, (
+                f"{name}: {generated}/ is copied into every sandbox"
+            )
+        for real in ("Thunder", "tests", "update.py", "requirements.txt"):
+            assert real not in ignored, (
+                f"{name} would exclude real content: {real}"
+            )
+
+
 def test_thunder_script_resolves_python_from_its_own_directory():
     script = (REPO / "thunder.sh").read_text(encoding="utf-8")
     assert "BASH_SOURCE" in script

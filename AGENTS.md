@@ -96,7 +96,7 @@ Copy `config_sample.env` → `config.env`. Required vars: `API_ID`, `API_HASH`, 
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q          # ~20s; no network or Telegram credentials needed
+python -m pytest -q          # ~20s on Linux, ~45s on Windows; no credentials needed
 python -m ruff check .       # config lives in pyproject.toml
 ```
 
@@ -106,6 +106,33 @@ update.py preconditions and rollback, plugin handler registration, the CI
 workflow's invariants, and .gitignore hygiene.
 
 `pytest` and `ruff` both read `pyproject.toml`; there is no `pytest.ini`.
+
+### With uv
+
+`uv` is faster than pip for creating environments and installing, and it is used
+only as a tool — there is deliberately **no `uv.lock`**: pinning every package is
+the opposite of what this project wants, because `requirements.txt` floats so that
+CI notices a bad upstream release. Every command below was run to confirm it works
+and leaves no lock file:
+
+```bash
+uv venv .venv --python 3.13              # ~0.15s
+uv pip install --python .venv/bin/python -r requirements-dev.txt   # ~3s first time
+uvx ruff check .                         # ~0.1s, no install needed
+```
+
+On Windows the interpreter is `.venv\Scripts\python.exe`. `uv pip install` runs in
+well under a second once anything is installed; the first install after creating
+the environment takes a few seconds. Re-running it is safe.
+
+One caveat if you deploy from this checkout: `uv venv` creates an environment
+**without pip**, and `update.py` installs dependencies on a self-update with
+`python -m pip`. It falls back to `uv pip` and warns if neither works, but the
+cleanest result comes from seeding pip in the first place:
+
+```bash
+uv venv --seed .venv --python 3.13       # includes pip
+```
 
 ## Debugging
 

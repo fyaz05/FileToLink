@@ -1,13 +1,12 @@
 """Collects MULTI_TOKEN1..N from the environment into client slots."""
 
 import os
-from typing import Dict, Optional
+from typing import Dict
 from Thunder.utils.logger import logger
 
 class TokenParser:
-    def __init__(self, config_file: Optional[str] = None):
+    def __init__(self):
         self.tokens: Dict[int, str] = {}
-        self.config_file = config_file
 
     def parse_from_env(self) -> Dict[int, str]:
         try:

@@ -4,7 +4,7 @@
 .venv/
 venv/
 .Python
-# Exclude env files (update.py runs `git add .` on self-update); track only the template.
+# Exclude env files (a stray `git add -A` must not pick them up); track only the template.
 *.env
 !config_sample.env
 # Local operational files containing credentials or scratch notes.
@@ -35,5 +35,8 @@ wheels/
 *.egg
 .pytest_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+.coverage.json
 __pycache__/
 *.pyc
