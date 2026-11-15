@@ -1,4 +1,4 @@
-# Thunder/utils/config_parser.py
+"""Collects MULTI_TOKEN1..N from the environment into client slots."""
 
 import os
 from typing import Dict, Optional

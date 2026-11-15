@@ -8,6 +8,7 @@ Python 3.13+ Telegram bot converting files to direct HTTP links. Uses Pyrofork, 
 python -m Thunder          # Primary entry point
 bash thunder.sh            # Updates from UPSTREAM_REPO, then runs the bot
 python3 update.py          # Update only (rolls back if the new tree is unusable)
+# update.py exits 0 when it cannot apply: no UPSTREAM_REPO, or no git/.git in a container
 ```
 
 ## Dependencies
@@ -40,6 +41,19 @@ Thunder/
 ├── utils/                   # 20 modules — see imports below
 └── template/                # req.html (Jinja2)
 ```
+
+## Docker
+
+The image runs as unprivileged user `10001` and installs no build toolchain (all
+dependencies provide wheels). `.dockerignore` excludes env files, session files,
+virtualenvs, dev tools, and tests; supply `config.env` at runtime.
+
+Two gotchas:
+- A mounted `config.env` must be readable by uid `10001` (`chown 10001:10001` or `644`;
+  a root-only `600` fails).
+- Docker's `--env-file` passes values verbatim, so inline comments and quotes in
+  `config_sample.env` corrupt variables (`PORT` becomes `8080 # Web server port`).
+  Generate the file with `python-dotenv` outside the repo (see README), or mount `config.env`.
 
 ## Key Imports
 
@@ -82,8 +96,8 @@ python -m pytest -q          # ~60s; no network or Telegram credentials needed
 ```
 
 Covers request parsing, slot conservation and truncation on the streaming
-routes, the import cycle, database naming, /status before startup, and
-update.py preconditions and rollback.
+routes, the import cycle, database naming, /status before startup,
+update.py preconditions and rollback, and .gitignore hygiene.
 
 ## Debugging
 

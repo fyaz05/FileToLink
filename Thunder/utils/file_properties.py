@@ -1,4 +1,8 @@
-# Thunder/utils/file_properties.py
+"""Reads the fields the app needs out of a Pyrogram message.
+
+Every media type nests its metadata differently, so these helpers give the rest
+of the code one shape to work with.
+"""
 
 import asyncio
 from datetime import datetime as dt
@@ -63,7 +67,6 @@ def get_fname(msg: Message) -> str:
                 "sticker": "webp"
             }
 
-            # Check which attribute type the message has
             for attr, extension in media_types.items():
                 if getattr(msg, attr, None) is not None:
                     ext = extension

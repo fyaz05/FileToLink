@@ -1,4 +1,7 @@
-# Thunder/utils/force_channel.py
+"""Blocking force-subscribe: a user must join the configured channel first.
+
+Answers with a join button and a re-check callback when membership is missing.
+"""
 
 import asyncio
 

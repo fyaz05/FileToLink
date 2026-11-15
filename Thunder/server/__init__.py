@@ -1,4 +1,3 @@
-# Thunder/server/__init__.py
 
 from aiohttp import web
 

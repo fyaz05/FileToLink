@@ -1,4 +1,8 @@
-# Thunder/utils/decorators.py
+"""Guards that run before a user command: ban, token, force-subscribe.
+
+Each returns a truthy value to let the command continue, or sends its own
+refusal and returns falsy so the caller stops.
+"""
 
 import asyncio
 from pyrogram.errors import FloodWait

@@ -1,4 +1,4 @@
-# Thunder/bot/__init__.py
+"""The primary Pyrogram client and the shared workload tables."""
 
 from pyrogram import Client
 from Thunder.vars import Var

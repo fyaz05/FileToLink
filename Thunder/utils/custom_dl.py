@@ -1,4 +1,8 @@
-# Thunder/utils/custom_dl.py
+"""Streams a Telegram file over HTTP without buffering the whole thing.
+
+ByteStreamer yields byte ranges from the storage channel, which is what lets
+the download routes answer Range requests and serve files far larger than RAM.
+"""
 
 import asyncio
 from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, Optional

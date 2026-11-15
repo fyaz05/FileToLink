@@ -1,4 +1,3 @@
-# Thunder/server/exceptions.py
 
 class InvalidHash(Exception):
     pass

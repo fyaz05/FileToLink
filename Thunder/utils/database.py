@@ -1,4 +1,8 @@
-# Thunder/utils/database.py
+"""MongoDB access layer for users, tokens, bans and file records.
+
+Owns the collections, their unique indexes, and the duplicate-user recovery
+that runs when an existing database predates the unique index on `id`.
+"""
 
 import asyncio
 import datetime

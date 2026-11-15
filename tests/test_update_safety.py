@@ -1,8 +1,4 @@
-"""update.py: preconditions are verified before anything destructive runs,
-and a failed update restores the previous tree.
-
-Each test works in a throwaway copy, so the repository is never touched.
-"""
+"""Verify update.py preconditions and rollback in isolated project copies."""
 import os
 import shutil
 import subprocess
@@ -92,6 +88,26 @@ def test_refuses_when_git_is_missing():
         shutil.rmtree(sandbox, ignore_errors=True)
 
 
+def test_no_git_and_no_checkout_is_not_an_error():
+    """In container environments without git, update is skipped without error."""
+    sandbox = make_sandbox()
+    try:
+        shutil.rmtree(sandbox / ".git", ignore_errors=True)
+        assert not (sandbox / ".git").exists()
+
+        env = dict(BASE_ENV)
+        env["UPSTREAM_REPO"] = "https://example.invalid/x.git"
+        env["PATH"] = "/nonexistent"
+        result = subprocess.run([sys.executable, "update.py"], cwd=sandbox,
+                                env=env, capture_output=True, text=True,
+                                timeout=180)
+        assert result.returncode == 0, result.stderr[-500:]
+        assert (sandbox / "config.env").exists(), "nothing may be touched"
+        assert (sandbox / "update.py").exists(), "code must be left intact"
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
 def test_refuses_unreachable_remote():
     sandbox = make_sandbox()
     try:
@@ -141,7 +157,7 @@ def test_update_is_idempotent():
 
 
 def test_broken_upstream_rolls_back():
-    """A tree that will not compile must not be left in place."""
+    """A broken upstream that fails bytecode compilation is rolled back."""
     root, bare = make_upstream(broken=True)
     sandbox = make_sandbox()
     try:

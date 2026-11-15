@@ -1,4 +1,8 @@
-# Thunder/utils/tokens.py
+"""Token gate: who may generate links while TOKEN_ENABLED is on.
+
+Issues, validates and expires access tokens, and tracks the separate list of
+permanently authorized users.
+"""
 
 import secrets
 from datetime import datetime, timedelta, timezone

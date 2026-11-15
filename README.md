@@ -307,12 +307,43 @@ cd FileToLink
 cp config_sample.env config.env
 nano config.env  # Edit your settings
 
-# 3. Build and run
+# 3. Build and run (the config is mounted — it is not baked into the image)
 docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 thunder
-# Optional: --stop-timeout 30 lets the server's 25s shutdown drain finish (docker stop defaults to 10s)
-docker run -d --stop-timeout 30 --name thunder -p 8080:8080 thunder
+sudo chown 10001:10001 config.env
+docker run -d --name thunder -p 8080:8080 \
+  -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
+
+Note the `chown`: the container runs as uid `10001`, so it must be able to read
+`config.env`. `--stop-timeout 30` is optional — it lets the server's 25s shutdown drain
+finish, since `docker stop` defaults to 10s:
+
+```bash
+docker run -d --stop-timeout 30 --name thunder -p 8080:8080 \
+  -v "$PWD/config.env:/app/config.env:ro" thunder
+```
+
+The image runs as unprivileged user `10001` without a build toolchain. Env files are
+excluded from the build context (`.dockerignore`), so `config.env` is not baked in and
+must be supplied at runtime.
+
+<details>
+<summary>Alternative: pass configuration as environment variables</summary>
+
+Docker's `--env-file` passes values verbatim, so inline comments and quotes in
+`config_sample.env` (`HAS_SSL="True" # ...`) corrupt variables. Generate a clean file
+using `python-dotenv`:
+
+```bash
+python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > /tmp/thunder-docker.env
+docker run -d --name thunder -p 8080:8080 --env-file /tmp/thunder-docker.env thunder
+```
+
+Requires `python-dotenv` locally (`pip install python-dotenv`); mounting `config.env`
+avoids this step. Keep the generated file outside the repository so it cannot enter the
+build context.
+
+</details>
 
 <details>
 <summary>Manual Installation</summary>

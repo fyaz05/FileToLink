@@ -14,7 +14,9 @@ UPSTREAM_REPO = environ.get("UPSTREAM_REPO", "")
 UPSTREAM_BRANCH = environ.get("UPSTREAM_BRANCH", "main")
 
 _BACKUP = path.join("..", "thunder_rollback")
-_SKIP = (".git", "config.env", "logs", "__pycache__", "*.session", "*.session-journal")
+# Exclude regenerated and machine-specific files (sessions, logs, caches) from rollback.
+_SKIP = (".git", "config.env", "logs", "__pycache__",
+         "*.session", "*.session-journal", "*.session-shm", "*.session-wal")
 
 
 def _on_rmtree_error(func, target, exc):
@@ -26,17 +28,29 @@ def _on_rmtree_error(func, target, exc):
     func(target)
 
 
-def _preflight(repo: str, branch: str) -> bool:
-    # Nothing destructive runs until git and the remote are both proven.
+def _preflight(repo: str, branch: str) -> bool | None:
+    # Returns None when self-update cannot apply (e.g. no git in container), False on error.
     try:
         probe = srun(["git", "--version"], capture_output=True)
     except OSError as e:
+        detail = str(e)
+    else:
+        if probe.returncode == 0:
+            detail = ""
+        else:
+            detail = "git returned a non-zero exit code"
+
+    if detail:
+        if not path.exists(".git"):
+            # Container image: no git and no history is normal, not a failure.
+            logger.info(
+                f"Self-update is not applicable in this deployment ({detail}); "
+                f"UPSTREAM_REPO is set but this deployment cannot update itself. "
+                f"Nothing has been changed.")
+            return None
         logger.error(
-            f"git is not runnable ({e}). Install git and put it on PATH "
+            f"git is not runnable ({detail}). Install git and put it on PATH "
             f"before updating; nothing has been changed.")
-        return False
-    if probe.returncode != 0:
-        logger.error("git is not working on this host; nothing has been changed.")
         return False
 
     try:
@@ -67,8 +81,7 @@ def _rollback() -> None:
         logger.error("Update failed and no rollback copy exists; code is unchanged.")
         return
 
-    # Clear first: the failed tree may hold files the snapshot lacks. Entries
-    # open in this process (the log file) are skipped rather than fatal.
+    # Remove files absent from snapshot; skip open files (e.g. active log).
     for entry in listdir("."):
         if entry in (".git", "config.env", "logs", _BACKUP.split(path.sep)[-1]):
             continue
@@ -83,8 +96,7 @@ def _rollback() -> None:
 
     copytree(_BACKUP, ".", dirs_exist_ok=True)
 
-    # A directory that could not be cleared still holds whatever the failed
-    # update added; delete anything the snapshot does not contain.
+    # Delete new files inside directories that could not be removed directly.
     for root, _dirs, files in walk(".", topdown=False):
         if root.startswith("." + path.sep + ".git") or root == "." + path.sep + "logs":
             continue
@@ -157,16 +169,15 @@ def _validate() -> bool:
     return result.returncode == 0
 
 
-def _run_update(repo: str, branch: str) -> bool:
-    if not _preflight(repo, branch):
-        return False
+def _run_update(repo: str, branch: str) -> bool | None:
+    preflight = _preflight(repo, branch)
+    if preflight is not True:
+        # False: preconditions failed. None: self-update does not apply here.
+        return preflight
 
     _snapshot()
 
-    # config.env is normally gitignored, but keep it safe either way.
-    # Move config aside for the reset. The backup lives beside the tree and is
-    # removed on the way out, so a stale one from a killed run cannot block
-    # the next update.
+    # Move config aside for the git reset; a stale backup from a killed run is removed first.
     config_backup = path.join("..", f".config.env.{getpid()}.tmp")
     if path.exists(config_backup):
         remove(config_backup)
@@ -193,7 +204,8 @@ def main() -> int:
     if not UPSTREAM_REPO:
         logger.info("No UPSTREAM_REPO set, skipping update")
         return 0
-    return 0 if _run_update(UPSTREAM_REPO, UPSTREAM_BRANCH) else 1
+    result = _run_update(UPSTREAM_REPO, UPSTREAM_BRANCH)
+    return 0 if result in (True, None) else 1
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# Thunder/utils/render_template.py
+"""Renders the HTML player page from a stored file record."""
 
 import asyncio
 import urllib.parse

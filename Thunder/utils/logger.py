@@ -1,4 +1,7 @@
-# Thunder/utils/logger.py
+"""The shared logger: non-blocking queue, rotating file, and console output.
+
+Handlers write from a listener thread so logging never blocks the event loop.
+"""
 
 import logging
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener

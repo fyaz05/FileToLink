@@ -1,3 +1,5 @@
+"""Registers the bot command list with Telegram."""
+
 from pyrogram.types import BotCommand
 
 from Thunder.bot import StreamBot

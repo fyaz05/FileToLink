@@ -1,4 +1,4 @@
-# Thunder/utils/speedtest.py
+"""Speed test via speedtest-cli, rendering the result as an image."""
 
 import asyncio
 from typing import Optional, Tuple, Dict, Any

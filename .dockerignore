@@ -1,0 +1,36 @@
+# Exclude env files at any depth (**/*.env) — Docker patterns without '/' are
+# root-anchored (unlike gitignore) and miss subdirectories.
+# config_sample.env is re-included below; order matters, last match wins.
+# Without this file, COPY . . bakes env files and virtualenvs into the image.
+.git
+.gitattributes
+**/*.env
+!config_sample.env
+**/*.session
+**/*.session-journal
+**/*.session-shm
+**/*.session-wal
+Thunder/logs
+.venv
+venv
+__pycache__
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.coverage
+.coverage.*
+.coverage.json
+tests
+requirements-dev.txt
+pytest.ini
+.github
+.gitignore
+.python-version
+Dockerfile
+.dockerignore
+README.md
+AGENTS.md
+VPS.md
+PLAN.md
+

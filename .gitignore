@@ -2,8 +2,14 @@
 *$py.class
 *.so
 .venv/
+venv/
 .Python
-config.env
+# Exclude env files (update.py runs `git add .` on self-update); track only the template.
+*.env
+!config_sample.env
+# Local operational files containing credentials or scratch notes.
+VPS.md
+PLAN.md
 log.text
 .vscode/
 **/__pycache__/

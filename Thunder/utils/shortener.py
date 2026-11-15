@@ -1,4 +1,8 @@
-# Thunder/utils/shortener.py
+"""URL shortener plugins: one per provider, chosen by the configured site.
+
+``shorten`` returns the original URL when no plugin matches or the provider
+fails, so a broken shortener never breaks link generation.
+"""
 
 import asyncio
 import cloudscraper

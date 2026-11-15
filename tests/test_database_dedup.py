@@ -1,12 +1,4 @@
-"""The duplicate-user recovery path must await the aggregate cursor.
-
-pymongo's ``AsyncCollection.aggregate`` is ``async def``, so the call returns a
-coroutine, not a cursor, and ``async for`` over it raises
-``TypeError: 'async for' requires an object with __aiter__ method, got coroutine``.
-
-That code runs only when ``create_index("id", unique=True)`` raises
-DuplicateKeyError, so nothing else in the suite reaches it.
-"""
+"""Verify _deduplicate_users awaits AsyncCollection.aggregate coroutine on DuplicateKeyError."""
 from pymongo.errors import DuplicateKeyError
 
 from Thunder.utils.database import Database
@@ -83,7 +75,7 @@ async def test_deduplicate_users_awaits_the_aggregate_cursor():
 
 
 async def test_ensure_indexes_recovers_from_duplicate_keys():
-    """The real caller: this is the only path that reaches the dedup."""
+    """Verify ensure_indexes recovers from DuplicateKeyError by running deduplication."""
     col = RecoveryCollection(keep_ids=[10, 20])
     db = make_db(col)
 
