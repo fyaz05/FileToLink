@@ -4,4 +4,7 @@ pytest-asyncio
 # Lint gate (config in pyproject.toml), run locally and in CI.
 ruff
 # tests/test_ci_workflow.py parses the workflow files to check their invariants.
+# No cp315 wheel, and the sdist needs MSVC on Windows, so install as:
+#     PYYAML_FORCE_LIBYAML=0 pip install -r requirements-dev.txt      # POSIX
+#     $env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt   # Windows
 pyyaml

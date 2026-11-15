@@ -1,10 +1,12 @@
 from fnmatch import fnmatch
 from os import chmod, environ, listdir, path, remove, replace, rmdir
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from shutil import copytree, ignore_patterns, rmtree
+from sqlite3 import connect as sqlite_connect
 from stat import S_IWRITE
 from subprocess import run as srun
 from sys import executable, exit
+from tempfile import TemporaryDirectory
 
 from dotenv import load_dotenv
 
@@ -219,7 +221,27 @@ def _install_requirements() -> bool:
     return True
 
 
+# Placeholders for the probe below. Thunder.vars validates its configuration when
+# imported, and _run_update moves config.env aside before validating, so the child
+# process would otherwise fail on a perfectly good tree. The CI smoke test uses the
+# same values to import the app in the image; none of them reach the network.
+_PROBE_ENV = {
+    "API_ID": "123456",
+    "API_HASH": "0123456789abcdef0123456789abcdef",
+    "BOT_TOKEN": "123456:AA" + "x" * 30,
+    "BIN_CHANNEL": "-1001234567890",
+    "OWNER_ID": "123456",
+    "DATABASE_URL": "mongodb://localhost:27017/probe",
+}
+
+
 def _validate() -> bool:
+    """Confirm the tree compiles and can import what it will load at startup.
+
+    compileall alone passes on an environment whose packages are broken -- every
+    file can still compile while the bot cannot start -- so the import probe is
+    what catches it.
+    """
     try:
         result = srun(
             [executable, "-m", "compileall", "-q", "Thunder", "update.py"],
@@ -228,7 +250,109 @@ def _validate() -> bool:
     except OSError as e:
         logger.error(f"Could not run compileall: {e}")
         return False
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+
+    try:
+        # Import the startup chain, not just the package: a syntactically valid
+        # but unresolvable import in Thunder.bot or Thunder.__main__ compiles and
+        # leaves `import Thunder` working, while the bot cannot start. Binding
+        # names also catches a directory left empty by an in-place upgrade, which
+        # imports as a namespace package.
+        probe = srun(
+            [executable, "-c",
+             "from pyrogram import Client, filters, enums; "
+             "import warpcrypto, Thunder, Thunder.bot, Thunder.__main__"],
+            capture_output=True,
+            env={**environ, **_PROBE_ENV},
+        )
+    except OSError as e:
+        logger.error(f"Could not import the application: {e}")
+        return False
+    if probe.returncode != 0:
+        tail = (probe.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+        logger.error(
+            "The updated tree cannot import its dependencies: "
+            f"{tail[-1] if tail else 'no output'}. Recreate the environment "
+            "(`uv venv --seed .venv`) rather than installing over the old one."
+        )
+        return False
+    return True
+
+
+def _stale_sessions() -> list[str]:
+    """*.session files the installed library refuses to open.
+
+    Reported, never deleted: the file holds the bot's authorisation, so the
+    operator removes it. Such a file fails at startup rather than re-authorising.
+
+    Asked of the library rather than inferred from the stored schema version. The
+    number does not identify the format: pyrofork wrote v4 with a layout wzgram's
+    v4 migration cannot apply, while wzgram reads v6 and v7 by migrating them, so
+    comparing versions would condemn files that open fine and miss files that do
+    not. The library is tried on a copy, so the original is untouched.
+    """
+    try:
+        import asyncio
+        from pyrogram.storage import FileStorage
+    except Exception:
+        return []
+
+    stale: list[str] = []
+
+    def snapshot(source: str, destination: str) -> bool:
+        """Write a consistent copy of a SQLite database, WAL included.
+
+        Copying the file alone loses committed pages still held in the -wal
+        sidecar, which an unclean stop leaves behind: the copy then has no
+        `version` table and looks corrupt when it is only uncheckpointed. The
+        backup API reads through the WAL, so the copy is a real snapshot.
+        """
+        origin = sqlite_connect(f"file:{source}?mode=ro", uri=True)
+        try:
+            target = sqlite_connect(destination)
+            try:
+                origin.backup(target)
+            finally:
+                target.close()
+        finally:
+            origin.close()
+        return True
+
+    async def unreadable(source: str) -> bool:
+        """Snapshot the session, open the copy, and report whether it failed."""
+        with TemporaryDirectory(prefix="thunder-session-check-") as holder:
+            copy = path.join(holder, "probe.session")
+            try:
+                snapshot(source, copy)
+            except Exception:
+                # Cannot snapshot it, so say nothing: an inconclusive answer must
+                # not send the operator to delete a session that may be fine.
+                return False
+            storage = FileStorage("probe", Path(holder))
+            try:
+                await storage.open()
+                return False
+            except Exception:
+                return True
+            finally:
+                try:
+                    await storage.conn.close()
+                except Exception:
+                    pass
+
+    for name in listdir("."):
+        if not name.endswith(".session"):
+            continue
+        try:
+            with open(name, "rb") as handle:
+                if handle.read(15) != b"SQLite format 3":
+                    continue
+            if asyncio.run(unreadable(name)):
+                stale.append(name)
+        except Exception:
+            continue
+    return stale
 
 
 def _run_update(repo: str, branch: str) -> bool | None:
@@ -266,6 +390,17 @@ def _run_update(repo: str, branch: str) -> bool | None:
             return False
 
         logger.info("Successfully updated with Latest Updates!")
+
+        # Advisory: never turns a good update into a failed one.
+        try:
+            for stale in _stale_sessions():
+                logger.warning(
+                    f"Session {stale} cannot be read by the installed library; "
+                    "delete it and restart to re-authorise from BOT_TOKEN."
+                )
+        except Exception:
+            logger.debug("Could not check session compatibility", exc_info=True)
+
         return True
     finally:
         # replace, not rename: on Windows rename raises FileExistsError if the

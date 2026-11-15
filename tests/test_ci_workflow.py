@@ -22,6 +22,11 @@ WORKFLOWS = REPO / ".github" / "workflows"
 PINNED_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 PUSH_EVENT = "github.event_name == 'push'"
 
+# The single interpreter the project ships. Read from .python-version rather than
+# written twice, so a version bump has one place to change and this suite reports
+# the drift instead of hiding it.
+PRIMARY_PYTHON = (REPO / ".python-version").read_text(encoding="utf-8").strip()
+
 
 def load(path: Path):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -123,17 +128,35 @@ def test_the_suite_runs_on_both_operating_systems():
     assert any(os_name.startswith("windows") for os_name in matrix["os"]), (
         "the uvloop marker and update.py's chmod fallback only run on Windows"
     )
-    assert "3.13" in [str(value) for value in matrix["python-version"]]
+    assert PRIMARY_PYTHON in [str(value) for value in matrix["python-version"]]
 
 
-def test_the_documented_python_range_is_actually_tested():
-    """README says 3.13+; a floating dependency can quietly drop the newer one."""
+def test_the_tested_python_is_the_one_the_project_ships():
+    """`.python-version`, the Dockerfile and the CI matrix must name one version.
+
+    Three files describe the interpreter; they can drift apart silently.
+    """
     matrix = workflow()["jobs"]["test"]["strategy"]["matrix"]
     tested = {str(value) for value in matrix["python-version"]}
     tested |= {str(entry["python-version"]) for entry in matrix.get("include", [])}
-    assert "3.14" in tested, (
-        "3.14 was deferred only until uvloop shipped cp314 wheels, which it now "
-        "does; the range is documented, so it is tested"
+
+    stated = (REPO / ".python-version").read_text(encoding="utf-8").strip()
+
+    assert stated in tested, (
+        f".python-version says {stated!r} but CI tests {sorted(tested)}; one of "
+        "them is describing a version nobody runs"
+    )
+
+    # Parse the FROM line rather than reading the first line, which breaks on a
+    # `# syntax=` directive and would accept a version named only in a comment.
+    base_images = re.findall(r"^FROM\s+(\S+)", (REPO / "Dockerfile").read_text(encoding="utf-8"),
+                             flags=re.MULTILINE | re.IGNORECASE)
+    assert base_images, "the Dockerfile has no FROM line"
+    minor = ".".join(stated.split(".")[:2])
+    assert any(re.fullmatch(rf"python:{re.escape(minor)}(\.\d+)?-\w+", image)
+               for image in base_images), (
+        f"the Dockerfile builds from {base_images}, not from the {minor} that "
+        ".python-version and CI agree on"
     )
 
 
@@ -255,4 +278,92 @@ def test_dependabot_only_tracks_actions():
     ecosystems = {update["package-ecosystem"] for update in doc["updates"]}
     assert ecosystems == {"github-actions"}, (
         "app dependencies float by policy, so only the pinned actions need updates"
+    )
+
+
+def test_the_archived_library_stays_out_of_the_requirements():
+    """The retired distributions must not return, and wzgram must stay named.
+
+    wzgram ships the `pyrogram` package, so every import keeps working and
+    nothing else in the tree mentions the old names -- a revert of this file
+    would be silent until a deployment broke.
+    """
+    def package_name(entry: str) -> str:
+        # PEP 503: comparison is case-insensitive and -/_/. are interchangeable,
+        # so `Pyrofork` must not slip past a check for `pyrofork`.
+        raw = re.split(r"[<>=!~;\[ (]", entry.strip(), maxsplit=1)[0]
+        return re.sub(r"[-_.]+", "-", raw).lower()
+
+    entries = [
+        line.strip() for line in
+        (REPO / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    names = {package_name(entry) for entry in entries}
+
+    for retired in ("pyrofork", "tgcrypto-pyrofork"):
+        assert retired not in names, f"{retired} is retired; wzgram replaces it"
+
+    assert "wzgram" in names, (
+        "wzgram must be requested explicitly; it is the maintained fork the "
+        "`pyrogram` imports resolve through"
+    )
+
+
+def test_the_crypto_backend_is_checked_in_the_image():
+    """The smoke test must prove the crypto backend shipped.
+
+    Its import list is the only place asserting the backend is present in the
+    built image, so a stale name there surfaces only when the image fails to start.
+    """
+    steps = workflow()["jobs"]["build"]["steps"]
+    runs = [step for step in steps if "docker run" in str(step.get("run", ""))]
+    assert runs, "the image is never run, so nothing proves it starts"
+
+    # Read the parsed `run` values: a commented-out smoke test still matches a
+    # text search while executing nothing.
+    commands = " ".join(str(step["run"]) for step in runs)
+    imports = [line for line in commands.splitlines() if "import Thunder" in line]
+    assert imports, "the smoke test no longer imports the app"
+
+    assert any("warpcrypto" in line for line in imports), \
+        "the smoke test does not import warpcrypto, so nothing proves the backend shipped"
+    assert not any("tgcrypto" in line for line in imports), \
+        "tgcrypto is no longer a dependency; importing it would fail the gate"
+
+
+def test_the_dev_install_is_documented_the_way_ci_does_it():
+    """The documented dev installs must match what CI does.
+
+    PyYAML has no cp315 wheel and its sdist needs MSVC on Windows, so the
+    documented install fails locally while CI passes, unless the env var is set.
+    Asserted against the runnable command rather than the file text, since the
+    prose around it also names the variable.
+
+    Either spelling counts: `VAR=0 cmd` on POSIX and `$env:VAR = "0"; cmd` on
+    Windows, which is the only form that works in PowerShell.
+    """
+    # Matches both `PYYAML_FORCE_LIBYAML=0` and `$env:PYYAML_FORCE_LIBYAML = "0"`.
+    sets_the_var = re.compile(r"PYYAML_FORCE_LIBYAML\s*=\s*[\"']?0")
+
+    for relative in ("requirements-dev.txt", "AGENTS.md", "README.md"):
+        text = (REPO / relative).read_text(encoding="utf-8")
+        assert sets_the_var.search(text), (
+            f"{relative} no longer tells the reader to set PYYAML_FORCE_LIBYAML=0, "
+            "so a dev install on 3.15 fails where CI succeeds"
+        )
+        commands = [line.strip() for line in text.splitlines()
+                    if "install" in line and "requirements-dev" in line
+                    and not line.lstrip().startswith("#")]
+        for command in commands:
+            assert sets_the_var.search(command), (
+                f"{relative} documents `{command}` without setting the env var, "
+                "which fails on 3.15; both the pip and uv forms need it"
+            )
+
+    install = next(step for step in workflow()["jobs"]["test"]["steps"]
+                   if step.get("name") == "Install")
+    assert (install.get("env") or {}).get("PYYAML_FORCE_LIBYAML") == "0", (
+        "the CI install step dropped the env var, so the job would fail on the "
+        "sdist build it is documented to avoid"
     )

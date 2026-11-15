@@ -3,7 +3,7 @@
 
 [tool.ruff]
 line-length = 120
-target-version = "py313"
+target-version = "py315"
 
 [tool.ruff.lint]
 # E4 stays out on purpose: __main__.py imports after creating the event loop,
