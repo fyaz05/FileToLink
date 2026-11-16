@@ -29,12 +29,9 @@ jobs:
         # Windows earns its place: the uvloop marker and update.py's chmod
         # fallback never execute on Linux.
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.13"]
-        include:
-          # The image pins 3.13, but the project documents 3.13+ support and the
-          # dependencies float, so this is what proves the promise still holds.
-          - os: ubuntu-latest
-            python-version: "3.14"
+        # Must match .python-version and the Dockerfile's minor;
+        # tests/test_ci_workflow.py asserts that.
+        python-version: ["3.15"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -43,6 +40,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
+        # PyYAML has no cp315 wheel; without this it builds its C extension,
+        # which needs MSVC on Windows.
+        env:
+          PYYAML_FORCE_LIBYAML: "0"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
@@ -103,7 +104,7 @@ jobs:
             -e OWNER_ID=1 \
             -e DATABASE_URL=mongodb://localhost:27017/smoke \
             fyaz05/thunder:test python -c \
-            "import Thunder, Thunder.__main__, uvloop, tgcrypto, aiohttp; print('ok', Thunder.__version__)"
+            "import Thunder, Thunder.__main__, uvloop, warpcrypto, aiohttp; print('ok', Thunder.__version__)"
       - name: Publish
         # Only reached once the smoke test passed, and only for a push event: a
         # pull request never receives secrets. Rebuilds from the cache the tested

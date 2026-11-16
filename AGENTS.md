@@ -1,6 +1,6 @@
 # AGENTS.md — Thunder File-to-Link Bot
 
-Python 3.13+ Telegram bot converting files to direct HTTP links. Uses Pyrofork, aiohttp, MongoDB, uvloop.
+Python 3.15 Telegram bot converting files to direct HTTP links. Uses wzgram, aiohttp, MongoDB, uvloop.
 
 ## Run
 
@@ -15,7 +15,7 @@ python3 update.py          # Update only (rolls back if the new tree is unusable
 
 ```bash
 pip install -r requirements.txt
-# aiohttp, cloudscraper, Jinja2, pyrofork, pymongo, psutil, python-dotenv, speedtest-cli, tgcrypto-pyrofork
+# aiohttp, cloudscraper, Jinja2, wzgram, pymongo, psutil, python-dotenv, speedtest-cli
 # uvloop (non-Windows/Cygwin only, requirements.txt marker); asyncio loop elsewhere
 ```
 
@@ -95,15 +95,26 @@ Copy `config_sample.env` → `config.env`. Required vars: `API_ID`, `API_HASH`, 
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
+PYYAML_FORCE_LIBYAML=0 pip install -r requirements-dev.txt   # POSIX
 python -m pytest -q          # ~20s on Linux, ~45s on Windows; no credentials needed
 python -m ruff check .       # config lives in pyproject.toml
 ```
 
+PyYAML has no `cp315` wheel, so the env var is required; on Windows set it first,
+since `VAR=value cmd` is not valid there:
+
+```powershell
+$env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
+```
+
+A cached wheel from an earlier build can make a plain install appear to work — use
+`--no-cache-dir` to check.
+
 Covers request parsing, slot conservation and truncation on the streaming
 routes, the import cycle, database naming, /status before startup,
 update.py preconditions and rollback, plugin handler registration, the CI
-workflow's invariants, and .gitignore hygiene.
+workflow's invariants, .gitignore hygiene, and the interpreter and requirements
+guards.
 
 `pytest` and `ruff` both read `pyproject.toml`; there is no `pytest.ini`.
 
@@ -116,10 +127,12 @@ CI notices a bad upstream release. Every command below was run to confirm it wor
 and leaves no lock file:
 
 ```bash
-uv venv .venv --python 3.13              # ~0.15s
-uv pip install --python .venv/bin/python -r requirements-dev.txt   # ~3s first time
+uv venv .venv --python 3.15              # ~0.15s
+PYYAML_FORCE_LIBYAML=0 uv pip install --python .venv/bin/python -r requirements-dev.txt
 uvx ruff check .                         # ~0.1s, no install needed
 ```
+
+The same env var applies to `uv pip install`, which builds the same sdist.
 
 On Windows the interpreter is `.venv\Scripts\python.exe`. `uv pip install` runs in
 well under a second once anything is installed; the first install after creating
@@ -131,7 +144,7 @@ One caveat if you deploy from this checkout: `uv venv` creates an environment
 cleanest result comes from seeding pip in the first place:
 
 ```bash
-uv venv --seed .venv --python 3.13       # includes pip
+uv venv --seed .venv --python 3.15       # includes pip
 ```
 
 ## Debugging

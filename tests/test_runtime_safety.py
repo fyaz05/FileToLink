@@ -201,3 +201,57 @@ def test_restart_never_execs_a_path_that_does_not_exist():
     assert "shutil.which" in restart, "the shell must be located, not assumed"
     assert "sys.executable" in restart, \
         "there must be a fallback that works without bash"
+
+
+def test_update_validation_imports_the_startup_chain_not_just_the_package():
+    """Validation must import the names the app uses, and supply configuration.
+
+    Two failures it has to catch, both leaving a tree that compiles: a package
+    directory left empty by an in-place upgrade, where `import pyrogram` succeeds
+    and `from pyrogram import Client` fails; and an unresolvable import in a
+    startup module, which leaves `import Thunder` working while the bot cannot
+    start.
+
+    And one it must not cause: those modules read configuration when imported,
+    while `_run_update` moves config.env aside first, so the probe needs
+    placeholders or it would fail on a good tree and roll it back.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_update_under_test", REPO / "update.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    calls = []
+
+    class FakeCompleted:
+        returncode = 0
+        stderr = b""
+        stdout = b""
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return FakeCompleted()
+
+    original = module.srun
+    try:
+        module.srun = fake_run
+        assert module._validate() is True
+    finally:
+        module.srun = original
+
+    assert any("compileall" in " ".join(str(a) for a in cmd) for cmd, _ in calls), \
+        "syntax checking is still worth doing"
+
+    probe_calls = [(cmd, kw) for cmd, kw in calls if "-c" in cmd]
+    assert probe_calls, "validation must run an import probe, not only compile"
+    probe, kwargs = probe_calls[0]
+    probe = " ".join(str(a) for a in probe)
+
+    for needed in ("from pyrogram import", "Client", "warpcrypto", "Thunder.bot",
+                   "Thunder.__main__"):
+        assert needed in probe, f"the probe omits {needed}"
+
+    env = kwargs.get("env") or {}
+    for needed in ("API_ID", "API_HASH", "BOT_TOKEN", "BIN_CHANNEL", "DATABASE_URL"):
+        assert env.get(needed), f"the probe runs without {needed}"

@@ -1,6 +1,4 @@
 <p align="center">
-
-[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/fyaz05/FileToLink)
   <img src="https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/FileToLink/Thunder.jpg" alt="Thunder Logo" width="120">
   <h1 align="center">⚡ Thunder</h1>
 </p>
@@ -10,8 +8,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
-  <a href="https://github.com/Mayuri-Chan/pyrofork"><img src="https://img.shields.io/badge/Pyrofork-red?style=for-the-badge" alt="Pyrofork"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.15-blue?style=for-the-badge&logo=python" alt="Python Version"></a>
+  <a href="https://github.com/rjriajul/wzgram"><img src="https://img.shields.io/badge/wzgram-red?style=for-the-badge" alt="wzgram"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/fyaz05/FileToLink?style=for-the-badge&color=green" alt="License"></a>
   <a href="https://t.me/Thunder_Updates"><img src="https://img.shields.io/badge/Telegram-Channel-blue?style=for-the-badge&logo=telegram" alt="Telegram Channel"></a>
 </p>
@@ -136,7 +134,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `MAX_BATCH_FILES` | Maximum files in batch processing | `50` |
 | `CHANNEL` | Allow processing messages from channels | `False` |
 | `BANNED_CHANNELS` | Blocked channel IDs | *(empty)* |
-| `SLEEP_THRESHOLD` | Pyrogram flood-wait threshold | `600` |
+| `SLEEP_THRESHOLD` | Flood-wait threshold in seconds | `600` |
 | `WORKERS` | Async workers | `8` |
 | `NAME` | Bot name; also the MongoDB database name (unsafe chars become `_`) | `ThunderF2L` |
 | `BIND_ADDRESS` | Bind address | `0.0.0.0` |
@@ -287,7 +285,7 @@ This section covers the complete setup process for deploying Thunder, from prere
 
 | Requirement | Description | Source |
 | :--- | :--- | :--- |
-| Python 3.13 | Programming language | [python.org](https://python.org) |
+| Python 3.15 | Programming language | [python.org](https://python.org) |
 | MongoDB | Database | [mongodb.com](https://mongodb.com) |
 | Telegram API | API credentials | [my.telegram.org](https://my.telegram.org/apps) |
 | Bot Token | From @BotFather | [@BotFather](https://t.me/BotFather) |
@@ -578,6 +576,11 @@ A: Your browser likely doesn't support the file's audio or video format (codec).
 **Q: Why does the bot sometimes become unresponsive?**
 A: This is likely a **Telegram Flood Wait**. To prevent spam, Telegram temporarily limits accounts that make too many requests. The bot is designed to handle this automatically by pausing and will resume on its own once the limit is lifted.
 
+**Q: On shutdown I see `Task was destroyed but it is pending!` — is something broken?**
+A: No, if `✓ Database connection closed` was printed first. The library leaves its media
+sessions open on teardown; the bot still exits cleanly. Expect six after a download, none if
+nothing was streamed.
+
 #### **Performance**
 
 **Q: How can I fix slow download and streaming speeds?**
@@ -605,9 +608,14 @@ Contributions are welcome! Please follow these steps:
 2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
 3. Make your change and run the suite and linter:
    ```bash
-   pip install -r requirements-dev.txt
+   PYYAML_FORCE_LIBYAML=0 pip install -r requirements-dev.txt   # POSIX
    python -m pytest -q
    python -m ruff check .
+   ```
+   The env var is needed on Python 3.15 (no `cp315` wheel). On Windows, where that
+   assignment is not valid, set it first:
+   ```powershell
+   $env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
    ```
 4. Commit your changes (`git commit -m 'Add some amazing feature'`).
 5. Push to the branch (`git push origin feature/amazing-feature`).
@@ -622,10 +630,10 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 ## Acknowledgments
 
-- [Pyrofork](https://github.com/Mayuri-Chan/pyrofork) - Telegram MTProto API Framework
+- [wzgram](https://github.com/rjriajul/wzgram) - Telegram MTProto API Framework
 - [aiohttp](https://github.com/aio-libs/aiohttp) - Asynchronous HTTP Client/Server
 - [PyMongo](https://github.com/mongodb/mongo-python-driver) - Asynchronous MongoDB Driver
-- [TgCrypto](https://github.com/wulan17/tgcrypto-pyrofork) - High-performance cryptography library
+- [WarpCrypto](https://github.com/rjriajul/warpcrypto) - High-performance cryptography library (Rust)
 
 ## ⚠️ Disclaimer
 

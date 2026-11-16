@@ -2,12 +2,10 @@
 aiohttp>=3.14
 cloudscraper
 Jinja2
-pyrofork
+wzgram
 pymongo
 psutil
 python-dotenv
 speedtest-cli
-# Fork provides cp313/cp314 wheels (avoids C toolchain at build time) and imports as "tgcrypto".
-tgcrypto-pyrofork
 # uvloop is Unix-only; bot falls back to standard asyncio on Windows.
 uvloop>=0.22.1; sys_platform != "win32" and sys_platform != "cygwin"

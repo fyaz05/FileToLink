@@ -21,5 +21,6 @@ def test_platform_files_consumed_at_deploy_time_still_exist():
         target = REPO / name
         assert target.is_file(), f"{name} is read by the deploy platform, not by our code"
 
+    # Local tooling and buildpack deploys read this; the Docker image does not.
     assert (REPO / ".python-version").read_text(encoding="utf-8").strip(), \
-        "Heroku reads this to pick the interpreter"
+        "uv and buildpack-based deploys read this to pick the interpreter"

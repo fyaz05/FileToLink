@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pathlib import Path
 
-# Pyrofork binds a client to the loop current at creation and Thunder.bot
+# wzgram binds a client to the loop current at creation and Thunder.bot
 # creates it on import, so the loop has to exist before these imports.
 try:
     from uvloop import install
