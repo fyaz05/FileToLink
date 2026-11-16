@@ -204,18 +204,17 @@ def test_restart_never_execs_a_path_that_does_not_exist():
 
 
 def test_update_validation_imports_the_startup_chain_not_just_the_package():
-    """Validation must import names the app actually uses, and supply config.
+    """Validation must import the names the app uses, and supply configuration.
 
-    Two failures it has to catch, both of which leave a tree that compiles:
+    Two failures it has to catch, both leaving a tree that compiles: a package
+    directory left empty by an in-place upgrade, where `import pyrogram` succeeds
+    and `from pyrogram import Client` fails; and an unresolvable import in a
+    startup module, which leaves `import Thunder` working while the bot cannot
+    start.
 
-    * a directory left importable but empty by an in-place upgrade, where
-      `import pyrogram` exits 0 and `from pyrogram import Client` fails;
-    * an unresolvable import in a startup module, which leaves `import Thunder`
-      working while the bot cannot start.
-
-    And one it must not cause: those startup modules read configuration when
-    imported, while `_run_update` moves config.env aside before validating, so the
-    probe has to supply placeholders or a good update would be rolled back.
+    And one it must not cause: those modules read configuration when imported,
+    while `_run_update` moves config.env aside first, so the probe needs
+    placeholders or it would fail on a good tree and roll it back.
     """
     import importlib.util
 
@@ -251,14 +250,8 @@ def test_update_validation_imports_the_startup_chain_not_just_the_package():
 
     for needed in ("from pyrogram import", "Client", "warpcrypto", "Thunder.bot",
                    "Thunder.__main__"):
-        assert needed in probe, (
-            f"the probe omits {needed}: the startup chain must be imported, since "
-            "an unresolvable import there compiles and only fails at next startup"
-        )
+        assert needed in probe, f"the probe omits {needed}"
 
     env = kwargs.get("env") or {}
     for needed in ("API_ID", "API_HASH", "BOT_TOKEN", "BIN_CHANNEL", "DATABASE_URL"):
-        assert env.get(needed), (
-            f"the probe runs without {needed}, so importing the startup modules "
-            "fails whenever config.env is absent -- which is when _validate runs"
-        )
+        assert env.get(needed), f"the probe runs without {needed}"

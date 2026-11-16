@@ -2,8 +2,6 @@
 aiohttp>=3.14
 cloudscraper
 Jinja2
-# Maintained Pyrogram fork. Imports stay `pyrogram`: the wheel ships that
-# package and aliases `wzgram` to it, so no source change is needed.
 wzgram
 pymongo
 psutil

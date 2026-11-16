@@ -22,9 +22,8 @@ WORKFLOWS = REPO / ".github" / "workflows"
 PINNED_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 PUSH_EVENT = "github.event_name == 'push'"
 
-# The single interpreter the project ships. Read from .python-version rather than
-# written twice, so a version bump has one place to change and this suite reports
-# the drift instead of hiding it.
+# The interpreter the project ships, read from .python-version rather than written
+# twice, so a version bump has one place to change.
 PRIMARY_PYTHON = (REPO / ".python-version").read_text(encoding="utf-8").strip()
 
 
@@ -132,9 +131,9 @@ def test_the_suite_runs_on_both_operating_systems():
 
 
 def test_the_tested_python_is_the_one_the_project_ships():
-    """`.python-version`, the Dockerfile and the CI matrix must name one version.
+    """`.python-version`, the Dockerfile and CI must name one version.
 
-    Three files describe the interpreter; they can drift apart silently.
+    Three files describe the interpreter and can drift apart silently.
     """
     matrix = workflow()["jobs"]["test"]["strategy"]["matrix"]
     tested = {str(value) for value in matrix["python-version"]}
@@ -142,22 +141,18 @@ def test_the_tested_python_is_the_one_the_project_ships():
 
     stated = (REPO / ".python-version").read_text(encoding="utf-8").strip()
 
-    assert stated in tested, (
-        f".python-version says {stated!r} but CI tests {sorted(tested)}; one of "
-        "them is describing a version nobody runs"
-    )
+    assert stated in tested, \
+        f".python-version says {stated!r} but CI tests {sorted(tested)}"
 
-    # Parse the FROM line rather than reading the first line, which breaks on a
-    # `# syntax=` directive and would accept a version named only in a comment.
+    # Parse FROM rather than reading line 0: a `# syntax=` directive would break
+    # that, and a substring test would accept a version named only in a comment.
     base_images = re.findall(r"^FROM\s+(\S+)", (REPO / "Dockerfile").read_text(encoding="utf-8"),
                              flags=re.MULTILINE | re.IGNORECASE)
     assert base_images, "the Dockerfile has no FROM line"
     minor = ".".join(stated.split(".")[:2])
     assert any(re.fullmatch(rf"python:{re.escape(minor)}(\.\d+)?-\w+", image)
-               for image in base_images), (
-        f"the Dockerfile builds from {base_images}, not from the {minor} that "
-        ".python-version and CI agree on"
-    )
+               for image in base_images), \
+        f"the Dockerfile builds from {base_images}, not {minor}"
 
 
 def test_a_weekly_run_guards_the_floating_dependencies():
@@ -284,13 +279,12 @@ def test_dependabot_only_tracks_actions():
 def test_the_archived_library_stays_out_of_the_requirements():
     """The retired distributions must not return, and wzgram must stay named.
 
-    wzgram ships the `pyrogram` package, so every import keeps working and
-    nothing else in the tree mentions the old names -- a revert of this file
+    Nothing else in the tree mentions the old names, so a revert of this file
     would be silent until a deployment broke.
     """
     def package_name(entry: str) -> str:
-        # PEP 503: comparison is case-insensitive and -/_/. are interchangeable,
-        # so `Pyrofork` must not slip past a check for `pyrofork`.
+        # PEP 503: case-insensitive, and -/_/. are interchangeable, so `Pyrofork`
+        # must not slip past a check for `pyrofork`.
         raw = re.split(r"[<>=!~;\[ (]", entry.strip(), maxsplit=1)[0]
         return re.sub(r"[-_.]+", "-", raw).lower()
 
@@ -304,16 +298,13 @@ def test_the_archived_library_stays_out_of_the_requirements():
     for retired in ("pyrofork", "tgcrypto-pyrofork"):
         assert retired not in names, f"{retired} is retired; wzgram replaces it"
 
-    assert "wzgram" in names, (
-        "wzgram must be requested explicitly; it is the maintained fork the "
-        "`pyrogram` imports resolve through"
-    )
+    assert "wzgram" in names, "wzgram is what the `pyrogram` imports resolve through"
 
 
 def test_the_crypto_backend_is_checked_in_the_image():
     """The smoke test must prove the crypto backend shipped.
 
-    Its import list is the only place asserting the backend is present in the
+    The import list is the only place asserting the backend is present in the
     built image, so a stale name there surfaces only when the image fails to start.
     """
     steps = workflow()["jobs"]["build"]["steps"]
@@ -335,13 +326,9 @@ def test_the_crypto_backend_is_checked_in_the_image():
 def test_the_dev_install_is_documented_the_way_ci_does_it():
     """The documented dev installs must match what CI does.
 
-    PyYAML has no cp315 wheel and its sdist needs MSVC on Windows, so the
-    documented install fails locally while CI passes, unless the env var is set.
-    Asserted against the runnable command rather than the file text, since the
-    prose around it also names the variable.
-
-    Either spelling counts: `VAR=0 cmd` on POSIX and `$env:VAR = "0"; cmd` on
-    Windows, which is the only form that works in PowerShell.
+    PyYAML has no cp315 wheel, so the documented install needs the env var or it
+    fails locally while CI passes. Either spelling counts: `VAR=0 cmd` on POSIX,
+    `$env:VAR = "0"; cmd` in PowerShell.
     """
     # Matches both `PYYAML_FORCE_LIBYAML=0` and `$env:PYYAML_FORCE_LIBYAML = "0"`.
     sets_the_var = re.compile(r"PYYAML_FORCE_LIBYAML\s*=\s*[\"']?0")

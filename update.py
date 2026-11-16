@@ -221,10 +221,9 @@ def _install_requirements() -> bool:
     return True
 
 
-# Placeholders for the probe below. Thunder.vars validates its configuration when
-# imported, and _run_update moves config.env aside before validating, so the child
-# process would otherwise fail on a perfectly good tree. The CI smoke test uses the
-# same values to import the app in the image; none of them reach the network.
+# Placeholders for the probe below: Thunder.vars validates its configuration at
+# import, and _run_update moves config.env aside before validating, so the child
+# would otherwise fail on a good tree. The CI smoke test uses the same values.
 _PROBE_ENV = {
     "API_ID": "123456",
     "API_HASH": "0123456789abcdef0123456789abcdef",
@@ -236,11 +235,10 @@ _PROBE_ENV = {
 
 
 def _validate() -> bool:
-    """Confirm the tree compiles and can import what it will load at startup.
+    """Confirm the tree compiles and can import what startup needs.
 
-    compileall alone passes on an environment whose packages are broken -- every
-    file can still compile while the bot cannot start -- so the import probe is
-    what catches it.
+    compileall alone passes on an environment whose packages are broken, so the
+    import probe is what catches it.
     """
     try:
         result = srun(
@@ -254,11 +252,10 @@ def _validate() -> bool:
         return False
 
     try:
-        # Import the startup chain, not just the package: a syntactically valid
-        # but unresolvable import in Thunder.bot or Thunder.__main__ compiles and
-        # leaves `import Thunder` working, while the bot cannot start. Binding
-        # names also catches a directory left empty by an in-place upgrade, which
-        # imports as a namespace package.
+        # The startup chain, not just the package: an unresolvable import in
+        # Thunder.bot or Thunder.__main__ compiles and leaves `import Thunder`
+        # working, while the bot cannot start. Binding names also catches a
+        # directory left empty by an in-place upgrade (a namespace package).
         probe = srun(
             [executable, "-c",
              "from pyrogram import Client, filters, enums; "
@@ -284,13 +281,12 @@ def _stale_sessions() -> list[str]:
     """*.session files the installed library refuses to open.
 
     Reported, never deleted: the file holds the bot's authorisation, so the
-    operator removes it. Such a file fails at startup rather than re-authorising.
+    operator removes it.
 
-    Asked of the library rather than inferred from the stored schema version. The
-    number does not identify the format: pyrofork wrote v4 with a layout wzgram's
-    v4 migration cannot apply, while wzgram reads v6 and v7 by migrating them, so
-    comparing versions would condemn files that open fine and miss files that do
-    not. The library is tried on a copy, so the original is untouched.
+    Asked of the library rather than inferred from the stored schema version, which
+    does not identify the format -- pyrofork's v4 layout fails to migrate while
+    wzgram migrates v6 and v7. The library is tried on a snapshot, so the original
+    is untouched.
     """
     try:
         import asyncio
@@ -303,10 +299,9 @@ def _stale_sessions() -> list[str]:
     def snapshot(source: str, destination: str) -> None:
         """Write a consistent copy of a SQLite database, WAL included.
 
-        Copying the file alone loses committed pages still held in the -wal
-        sidecar, which an unclean stop leaves behind: the copy then has no
-        `version` table and looks corrupt when it is only uncheckpointed. The
-        backup API reads through the WAL, so the copy is a real snapshot.
+        Copying the file alone loses committed pages still in the -wal sidecar,
+        which an unclean stop leaves behind: the copy then looks corrupt when it is
+        only uncheckpointed. The backup API reads through the WAL.
         """
         origin = sqlite_connect(f"file:{source}?mode=ro", uri=True)
         try:

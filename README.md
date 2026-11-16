@@ -577,9 +577,9 @@ A: Your browser likely doesn't support the file's audio or video format (codec).
 A: This is likely a **Telegram Flood Wait**. To prevent spam, Telegram temporarily limits accounts that make too many requests. The bot is designed to handle this automatically by pausing and will resume on its own once the limit is lifted.
 
 **Q: On shutdown I see `Task was destroyed but it is pending!` — is something broken?**
-A: No, if `✓ Database connection closed` was printed first. The Telegram library leaves its
-media sessions open on teardown; the bot still closes the database and exits cleanly. Expect
-six of them per download and none if nothing was streamed.
+A: No, if `✓ Database connection closed` was printed first. The library leaves its media
+sessions open on teardown; the bot still exits cleanly. Expect six after a download, none if
+nothing was streamed.
 
 #### **Performance**
 
@@ -612,13 +612,11 @@ Contributions are welcome! Please follow these steps:
    python -m pytest -q
    python -m ruff check .
    ```
-   On Windows, where that assignment is not valid syntax, set it first:
+   The env var is needed on Python 3.15 (no `cp315` wheel). On Windows, where that
+   assignment is not valid, set it first:
    ```powershell
    $env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
    ```
-   The env var is needed on Python 3.15: PyYAML ships no `cp315` wheel and compiles
-   its C extension by default, which requires MSVC on Windows. This selects the
-   pure-Python fallback instead.
 4. Commit your changes (`git commit -m 'Add some amazing feature'`).
 5. Push to the branch (`git push origin feature/amazing-feature`).
 6. Open a Pull Request.

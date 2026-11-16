@@ -27,11 +27,8 @@ SESSIONS_COLS_V7 = SESSIONS_COLS + ", server_address TEXT, port INTEGER"
 
 def _write_session(path, version, columns=SESSIONS_COLS, update_state=True,
                    username_peer_id=False, extra_columns=0):
-    """Write a session shaped the way `version` expects.
-
-    The layout matters: a session's stored version does not identify its format,
-    so a fixture has to be built per version rather than stamped with a number.
-    """
+    """Write a session. `columns` shapes it, since the stored version does not
+    identify the layout: a fixture has to match the format it claims."""
     connection = sqlite3.connect(str(path))
     connection.execute(f"CREATE TABLE sessions ({columns})")
     connection.execute(
@@ -53,18 +50,17 @@ def _write_session(path, version, columns=SESSIONS_COLS, update_state=True,
 
 
 def test_only_sessions_the_library_cannot_open_are_reported(tmp_path, monkeypatch):
-    """Report the files the installed library refuses, not every schema difference.
+    """Report the files the library refuses, not every schema difference.
 
-    A stored version does not identify a session's format, so comparing it would
-    condemn files that open fine -- wzgram reads v6 and v7 by migrating them -- and
-    miss the pyrofork v4 file, whose layout its v4 migration cannot apply. The
-    library is the only authority, so update.py tries it on a copy.
+    A stored version does not identify a session's format: wzgram migrates v6 and
+    v7, while pyrofork's v4 layout fails to migrate. The library is the only
+    authority, so update.py tries it on a snapshot.
     """
     module = _load_update()
     monkeypatch.chdir(tmp_path)
 
-    # A pyrofork-shaped v4: its own step 4 already created update_state, which
-    # wzgram's step 4 re-creates without IF NOT EXISTS, so open() raises.
+    # pyrofork's shape: its step 4 already created update_state, which wzgram's
+    # step 4 re-creates without IF NOT EXISTS, so open() raises.
     _write_session(tmp_path / "pyrofork.session", 4)
     # Migratable: one step behind, shaped as that version leaves it.
     _write_session(tmp_path / "migratable.session", 7, SESSIONS_COLS_V7,
@@ -77,7 +73,7 @@ def test_only_sessions_the_library_cannot_open_are_reported(tmp_path, monkeypatc
     found = module._stale_sessions()
 
     assert any("pyrofork.session" in entry for entry in found), \
-        "a session the library cannot open must be reported before it breaks startup"
+        "a session the library cannot open must be reported"
     assert not any("migratable.session" in entry for entry in found), \
         "a session the library migrates must not be reported; deleting it logs the bot out"
     assert not any("current.session" in entry for entry in found), \
@@ -90,11 +86,9 @@ def test_only_sessions_the_library_cannot_open_are_reported(tmp_path, monkeypatc
 def test_an_uncheckpointed_session_is_not_reported_as_unreadable(tmp_path, monkeypatch):
     """A session whose pages are still in the -wal sidecar must survive the check.
 
-    An unclean stop leaves committed schema in `name.session-wal`, and SQLite keeps
-    the database valid there -- the main file alone looks empty. Copying only that
-    file gives the probe no `version` table, so a perfectly good session is reported
-    as incompatible and the operator is told to delete their authorisation. Read
-    through the WAL instead, which the snapshot does.
+    An unclean stop leaves committed schema there and the main file looks empty.
+    Copying only that file gives the probe no `version` table, so a good session is
+    reported as incompatible and the operator is told to delete their authorisation.
     """
     module = _load_update()
     monkeypatch.chdir(tmp_path)

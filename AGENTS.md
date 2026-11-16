@@ -16,7 +16,6 @@ python3 update.py          # Update only (rolls back if the new tree is unusable
 ```bash
 pip install -r requirements.txt
 # aiohttp, cloudscraper, Jinja2, wzgram, pymongo, psutil, python-dotenv, speedtest-cli
-# wzgram ships the "pyrogram" package (and aliases "wzgram" to it), so imports are unchanged.
 # uvloop (non-Windows/Cygwin only, requirements.txt marker); asyncio loop elsewhere
 ```
 
@@ -101,21 +100,21 @@ python -m pytest -q          # ~20s on Linux, ~45s on Windows; no credentials ne
 python -m ruff check .       # config lives in pyproject.toml
 ```
 
-On Windows the variable is set first, since `VAR=value cmd` is not valid there:
+PyYAML has no `cp315` wheel, so the env var is required; on Windows set it first,
+since `VAR=value cmd` is not valid there:
 
 ```powershell
 $env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
 ```
 
-The env var is required on 3.15: PyYAML has no `cp315` wheel and compiles its C
-extension by default, which needs MSVC on Windows. A cached wheel from an earlier
-build can make a plain install appear to work — use `--no-cache-dir` to check.
+A cached wheel from an earlier build can make a plain install appear to work — use
+`--no-cache-dir` to check.
 
 Covers request parsing, slot conservation and truncation on the streaming
 routes, the import cycle, database naming, /status before startup,
 update.py preconditions and rollback, plugin handler registration, the CI
-workflow's invariants, .gitignore hygiene, and the interpreter/requirements
-guards that keep this file's own claims true.
+workflow's invariants, .gitignore hygiene, and the interpreter and requirements
+guards.
 
 `pytest` and `ruff` both read `pyproject.toml`; there is no `pytest.ini`.
 
@@ -133,8 +132,7 @@ PYYAML_FORCE_LIBYAML=0 uv pip install --python .venv/bin/python -r requirements-
 uvx ruff check .                         # ~0.1s, no install needed
 ```
 
-The same env var applies to `uv pip install`: it builds the same sdist, and on
-Windows it is set the same way as above.
+The same env var applies to `uv pip install`, which builds the same sdist.
 
 On Windows the interpreter is `.venv\Scripts\python.exe`. `uv pip install` runs in
 well under a second once anything is installed; the first install after creating
