@@ -300,7 +300,7 @@ def _stale_sessions() -> list[str]:
 
     stale: list[str] = []
 
-    def snapshot(source: str, destination: str) -> bool:
+    def snapshot(source: str, destination: str) -> None:
         """Write a consistent copy of a SQLite database, WAL included.
 
         Copying the file alone loses committed pages still held in the -wal
@@ -317,7 +317,6 @@ def _stale_sessions() -> list[str]:
                 target.close()
         finally:
             origin.close()
-        return True
 
     async def unreadable(source: str) -> bool:
         """Snapshot the session, open the copy, and report whether it failed."""
