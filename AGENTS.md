@@ -15,7 +15,7 @@ python3 update.py          # Update only (rolls back if the new tree is unusable
 
 ```bash
 pip install -r requirements.txt
-# aiohttp, cloudscraper, Jinja2, wzgram, pymongo, psutil, python-dotenv, speedtest-cli
+# aiohttp, cloudscraper, minijinja, wzgram, pymongo, psutil, python-dotenv, speedtest-cli
 # uvloop (non-Windows/Cygwin only, requirements.txt marker); asyncio loop elsewhere
 ```
 
@@ -39,7 +39,7 @@ Thunder/
 │   ├── stream_routes.py     # HTTP streaming endpoints
 │   └── exceptions.py        # Custom HTTP exceptions
 ├── utils/                   # 20 modules — see imports below
-└── template/                # req.html (Jinja2)
+└── template/                # req.html (MiniJinja) + player.css / player.js
 ```
 
 ## Docker

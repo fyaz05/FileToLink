@@ -4,9 +4,11 @@ Serves /f/<hash>/<name> and the short-hash form, honouring Range requests so
 large files seek, plus the /watch pages that wrap a file in a player.
 """
 
+import gzip
 import re
 import secrets
 import time
+from pathlib import Path
 from urllib.parse import quote, unquote
 
 from aiohttp import web
@@ -261,6 +263,77 @@ async def _serve_media_response(
     return response
 
 
+# Explicit allowlist: this route must not become a directory walk. Each entry
+# names its own file, so the path is built from this table, not from the request.
+PLAYER_ASSET_DIR = Path(__file__).resolve().parent.parent / "template"
+PLAYER_ASSETS = {
+    "player.css": ("player.css", "text/css; charset=utf-8"),
+    "player.js": ("player.js", "application/javascript; charset=utf-8"),
+}
+# Safe to cache hard: the page links these with a ?v= content fingerprint.
+ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+# name -> (etag, raw bytes, gzipped bytes).
+_asset_cache: dict[str, tuple[str, bytes, bytes]] = {}
+
+
+@routes.get("/assets/{name}", allow_head=True)
+async def player_asset(request: web.Request):
+    asset = PLAYER_ASSETS.get(request.match_info["name"])
+    if asset is None:
+        raise web.HTTPNotFound(text="Asset not found")
+    file_name, content_type = asset
+
+    path = PLAYER_ASSET_DIR / file_name
+    try:
+        stat = path.stat()
+    except OSError as e:
+        logger.error(f"Player asset missing: {file_name} - {e}")
+        raise web.HTTPNotFound(text="Asset not found") from e
+
+    # mtime+size is enough to revalidate a build-time asset.
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    if etag in request.headers.get("If-None-Match", ""):
+        return web.Response(status=304, headers={"ETag": etag, "Cache-Control": ASSET_CACHE_CONTROL})
+
+    # The ETag covers mtime and size, so a cached body cannot go stale without
+    # the key changing. Both assets are small and bounded, so the read and the
+    # gzip happen once rather than per request.
+    cached = _asset_cache.get(file_name)
+    if cached is None or cached[0] != etag:
+        try:
+            raw = path.read_bytes()
+        except OSError as e:
+            logger.error(f"Player asset missing: {file_name} - {e}")
+            raise web.HTTPNotFound(text="Asset not found") from e
+        cached = (etag, raw, gzip.compress(raw, 6))
+        _asset_cache[file_name] = cached
+    _, body, compressed = cached
+
+    common = {
+        "Cache-Control": ASSET_CACHE_CONTROL,
+        "ETag": etag,
+        "X-Content-Type-Options": "nosniff",
+        # Gzip is negotiated per response, so the caches must not mix the two.
+        "Vary": "Accept-Encoding",
+    }
+    if "gzip" in request.headers.get("Accept-Encoding", "").lower():
+        response = web.Response(
+            body=compressed,
+            # charset= is passed separately, so the media type must not carry it.
+            content_type=content_type.split(";", 1)[0],
+            charset="utf-8",
+            headers={**common, "Content-Encoding": "gzip"},
+        )
+    else:
+        response = web.Response(
+            body=body,
+            content_type=content_type.split(";", 1)[0],
+            charset="utf-8",
+            headers=common,
+        )
+    return response
+
+
 @routes.get("/", allow_head=True)
 async def root_redirect(request):
     raise web.HTTPFound("https://github.com/fyaz05/FileToLink")
@@ -322,7 +395,12 @@ async def canonical_media_preview(request: web.Request):
 
         file_name = file_record.get("file_name") or f"file_{secure_hash}"
         src = f"{Var.URL.rstrip('/')}/f/{secure_hash}/{quote_media_name(file_name)}"
-        rendered_page = await render_media_page(file_name, src)
+        rendered_page = await render_media_page(
+            file_name,
+            f"{src}?disposition=inline",
+            mime_type=file_record.get("mime_type") or "application/octet-stream",
+            file_size=int(file_record.get("file_size") or 0),
+        )
 
         response = web.Response(
             text=rendered_page,
