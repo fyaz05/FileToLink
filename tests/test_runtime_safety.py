@@ -109,6 +109,54 @@ def test_status_reports_null_username_before_startup():
     asyncio.run(run())
 
 
+def test_status_exposes_the_startup_check_counts():
+    """The cached startup result reaches /status, and only as counts.
+
+    A frequent, unauthenticated healthcheck must not run checks or name
+    channels or hosts.
+    """
+    import asyncio
+
+    import aiohttp
+    from aiohttp import web
+
+    from Thunder.server.stream_routes import (
+        CONFIGURATION_STATUS_KEY,
+        configuration_summary,
+        routes,
+    )
+
+    class FakeReport:
+        failures = []
+        passed = [1, 2, 3]
+        warnings = [1]
+        skipped = []
+
+    async def run():
+        app = web.Application()
+        app.add_routes(routes)
+        app[CONFIGURATION_STATUS_KEY] = configuration_summary(FakeReport())
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"http://127.0.0.1:{port}/status") as r:
+                    assert r.status == 200, "a healthcheck must not see a failure"
+                    payload = await r.json()
+        finally:
+            await runner.cleanup()
+
+        configuration = payload["configuration"]
+        assert configuration == {"ok": True, "passed": 3, "warnings": 1, "failures": 0}
+        for leak in ("BIN_CHANNEL", "mongodb", "@", "-100"):
+            assert leak not in str(configuration), f"/status leaks {leak}"
+
+    asyncio.run(run())
+
+
 def test_update_script_parses():
     result = subprocess.run(
         [sys.executable, "-c",
@@ -118,13 +166,7 @@ def test_update_script_parses():
 
 
 def test_install_requirements_does_not_assume_pip_exists():
-    """`uv venv` creates an environment without pip.
-
-    update.py installs dependencies with `python -m pip`, which fails there and
-    used to surface as a warning inside an otherwise-successful update -- so new
-    requirements would be missing while the update reported success. It now falls
-    back to `uv pip`, and warns actionably when neither is available.
-    """
+    """pip is tried first, then `uv pip` (uv venv has no pip); a failure must name the fix."""
     source = (REPO / "update.py").read_text(encoding="utf-8")
     installer = source.split("def _install_requirements", 1)[1].split("\ndef ", 1)[0]
 
@@ -150,17 +192,10 @@ def _sandbox_skip(module_name="update_helpers"):
 
 
 def test_sandbox_copies_exclude_generated_state_and_nothing_else():
-    """The update tests copy the whole project into a sandbox, once per test case.
+    """Copies exclude a venv and caches, but keep real content.
 
-    A venv lives inside the checkout (the README sets one up there) and this
-    project's runs to tens of thousands of files, so leaving it in the copy
-    patterns costs seconds per sandbox and makes the suite minutes slower for no
-    coverage. Caches cost less but are equally pointless. Real content must still
-    be copied or the tests would be running against a hollow tree.
-
-    Asserted by calling the pattern matcher rather than reading the source: a
-    check on the text passes for `**/.venv`, for `.venv-backup`, and for a
-    comment that merely mentions the names, none of which exclude anything.
+    Call the matcher, not read source: a text check accepts patterns that
+    exclude nothing.
     """
     names = ["Thunder", "tests", "update.py", "requirements.txt", "config.env",
              ".venv", "venv", ".pytest_cache", ".ruff_cache", "logs", "__pycache__"]
@@ -171,8 +206,8 @@ def test_sandbox_copies_exclude_generated_state_and_nothing_else():
     for real in ("Thunder", "tests", "update.py", "requirements.txt"):
         assert real not in ignored, f"real content would be excluded: {real}"
 
-    # The two update test files must actually use that shared set, or the
-    # assertion above would be checking a module nothing calls.
+    # The update tests must use that shared set, or the assertion checks an
+    # unused module.
     for name in ("test_update_safety", "test_update_recovery"):
         source = (REPO / "tests" / f"{name}.py").read_text(encoding="utf-8")
         assert "from update_helpers import" in source, \
@@ -186,11 +221,8 @@ def test_thunder_script_resolves_python_from_its_own_directory():
 
 
 def test_restart_never_execs_a_path_that_does_not_exist():
-    """`/restart` replaced the process with /bin/bash unconditionally.
-
-    On Windows that raised FileNotFoundError after telling the user the bot was
-    restarting, and it would do the same in an image that has no bash. The
-    handler must fall back to restarting the interpreter instead.
+    """`/restart` used to exec /bin/bash unconditionally; locate the shell with
+    ``shutil.which`` and fall back to the interpreter.
     """
     source = (REPO / "Thunder" / "bot" / "plugins" / "admin.py").read_text(encoding="utf-8")
     restart = source.split("async def restart_bot", 1)[1].split("\n@StreamBot", 1)[0]
@@ -204,17 +236,11 @@ def test_restart_never_execs_a_path_that_does_not_exist():
 
 
 def test_update_validation_imports_the_startup_chain_not_just_the_package():
-    """Validation must import the names the app uses, and supply configuration.
+    """Validation imports what the app uses, with config supplied.
 
-    Two failures it has to catch, both leaving a tree that compiles: a package
-    directory left empty by an in-place upgrade, where `import pyrogram` succeeds
-    and `from pyrogram import Client` fails; and an unresolvable import in a
-    startup module, which leaves `import Thunder` working while the bot cannot
-    start.
-
-    And one it must not cause: those modules read configuration when imported,
-    while `_run_update` moves config.env aside first, so the probe needs
-    placeholders or it would fail on a good tree and roll it back.
+    Catches an emptied package or broken startup import; config.env is moved
+    aside during an update, so the probe needs placeholders or it fails a good
+    tree.
     """
     import importlib.util
 

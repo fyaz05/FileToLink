@@ -1,11 +1,11 @@
-"""Streams a Telegram file over HTTP without buffering the whole thing.
+"""Stream a Telegram file over HTTP without buffering it whole.
 
-ByteStreamer yields byte ranges from the storage channel, which is what lets
-the download routes answer Range requests and serve files far larger than RAM.
+ByteStreamer yields byte ranges from the storage channel, letting the download
+routes answer Range requests and serve files far larger than RAM.
 """
 
 import asyncio
-from typing import Any, AsyncGenerator, Awaitable, Callable, Dict, Optional
+from typing import Any, AsyncGenerator, Dict
 
 from pyrogram import Client
 from pyrogram.errors import FloodWait
@@ -45,49 +45,32 @@ class ByteStreamer:
         media_ref: int | Message,
         offset: int = 0,
         limit: int = 0,
-        fallback_message_id: int | None = None,
-        on_fallback_message: Optional[Callable[[Message], Awaitable[None]]] = None
     ) -> AsyncGenerator[bytes, None]:
         chunk_offset = offset // (1024 * 1024)
         chunk_limit = 0
         if limit > 0:
             chunk_limit = ((limit + (1024 * 1024) - 1) // (1024 * 1024)) + 1
 
-        refs: list[int | Message] = [media_ref]
-        media_id = media_ref if isinstance(media_ref, int) else None
-        if isinstance(media_ref, Message):
-            media_id = getattr(media_ref, "id", getattr(media_ref, "message_id", None))
-        if fallback_message_id is not None and (media_id is None or fallback_message_id != media_id):
-            refs.append(fallback_message_id)
-
         last_error: Exception | None = None
-        for ref in refs:
-            started_stream = False
-            while True:
-                try:
-                    target = await self.get_message(ref) if isinstance(ref, int) else ref
-                    if (
-                        on_fallback_message is not None and
-                        fallback_message_id is not None and
-                        ref == fallback_message_id and
-                        isinstance(target, Message)
-                    ):
-                        await on_fallback_message(target)
-                    async for chunk in self.client.stream_media(
-                        target, offset=chunk_offset, limit=chunk_limit
-                    ):
-                        started_stream = True
-                        yield chunk
-                    return
-                except FloodWait as e:
-                    logger.debug(f"FloodWait: stream_file, sleep {e.value}s")
-                    await asyncio.sleep(e.value)
-                except Exception as e:
-                    last_error = e
-                    logger.debug(f"Error streaming media ref {ref}: {e}", exc_info=True)
-                    if started_stream:
-                        raise
-                    break
+        started_stream = False
+        while True:
+            try:
+                target = await self.get_message(media_ref) if isinstance(media_ref, int) else media_ref
+                async for chunk in self.client.stream_media(
+                    target, offset=chunk_offset, limit=chunk_limit
+                ):
+                    started_stream = True
+                    yield chunk
+                return
+            except FloodWait as e:
+                logger.debug(f"FloodWait: stream_file, sleep {e.value}s")
+                await asyncio.sleep(e.value)
+            except Exception as e:
+                last_error = e
+                logger.debug(f"Error streaming media: {e}", exc_info=True)
+                if started_stream:
+                    raise
+                break
 
         raise FileNotFound(f"Unable to stream file: {last_error}")
 

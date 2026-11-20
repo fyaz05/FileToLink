@@ -125,5 +125,6 @@ class TestSelectOptimalClient:
 
     def test_raises_when_no_clients(self):
         work_loads.clear()
-        with pytest.raises(Exception):
+        with pytest.raises(Exception) as exc:
             select_optimal_client()
+        assert exc.value.status == 503

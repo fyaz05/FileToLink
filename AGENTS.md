@@ -1,153 +1,116 @@
 # AGENTS.md — Thunder File-to-Link Bot
 
-Python 3.15 Telegram bot converting files to direct HTTP links. Uses wzgram, aiohttp, MongoDB, uvloop.
+Telegram bot converting files to direct HTTP links. Python 3.15, wzgram, aiohttp, MongoDB.
 
 ## Run
 
 ```bash
-python -m Thunder          # Primary entry point
-bash thunder.sh            # Updates from UPSTREAM_REPO, then runs the bot
-python3 update.py          # Update only (rolls back if the new tree is unusable)
-# update.py exits 0 when it cannot apply: no UPSTREAM_REPO, or no git/.git in a container
+python -m Thunder [--check] [--verbose]   # --check runs the configuration checks and exits without serving
+bash thunder.sh                           # update, then run
+python3 update.py                         # update only; rolls back if unusable
 ```
 
-## Dependencies
+`update.py` exits **0** when it cannot apply (no `UPSTREAM_REPO`, no `.git`), so a
+nonzero exit means it tried and failed.
 
-```bash
-pip install -r requirements.txt
-# aiohttp, cloudscraper, minijinja, wzgram, pymongo, psutil, python-dotenv, speedtest-cli
-# uvloop (non-Windows/Cygwin only, requirements.txt marker); asyncio loop elsewhere
-```
-
-## Project Structure
+## Structure
 
 ```text
 Thunder/
-├── __init__.py              # __version__, StartTime
-├── __main__.py              # Entry: start_services() via asyncio
-├── vars.py                  # Configuration from env vars
-├── bot/
-│   ├── __init__.py          # StreamBot client, multi_clients, work_loads
-│   ├── clients.py           # Multi-client management
-│   └── plugins/
-│       ├── admin.py         # Owner commands: /users /broadcast /status /stats /restart /log /authorize /deauthorize /listauth /ban /unban /shell /speedtest
-│       ├── callbacks.py     # Inline keyboard handlers
-│       ├── common.py        # User commands: /start /help /about /dc /ping
-│       └── stream.py        # /link (groups), private/channel media handlers
-├── server/
-│   ├── __init__.py          # web_server() — creates aiohttp app with routes
-│   ├── stream_routes.py     # HTTP streaming endpoints
-│   └── exceptions.py        # Custom HTTP exceptions
-├── utils/                   # 20 modules — see imports below
-└── template/                # req.html (MiniJinja) + player.css / player.js
+├── __init__.py        # __version__, StartTime
+├── __main__.py        # entry: flags, uvloop, start_services()
+├── vars.py            # config; raises ConfigError for the whole set
+├── bot/               # StreamBot client, multi_clients, plugins/
+├── server/            # aiohttp app, stream routes
+├── utils/             # 24 modules
+└── template/          # req.html (MiniJinja), player.css/js
 ```
+
+Plugins: `admin.py` (owner commands), `common.py` (`/start /help /about /dc /ping`),
+`stream.py` (`/link`, media handlers), `callbacks.py` (inline keyboards).
+
+## Startup validation
+
+Three stages; keep them separate.
+
+1. `utils/config_values.py` parses env and **records every problem**, so one
+   restart reports them all. `vars.py` raises one `ConfigError` after. Values
+   with a single sane reading are corrected and noted (FQDN scheme/slash,
+   quoted booleans, comma-separated `BANNED_CHANNELS`).
+2. `utils/preflight.py` checks what only Telegram/Mongo can answer: token,
+   channel membership **and posting right**, DB reachability **and writability**,
+   owner, force channel, shortener, public URL. Definite failures stop startup;
+   transient ones (timeout, `FloodWait`) only warn.
+3. `utils/channel_watch.py` rechecks the channel every `CHANNEL_WATCH_INTERVAL`
+   seconds after boot (`0` disables) and messages the owner once per transition.
+
+`utils/public_host.py` resolves the host links are built from: `FQDN`, or the
+platform variable when unset (`KOYEB_PUBLIC_DOMAIN`, `RENDER_EXTERNAL_URL`,
+`RAILWAY_PUBLIC_DOMAIN`, `HEROKU_APP_NAME`, `FLY_APP_NAME`, `WEBSITE_HOSTNAME`),
+normalised with FQDN rules. Its `describe_missing_host`/`describe_ignored_port`
+findings are part of the stage-2 report.
+
+Live checks run concurrently and **must stay that way**; only the channel check
+waits (it needs a message id first). `gather(..., return_exceptions=True)` is
+deliberate: one bad check must not discard the others.
+
+`/doctor` re-runs stage 2 from Telegram (the only route with no shell). Neither
+`--check` nor `/doctor` runs during a normal request: `/status` reads the cached
+startup result.
+
+Parsing is strict: `WORKERS=0`, `SLEEP_THRESHOLD<0`, `PING_INTERVAL<=0` are
+rejected by the parser (`vars.py` raises one `ConfigError` naming them) instead
+of crashing or busy-looping later.
+
+## Gotchas
+
+- **Import order:** wzgram binds a client to the loop current at creation, and
+  `Thunder.bot` creates one at import. `__main__` installs uvloop and creates the
+  loop *before* importing the package. Do not reorder.
+- `db` is a `Database` wrapper (`utils/database.py`), not the raw Mongo client.
+- `is_admin(cli, chat_id)` and `owner_only(client, update)` are **async functions**,
+  not decorators. Use `filters.user(Var.OWNER_ID)` on handlers, not `is_admin()`.
+- A failed channel probe is not proof of lost access. Do not turn it into an alert.
 
 ## Docker
 
-The image runs as unprivileged user `10001` and installs no build toolchain (all
-dependencies provide wheels). `.dockerignore` excludes env files, session files,
-virtualenvs, dev tools, and tests; supply `config.env` at runtime.
+Runs as uid `10001`, no toolchain. `.dockerignore` excludes env files and tests.
 
-Two gotchas:
-- A mounted `config.env` must be readable by uid `10001` (`chmod 644`; a
-  root-only `600` fails). Do not `chown` it — that hands the file to a host-unknown
-  uid you can no longer edit.
-- Docker's `--env-file` passes values verbatim, so inline comments and quotes in
-  `config_sample.env` corrupt variables (`PORT` becomes `8080 # Web server port`).
-  Generate the file with `python-dotenv` outside the repo (see README), or mount `config.env`.
+- A mounted `config.env` must be readable by `10001` (`chmod 644`). Do **not**
+  `chown` it — you lose edit access.
+- `--env-file` passes values verbatim, so inline comments corrupt them. Mount
+  `config.env` instead.
+- No `git` in the image, so self-update is skipped there.
 
-Self-update is skipped inside the image: there is no `git` and no `.git`, so
-`UPSTREAM_REPO` has no effect there. Update a container by building a new image.
+## Conventions
 
-## Key Imports
-
-```python
-from Thunder.utils.logger import logger          # Async-safe QueueHandler logger, writes to Thunder/logs/bot.txt
-from Thunder.utils.database import db             # AsyncMongoClient singleton
-from Thunder.utils.rate_limiter import rate_limiter, request_executor, handle_rate_limited_request
-from Thunder.utils.bot_utils import is_admin      # async def is_admin(cli, chat_id_val) -> bool — checks bot membership, NOT a decorator
-from Thunder.utils.decorators import owner_only   # async guard function, not a decorator
-from Thunder.vars import Var                      # All env config
-```
-
-## Code Conventions
-
-- PEP 8, 4-space indent, 120-char lines
-- Imports: stdlib → third-party → local
-- All I/O is async; use `asyncio.sleep()` not `time.sleep()`
-- Catch `FloodWait` from Telegram API with `await asyncio.sleep(e.value)`
-- Log with `logger.error(..., exc_info=True)` for exceptions
-- Admin access: `filters.user(Var.OWNER_ID)` on Pyrogram handlers (not `is_admin()`)
-- Naming: PascalCase classes, snake_case functions/vars, UPPER_SNAKE_CASE constants
-
-## Rate Limiting
-
-Two-tier deque system in `rate_limiter.py`:
-- Owners bypass queue entirely
-- Authorized users → `priority_queue` (drained first)
-- Regular users → `request_queue`
-- `QueueFullError` raised on overflow
-
-## Configuration
-
-Copy `config_sample.env` → `config.env`. Required vars: `API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`.
+- PEP 8, 4-space, 120 cols. stdlib → third-party → local imports.
+- All I/O async. `asyncio.sleep()`, never `time.sleep()`.
+- Catch `FloodWait` with `await asyncio.sleep(e.value)`.
+- `logger.error(..., exc_info=True)` for exceptions.
+- Rate limiting: owners bypass, authorized users → `priority_queue`, others →
+  `request_queue`, `QueueFullError` on overflow.
 
 ## Testing
 
 ```bash
-PYYAML_FORCE_LIBYAML=0 pip install -r requirements-dev.txt   # POSIX
-python -m pytest -q          # ~20s on Linux, ~45s on Windows; no credentials needed
-python -m ruff check .       # config lives in pyproject.toml
+pip install -r requirements-dev.txt   # needs PYYAML_FORCE_LIBYAML=0 on 3.15
+python -m pytest -q                   # ~20s Linux, ~45s Windows
+python -m ruff check .
 ```
 
-PyYAML has no `cp315` wheel, so the env var is required; on Windows set it first,
-since `VAR=value cmd` is not valid there:
+PyYAML has no `cp315` wheel, so set the env var first (`$env:PYYAML_FORCE_LIBYAML = "0"`
+on Windows). Use `--no-cache-dir` to verify a genuinely clean install.
 
-```powershell
-$env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
-```
+`uv` is optional (`uv venv --seed .venv --python 3.15`). There is deliberately **no
+`uv.lock`**: `requirements.txt` floats so CI notices bad upstream releases.
 
-A cached wheel from an earlier build can make a plain install appear to work — use
-`--no-cache-dir` to check.
+On Windows/3.14 without `wzgram`/`warpcrypto` installed (no cp314 wheel), the
+`update.py` tests fail with `ModuleNotFoundError` — environmental, not a code bug.
 
-Covers request parsing, slot conservation and truncation on the streaming
-routes, the import cycle, database naming, /status before startup,
-update.py preconditions and rollback, plugin handler registration, the CI
-workflow's invariants, .gitignore hygiene, and the interpreter and requirements
-guards.
+Coverage worth knowing before changing anything: streaming routes (ranges, slot
+conservation), config parsing, preflight against fakes built from real
+`pyrogram.types`, update/rollback paths, CI workflow invariants. A bug fix's
+tests should fail against the old code.
 
-`pytest` and `ruff` both read `pyproject.toml`; there is no `pytest.ini`.
-
-### With uv
-
-`uv` is faster than pip for creating environments and installing, and it is used
-only as a tool — there is deliberately **no `uv.lock`**: pinning every package is
-the opposite of what this project wants, because `requirements.txt` floats so that
-CI notices a bad upstream release. Every command below was run to confirm it works
-and leaves no lock file:
-
-```bash
-uv venv .venv --python 3.15              # ~0.15s
-PYYAML_FORCE_LIBYAML=0 uv pip install --python .venv/bin/python -r requirements-dev.txt
-uvx ruff check .                         # ~0.1s, no install needed
-```
-
-The same env var applies to `uv pip install`, which builds the same sdist.
-
-On Windows the interpreter is `.venv\Scripts\python.exe`. `uv pip install` runs in
-well under a second once anything is installed; the first install after creating
-the environment takes a few seconds. Re-running it is safe.
-
-One caveat if you deploy from this checkout: `uv venv` creates an environment
-**without pip**, and `update.py` installs dependencies on a self-update with
-`python -m pip`. It falls back to `uv pip` and warns if neither works, but the
-cleanest result comes from seeding pip in the first place:
-
-```bash
-uv venv --seed .venv --python 3.15       # includes pip
-```
-
-## Debugging
-
-- Logs: Thunder/logs/bot.txt
-- Health check: admin /status command, or GET /status on the web port
+Logs: `Thunder/logs/bot.txt`. Health: `/status` or `GET /status`.

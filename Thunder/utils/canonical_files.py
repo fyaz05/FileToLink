@@ -1,8 +1,8 @@
-"""Canonical file records: one entry per file, keyed by a public hash.
+"""Canonical file records, one per file, keyed by a public hash.
 
-Storage and lookup layer for the files collection, plus a bounded in-process
-cache and the ingest claim that stops two concurrent uploads of the same file
-from writing two records.
+Storage and lookup for the files collection, a bounded in-process cache, and
+an ingest claim that stops two concurrent uploads of the same file writing two
+records.
 """
 
 import asyncio
@@ -251,14 +251,6 @@ async def drain_background_touch_tasks() -> None:
             await db.touch_file_record(public_hash, reused=reused)
         except Exception as e:
             logger.error(f"Failed to flush touch for {public_hash}: {e}", exc_info=True)
-
-
-async def update_cached_file_id(record: Dict[str, Any], file_id: str) -> None:
-    if not record.get("public_hash") or not file_id:
-        return
-    record["file_id"] = file_id
-    _remember(record)
-    await db.update_file_id(record["public_hash"], file_id, raise_on_error=True)
 
 
 async def _fetch_canonical_message(record: Dict[str, Any]) -> Optional[Message]:

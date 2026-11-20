@@ -34,7 +34,8 @@ from Thunder.utils.messages import (
     MSG_CHANNEL_BANNED_REASON_SUFFIX, MSG_CHANNEL_NOT_BANNED,
     MSG_CHANNEL_UNBANNED, MSG_DB_ERROR, MSG_DB_STATS,
     MSG_DEAUTHORIZE_FAILED, MSG_DEAUTHORIZE_SUCCESS,
-    MSG_DEAUTHORIZE_USAGE, MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
+    MSG_DEAUTHORIZE_USAGE, MSG_DOCTOR_FAILED, MSG_DOCTOR_RUNNING,
+    MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
     MSG_INVALID_USER_ID, MSG_LOG_FILE_CAPTION, MSG_LOG_FILE_EMPTY,
     MSG_LOG_FILE_MISSING, MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
@@ -182,9 +183,8 @@ async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
 
-    # thunder.sh runs update.py before starting, so prefer it where it can run.
-    # It is a bash script, so Windows restarts the interpreter directly and skips
-    # the update step rather than crashing on a path that does not exist.
+    # Prefer thunder.sh, which runs update.py first. It is bash, so Windows skips
+    # it and restarts the interpreter directly rather than crashing on a missing path.
     bash = shutil.which("bash")
     if os.name != "nt" and bash:
         os.execv(bash, ["bash", "thunder.sh"])
@@ -204,7 +204,7 @@ async def send_logs(client: Client, message: Message):
         try:
             await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
         except FloodWait as e:
-            logger.debug(f"FloodWait in log file sending, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in log file sending: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
     except Exception as e:
@@ -308,7 +308,7 @@ async def ban_command(client: Client, message: Message):
                 try:
                     await client.leave_chat(target_id)
                 except FloodWait as e:
-                    logger.debug(f"FloodWait in leave_chat, sleeping for {e.value}s")
+                    logger.debug(f"FloodWait in leave_chat: sleep {e.value}s")
                     await asyncio.sleep(e.value)
                     await client.leave_chat(target_id)
             except Exception as e:
@@ -327,7 +327,7 @@ async def ban_command(client: Client, message: Message):
                 try:
                     await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
                 except FloodWait as e:
-                    logger.debug(f"FloodWait in ban notification, sleeping for {e.value}s")
+                    logger.debug(f"FloodWait in ban notification: sleep {e.value}s")
                     await asyncio.sleep(e.value)
                     await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
             except Exception as e:
@@ -360,7 +360,7 @@ async def unban_command(client: Client, message: Message):
                     try:
                         await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
                     except FloodWait as e:
-                        logger.debug(f"FloodWait in unban notification, sleeping for {e.value}s")
+                        logger.debug(f"FloodWait in unban notification: sleep {e.value}s")
                         await asyncio.sleep(e.value)
                         await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
                 except Exception as e:
@@ -408,7 +408,7 @@ async def run_shell_command(client: Client, message: Message):
         try:
             await status_msg.delete()
         except FloodWait as e:
-            logger.debug(f"FloodWait in shell status message delete, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in shell status message delete: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.delete()
         
@@ -421,7 +421,7 @@ async def run_shell_command(client: Client, message: Message):
                     caption=MSG_SHELL_OUTPUT.format(
                         command=html.escape(command)))
             except FloodWait as e:
-                logger.debug(f"FloodWait in shell output document, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in shell output document: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await message.reply_document(
                     file,
@@ -437,7 +437,7 @@ async def run_shell_command(client: Client, message: Message):
                     MSG_SHELL_ERROR.format(error=html.escape(str(e))),
                     parse_mode=ParseMode.HTML)
             except FloodWait as e:
-                logger.debug(f"FloodWait in shell error message edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in shell error message edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(
                     MSG_SHELL_ERROR.format(error=html.escape(str(e))),
@@ -451,6 +451,58 @@ async def run_shell_command(client: Client, message: Message):
                 parse_mode=ParseMode.HTML)
 
 
+@StreamBot.on_message(filters.command("doctor") & owner_filter)
+async def doctor_command(client: Client, message: Message):
+    """Re-run configuration checks without restarting.
+
+    The startup report exists only at boot; the log viewer may be the only way
+    to read it.
+    """
+    status_msg = await reply(message, text=MSG_DOCTOR_RUNNING)
+    try:
+        from Thunder.utils import preflight
+
+        report = preflight.Report()
+        # Same checks as startup so the two cannot disagree; drift (a demoted
+        # extra bot) is caught against the live clients below.
+        await preflight.verify_configuration(report)
+        report.extend(await preflight.check_public_url(Var.URL))
+
+        # Catch post-boot drift here: a demoted extra bot looks like a deleted file.
+        from Thunder.utils.config_parser import TokenParser
+        keys = TokenParser().parse_from_env()
+        for client_id, client in sorted(multi_clients.items()):
+            if client_id == 0:
+                continue
+            key, token = keys.get(client_id, (f"Client {client_id}", ""))
+            report.extend(await preflight.check_secondary_client(
+                client, key, Var.BIN_CHANNEL, preflight.token_bot_id(token)))
+
+        rendered = report.render(verbose=True)
+    except Exception as e:
+        logger.error(f"Error in doctor_command: {e}", exc_info=True)
+        rendered = MSG_DOCTOR_FAILED
+
+    rendered_text = f"<pre>{html.escape(rendered)}</pre>"
+    try:
+        await status_msg.edit_text(rendered_text, parse_mode=ParseMode.HTML)
+    except MessageNotModified:
+        pass
+    except FloodWait as e:
+        logger.debug(f"FloodWait in doctor result edit: sleep {e.value}s")
+        try:
+            await asyncio.sleep(e.value)
+            await status_msg.edit_text(rendered_text, parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            logger.warning(f"Could not deliver the doctor report: {type(exc).__name__}: {exc}")
+    except Exception as exc:
+        logger.warning(f"Could not edit the doctor report: {type(exc).__name__}: {exc}")
+        try:
+            await message.reply_text(rendered_text[:4096], parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
+
 @StreamBot.on_message(filters.command("speedtest") & owner_filter)
 async def speedtest_command(client: Client, message: Message):
     status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
@@ -460,7 +512,7 @@ async def speedtest_command(client: Client, message: Message):
             try:
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest error edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in speedtest error edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except MessageNotModified:
@@ -475,7 +527,7 @@ async def speedtest_command(client: Client, message: Message):
             try:
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest exception error edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in speedtest exception error edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except MessageNotModified:
@@ -515,20 +567,20 @@ async def _send_result(message: Message, status_msg: Message, result_text: str, 
         try:
             await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest photo reply, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest photo reply: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
         try:
             await status_msg.delete()
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest status delete, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest status delete: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.delete()
     else:
         try:
             await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest result edit, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest result edit: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
         except MessageNotModified:

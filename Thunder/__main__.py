@@ -1,7 +1,9 @@
-"""Entry point: builds the event loop, then starts clients and the web server.
+"""Build the event loop, then start clients and the web server.
 
-The loop is created before the Pyrogram imports on purpose; see the comment
-below. Run with ``python -m Thunder``.
+The loop is created before the Pyrogram imports on purpose (see below). Run
+with ``python -m Thunder``, or ``python -m Thunder --check`` to check config
+and exit; the public-URL probe needs the server and runs only in
+``start_services``.
 """
 
 import asyncio
@@ -12,8 +14,12 @@ from datetime import datetime
 
 from pathlib import Path
 
-# wzgram binds a client to the loop current at creation and Thunder.bot
-# creates it on import, so the loop has to exist before these imports.
+# Parse --check before the Thunder imports, which validate config and may raise.
+CHECK_ONLY = "--check" in sys.argv[1:]
+VERBOSE = "--verbose" in sys.argv[1:] or CHECK_ONLY
+
+# wzgram binds a client to the loop at creation, and Thunder.bot creates one on
+# import, so the loop must exist first.
 try:
     from uvloop import install
     install()
@@ -25,21 +31,36 @@ asyncio.set_event_loop(LOOP)
 
 from aiohttp import web
 from pyrogram import idle
-from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified, Unauthorized
 
 from Thunder import __version__
-from Thunder.bot import StreamBot
-from Thunder.bot.clients import cleanup_clients, initialize_clients
-from Thunder.server import web_server
-from Thunder.utils.commands import set_commands
-from Thunder.utils.database import db
-from Thunder.utils.keepalive import ping_server
-from Thunder.utils.canonical_files import drain_background_touch_tasks
-from Thunder.utils.logger import logger
-from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
-from Thunder.utils.rate_limiter import rate_limiter, request_executor
-from Thunder.utils.tokens import cleanup_expired_tokens
-from Thunder.vars import Var
+
+# Bound before the package import below, which is where ConfigError is raised.
+from Thunder.utils.config_values import CONFIG_FILE, ConfigError, render_config_error
+
+try:
+    from Thunder.bot import StreamBot
+    from Thunder.bot.clients import cleanup_clients, initialize_clients
+    from Thunder.server import web_server
+    from Thunder.utils import preflight
+    from Thunder.utils.commands import set_commands
+    from Thunder.utils.database import db
+    from Thunder.utils.channel_watch import watch_channel
+    from Thunder.utils.keepalive import ping_server
+    from Thunder.utils.canonical_files import drain_background_touch_tasks
+    from Thunder.utils.logger import logger
+    from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+    from Thunder.utils.rate_limiter import rate_limiter, request_executor
+    from Thunder.utils.tokens import cleanup_expired_tokens
+    from Thunder.server.stream_routes import (
+        CONFIGURATION_STATUS_KEY, configuration_summary,
+        refresh_configuration_summary,
+    )
+    from Thunder.vars import CORRECTIONS, Var
+except ConfigError as config_error:
+    # The file's presence decides the message; the path is checked directly.
+    print(render_config_error(config_error, Path(CONFIG_FILE).is_file()), flush=True)
+    raise SystemExit(1) from None
 
 
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
@@ -126,11 +147,89 @@ async def import_plugins():
     return success_count
 
 
+async def notify_owner(message: str) -> None:
+    """Send the owner a message; failures raise so the watcher can retry.
+
+    Requires ``initialize_clients`` first, which ``start_services`` does before
+    creating the watcher, so ``multi_clients`` and ``work_loads`` are populated.
+    """
+    if not Var.OWNER_ID:
+        return
+    from Thunder.bot import multi_clients, work_loads
+    client = multi_clients[min(work_loads, key=work_loads.get)]
+    await client.send_message(Var.OWNER_ID, message)
+
+
+def make_channel_probe():
+    """Bind the channel check to its ids once."""
+
+    async def probe():
+        message_id = await preflight.sample_message_id(db)
+        return await preflight.storage_channel_problem(
+            StreamBot, Var.BIN_CHANNEL, message_id)
+
+    return probe
+
+
+def emit(report) -> None:
+    """Log the block for /log and PaaS viewers; printing would duplicate it."""
+    logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+
+
+async def check_configuration_only():
+    """``--check``: run the checks, stop the clients, and exit.
+
+    Serves nothing; the public-URL probe needs the server's ``/status`` and
+    runs only in ``start_services``.
+    """
+    report = preflight.Report()
+    exit_code = 1
+
+    try:
+        await StreamBot.start()
+        StreamBot.username = (await StreamBot.get_me()).username
+        await preflight.verify_configuration(report)
+        await initialize_clients(report)
+    except Unauthorized:
+        # Same named failure as the normal start path: the token was rejected.
+        report.add("fail", preflight.token_rejected_message("BOT_TOKEN"))
+    except Exception as e:
+        # The summary names only the type; the traceback says why.
+        logger.error(f"Configuration check aborted: {e}", exc_info=True)
+        report.add("fail", f"✖ Could not connect to Telegram ({type(e).__name__}: {e}).\n"
+                           "  Check BOT_TOKEN, API_ID and API_HASH, then try again.")
+    else:
+        exit_code = 1 if report.failures else 0
+    finally:
+        try:
+            await cleanup_clients()
+        except Exception:
+            pass
+        # Not in multi_clients until initialize_clients runs, so stop it here.
+        try:
+            if StreamBot.is_initialized:
+                await StreamBot.stop()
+        except Exception:
+            pass
+        try:
+            await db.close()
+        except Exception:
+            pass
+
+    emit(report)
+    raise SystemExit(exit_code)
+
+
 async def start_services():
     start_time = datetime.now()
+
+    if CHECK_ONLY:
+        return await check_configuration_only()
+
     print_banner()
     print("╔════════════════ INITIALIZING BOT SERVICES ════════════════╗")
 
+    report = preflight.Report()
     print("   ▶ Starting Telegram Bot initialization...")
     try:
         try:
@@ -148,8 +247,51 @@ async def start_services():
             bot_info = await StreamBot.get_me()
 
         StreamBot.username = bot_info.username
-        print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
+    except ConfigError:
+        raise
+    except Unauthorized:
+        # Handle rejected tokens here, or the named failure from check_bot_token
+        # is lost to the generic handler.
+        report.add("fail", preflight.token_rejected_message("BOT_TOKEN"))
+        emit(report)
+        raise SystemExit(1)
+    except Exception as e:
+        logger.error(
+            f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
+        )
+        print("   ✖ Telegram rejected the configuration or could not be reached.")
+        print(f"     {type(e).__name__}: {e}")
+        print("     Check BOT_TOKEN, API_ID and API_HASH, then start again.")
+        raise SystemExit(1)
+
+    try:
+        await preflight.verify_configuration(report)
+        await initialize_clients(report)
+    except Exception as e:
+        logger.error(f"   ✖ Failed during configuration checks: {e}", exc_info=True)
+        raise SystemExit(1)
+
+    if report.failures:
+        emit(report)
+        try:
+            await cleanup_clients()
+        except Exception:
+            pass
+        try:
+            # cleanup_clients() already stopped StreamBot; stop it again only
+            # if that failed, so the client is stopped exactly once.
+            if StreamBot.is_initialized:
+                await StreamBot.stop()
+        except Exception:
+            pass
+        try:
+            await db.close()
+        except Exception:
+            pass
+        raise SystemExit(1)
+
+    try:
         await set_commands()
         print("   ✓ Bot commands set successfully.")
         schedule_index_ensure()
@@ -180,20 +322,11 @@ async def start_services():
                 logger.error(
                     f"Error processing restart message: {e}", exc_info=True
                 )
-        else:
-            pass
 
     except Exception as e:
         logger.error(
             f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
         )
-        raise SystemExit(1)
-
-    print("   ▶ Starting Client initialization...")
-    try:
-        await initialize_clients()
-    except Exception as e:
-        logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         raise SystemExit(1)
 
     await import_plugins()
@@ -212,9 +345,12 @@ async def start_services():
 
     print("   ▶ Starting Web Server initialization...")
     try:
+        app = await web_server()
+        # Set before the runner starts: changing app state afterwards is deprecated.
+        app[CONFIGURATION_STATUS_KEY] = configuration_summary(report)
         # shutdown_timeout belongs on AppRunner, not TCPSite, where the kwarg is deprecated.
         app_runner = web.AppRunner(
-            await web_server(),
+            app,
             handler_cancellation=True,
             shutdown_timeout=25,
         )
@@ -230,9 +366,32 @@ async def start_services():
         token_cleanup_task = asyncio.create_task(
             schedule_token_cleanup(), name="token_cleanup_task"
         )
+        channel_watch_task = None
+        if Var.CHANNEL_WATCH_INTERVAL > 0:
+            channel_watch_task = asyncio.create_task(
+                watch_channel(
+                    notify=notify_owner,
+                    probe=make_channel_probe(),
+                    interval_seconds=Var.CHANNEL_WATCH_INTERVAL,
+                ),
+                name="channel_watch_task",
+            )
+
+        # Needs the server running: asks our own URL for /status.
+        url_results = await preflight.check_public_url(Var.URL)
+        report.extend(url_results)
+        refresh_configuration_summary(app[CONFIGURATION_STATUS_KEY], report)
+        # After the probe: the public-URL results belong in the block too.
+        emit(report)
+        for status, text in url_results:
+            if status != preflight.OK:
+                print(f"   {text.splitlines()[0]}")
+            else:
+                print(f"   ✓ {text}")
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
+        emit(report)
         if 'app_runner' in locals() and app_runner is not None:
             try:
                 await app_runner.cleanup()
@@ -273,6 +432,8 @@ async def start_services():
     print("╠═══════════════════════════════════════════════════════════╣")
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")
+    # Shows a wrong FQDN before the first link goes out.
+    print(f"   ▶ Links: {Var.URL}")
     print(f"   ▶ Server: {bind_address}:{Var.PORT}")
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")
     print("╚═══════════════════════════════════════════════════════════╝")
@@ -283,6 +444,8 @@ async def start_services():
         keepalive_task,
         token_cleanup_task
     ]
+    if channel_watch_task is not None:
+        background_tasks.append(channel_watch_task)
 
     try:
         await idle()

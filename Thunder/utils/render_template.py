@@ -10,6 +10,7 @@ from pyrogram.errors import FloodWait
 
 from Thunder.bot import StreamBot
 from Thunder.server.exceptions import InvalidHash
+from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.file_properties import get_fname, get_fsize, get_mime_type, get_uniqid
 from Thunder.utils.human_readable import humanbytes
 from Thunder.utils.logger import logger
@@ -19,7 +20,7 @@ SITE_NAME = "Thunder"
 REPO_URL = "https://github.com/fyaz05/FileToLink"
 LOGO_URL = "https://cdn.jsdelivr.net/gh/fyaz05/Resources@main/ThunderGo/logo.png"
 
-# Module-relative: the bot may be started from any working directory.
+# Module-relative: the bot may start from any working directory.
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "template"
 
 
@@ -37,7 +38,7 @@ def _asset_version() -> str:
 ASSET_VERSION = _asset_version()
 
 # movi-player demuxes the container itself, so these decide only which surface
-# to show, never whether playback is possible.
+# to show, never whether playback works.
 _VIDEO_EXTENSIONS = frozenset({
     "3g2", "3gp", "asf", "avi", "divx", "f4v", "flv", "m2ts", "m2v", "m4v",
     "mkv", "mov", "mp4", "mpeg", "mpg", "mts", "mxf", "ogv", "rm", "rmvb",
@@ -67,10 +68,10 @@ def _extension_of(file_name: str) -> str:
 
 
 def classify_media(file_name: str, mime_type: str) -> str:
-    """``video``, ``audio``, ``image`` or ``other`` for the given file.
+    """Classify a file as ``video``, ``audio``, ``image`` or ``other``.
 
-    The extension wins: Telegram labels a document upload
-    ``application/octet-stream`` even when it is an MKV.
+    The extension wins: Telegram labels even an MKV document upload
+    ``application/octet-stream``.
     """
     extension = _extension_of(file_name)
     for kind, extensions in _MEDIA_KINDS:
@@ -81,7 +82,7 @@ def classify_media(file_name: str, mime_type: str) -> str:
     return prefix if prefix in {"video", "audio", "image"} else "other"
 
 
-# Unknown variables must raise: there is no contextual autoescaping to fall back on.
+# Unknown variables must raise: no contextual autoescaping to fall back on.
 template_env = minijinja.Environment(
     loader=minijinja.load_from_path([str(TEMPLATE_DIR)]),
     undefined_behavior="strict",
@@ -98,8 +99,8 @@ async def render_media_page(
 ) -> str:
     """Render the player page for one file.
 
-    ``stream_url`` must be percent-encoded and carry ``?disposition=inline``; the
-    template escapes it (``|tojson`` in the config script, autoescape in markup).
+    ``stream_url`` must be percent-encoded with ``?disposition=inline``; the
+    template escapes it (``|tojson`` in config, autoescape in markup).
     """
     normalized = (mime_type or "application/octet-stream").strip().lower()
     download_url = stream_url.split("?", 1)[0]
@@ -139,7 +140,7 @@ async def render_page(message_id: int, secure_hash: str) -> str:
         if not file_unique_id or file_unique_id[:6] != secure_hash:
             raise InvalidHash("File unique ID or secure hash mismatch during rendering.")
 
-        quoted_filename = urllib.parse.quote(file_name.replace('/', '_'), safe="")
+        quoted_filename = quote_media_name(file_name)
         src = urllib.parse.urljoin(Var.URL, f'{secure_hash}{message_id}/{quoted_filename}')
         return await render_media_page(
             file_name,

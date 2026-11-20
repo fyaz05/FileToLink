@@ -1,7 +1,7 @@
-"""MongoDB access layer for users, tokens, bans and file records.
+"""MongoDB access for users, tokens, bans and file records.
 
-Owns the collections, their unique indexes, and the duplicate-user recovery
-that runs when an existing database predates the unique index on `id`.
+Owns the collections and their unique indexes, plus duplicate-user recovery
+for databases that predate the unique index on `id`.
 """
 
 import asyncio
@@ -12,6 +12,9 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
+
+# Only used by verify_writable(); kept clear of the real collections.
+PREFLIGHT_COLLECTION = "_preflight"
 
 class Database:
     def __init__(self, uri: str, database_name: str, *args, **kwargs):
@@ -72,6 +75,25 @@ class Database:
             if raise_on_error:
                 raise
             return False
+
+    async def ping(self) -> dict:
+        """Round-trip to the server. Proves host, TLS and credentials."""
+        return await self._client.admin.command("ping")
+
+    async def verify_writable(self) -> None:
+        """Prove the login can write; a read-only user passes ``ping``.
+
+        Round-trips a document in a throwaway collection, then drops it so no
+        empty ``_preflight`` collection is left behind.
+        """
+        collection = self.db[PREFLIGHT_COLLECTION]
+        marker = {"_id": "preflight"}
+        await collection.replace_one(marker, {"_id": "preflight"}, upsert=True)
+        await collection.delete_one(marker)
+        try:
+            await collection.drop()
+        except Exception as e:
+            logger.debug(f"Could not drop {PREFLIGHT_COLLECTION}: {e}")
 
     def new_user(self, user_id: int) -> dict:
         try:
@@ -363,30 +385,6 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"Error touching canonical file {public_hash}: {e}", exc_info=True)
-            if raise_on_error:
-                raise
-            return False
-
-    async def update_file_id(
-        self,
-        public_hash: str,
-        file_id: str,
-        *,
-        raise_on_error: bool = False
-    ) -> bool:
-        try:
-            await self.files_col.update_one(
-                {"public_hash": public_hash},
-                {
-                    "$set": {
-                        "file_id": file_id,
-                        "last_seen_at": datetime.datetime.now(datetime.timezone.utc)
-                    }
-                }
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error updating file_id for {public_hash}: {e}", exc_info=True)
             if raise_on_error:
                 raise
             return False

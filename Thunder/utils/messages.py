@@ -1,7 +1,6 @@
-"""Every user-facing string, grouped by where it appears.
+"""User-facing strings, grouped by where they appear.
 
-Kept in one module so wording and formatting can be changed without touching
-the handlers that send them.
+Kept in one module so wording and formatting can change without touching handlers.
 """
 
 # ERROR MESSAGES
@@ -333,6 +332,8 @@ MSG_SYSTEM_STATUS = (
 # Speedtest Messages
 MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...**"
 MSG_SPEEDTEST_ERROR = "❌ **Speed Test Failed!**\n\n> Unable to complete the speed test. Please try again later."
+MSG_DOCTOR_RUNNING = "🩺 Running configuration checks..."
+MSG_DOCTOR_FAILED = "🩺 The configuration check could not run. See the log."
 MSG_SPEEDTEST_RESULT = (
     "⚡ **Speed Test Results**\n\n"
     "**SPEEDTEST INFO:**\n"
