@@ -164,6 +164,19 @@ class TestShortUrl:
 
 
 class TestPlugins:
+    @pytest.mark.parametrize("plugin,response", [
+        (BitlyPlugin(), FakeResponse(payload={"link": "https://bit.ly/x"})),
+        (OuoIoPlugin(), FakeResponse(text="https://ouo.io/x")),
+        (CuttLyPlugin(), FakeResponse(payload={"url": {"shortLink": "https://cutt.ly/x"}})),
+        (GenericShortenerPlugin(), FakeResponse(payload={"shortenedUrl": "https://short.example/x"})),
+    ])
+    async def test_http_plugins_bound_each_request(self, plugin, response):
+        session = FakeSession(response)
+        plugin.session = session
+        plugin.domain = "short.example"
+        await plugin.shorten(ORIGINAL, "k")
+        assert session.calls[0][1]["timeout"] == shortener.REQUEST_TIMEOUT_SECONDS
+
     async def test_cuttly_falls_back_on_http_error(self):
         plugin = CuttLyPlugin()
         plugin.session = FakeSession(FakeResponse(status_code=500))

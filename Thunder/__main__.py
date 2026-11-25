@@ -1,19 +1,20 @@
-"""Entry point: builds the event loop, then starts clients and the web server.
-
-The loop is created before the Pyrogram imports on purpose; see the comment
-below. Run with ``python -m Thunder``.
-"""
+"""Start services or run --check; the public-URL probe needs a bound server."""
 
 import asyncio
 import glob
 import importlib.util
 import sys
 from datetime import datetime
+from functools import partial
 
 from pathlib import Path
 
-# wzgram binds a client to the loop current at creation and Thunder.bot
-# creates it on import, so the loop has to exist before these imports.
+# Parse --check before the Thunder imports, which validate config and may raise.
+CHECK_ONLY = "--check" in sys.argv[1:]
+VERBOSE = "--verbose" in sys.argv[1:] or CHECK_ONLY
+
+# wzgram binds a client to the loop at creation, and Thunder.bot creates one on
+# import, so the loop must exist first.
 try:
     from uvloop import install
     install()
@@ -25,21 +26,35 @@ asyncio.set_event_loop(LOOP)
 
 from aiohttp import web
 from pyrogram import idle
-from pyrogram.errors import FloodWait, MessageNotModified
+from pyrogram.errors import FloodWait, MessageNotModified, Unauthorized
 
 from Thunder import __version__
-from Thunder.bot import StreamBot
-from Thunder.bot.clients import cleanup_clients, initialize_clients
-from Thunder.server import web_server
-from Thunder.utils.commands import set_commands
-from Thunder.utils.database import db
-from Thunder.utils.keepalive import ping_server
-from Thunder.utils.canonical_files import drain_background_touch_tasks
-from Thunder.utils.logger import logger
-from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
-from Thunder.utils.rate_limiter import rate_limiter, request_executor
-from Thunder.utils.tokens import cleanup_expired_tokens
-from Thunder.vars import Var
+
+# Import ConfigError before the package can raise it.
+from Thunder.utils.config_values import CONFIG_FILE, ConfigError, render_config_error
+
+try:
+    from Thunder.bot import StreamBot
+    from Thunder.bot.clients import cleanup_clients, initialize_clients
+    from Thunder.server import web_server
+    from Thunder.utils import preflight
+    from Thunder.utils.commands import set_commands
+    from Thunder.utils.database import db
+    from Thunder.utils.channel_watch import watch_channel
+    from Thunder.utils.keepalive import ping_server
+    from Thunder.utils.canonical_files import drain_background_touch_tasks
+    from Thunder.utils.logger import logger
+    from Thunder.utils.messages import MSG_ADMIN_RESTART_DONE
+    from Thunder.utils.rate_limiter import rate_limiter, request_executor
+    from Thunder.utils.tokens import cleanup_expired_tokens
+    from Thunder.server.stream_routes import (
+        CONFIGURATION_STATUS_KEY, configuration_summary,
+        refresh_configuration_summary,
+    )
+    from Thunder.vars import CORRECTIONS, Var
+except ConfigError as config_error:
+    print(render_config_error(config_error, Path(CONFIG_FILE).is_file()), flush=True)
+    raise SystemExit(1) from None
 
 
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
@@ -76,10 +91,13 @@ def schedule_index_ensure() -> None:
                 print("   ✓ Database indexes ensured.")
             else:
                 print("   ▶ Database indexes could not be ensured during startup.")
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.error(f"Background database index ensure failed: {e}", exc_info=True)
 
     task.add_done_callback(_log_index_failure)
+    return task
 
 
 async def import_plugins():
@@ -126,11 +144,143 @@ async def import_plugins():
     return success_count
 
 
+async def notify_owner(message: str) -> None:
+    """Send the owner a message; failures raise so the watcher can retry.
+
+    Requires ``initialize_clients`` first, which ``start_services`` does before
+    creating the watcher, so ``multi_clients`` and ``work_loads`` are populated.
+    """
+    if not Var.OWNER_ID:
+        return
+    from Thunder.bot import multi_clients, work_loads
+    client = multi_clients[min(work_loads, key=work_loads.get)]
+    await client.send_message(Var.OWNER_ID, message)
+
+
+async def _cleanup_services(resources: dict) -> None:
+    """Release every resource created during startup, on every exit path."""
+    async def step(name: str, operation):
+        # One failed or cancelled cleanup step must not skip the remaining ones.
+        try:
+            await operation()
+        except asyncio.CancelledError:
+            logger.warning(f"{name} was cancelled during cleanup; continuing")
+        except (Exception, KeyboardInterrupt) as e:
+            logger.error(f"Error during {name}: {e}", exc_info=True)
+
+    app_runner = resources.get("app_runner")
+    if app_runner is not None:
+        await step("web server cleanup", app_runner.cleanup)
+
+    for task in resources.get("background_tasks", []):
+        if task.done():
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error stopping background task {task.get_name()}: {e}", exc_info=True)
+
+    await step("rate limiter cleanup", rate_limiter.shutdown)
+    await step("client cleanup", cleanup_clients)
+
+    # Early failures happen before the primary is added to multi_clients.
+    if (getattr(StreamBot, "is_initialized", False)
+            or getattr(StreamBot, "is_connected", False)):
+        async def stop_primary():
+            last_error = None
+            for _attempt in range(2):
+                try:
+                    try:
+                        await StreamBot.stop()
+                    except FloodWait as e:
+                        await asyncio.sleep(e.value)
+                        await StreamBot.stop()
+                except (asyncio.CancelledError, KeyboardInterrupt, Exception) as exc:
+                    last_error = exc
+                else:
+                    last_error = None
+                if not (getattr(StreamBot, "is_initialized", False)
+                        or getattr(StreamBot, "is_connected", False)):
+                    return
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("primary client remained connected after stop retries")
+
+        await step("primary client cleanup", stop_primary)
+
+    await step("canonical touch task cleanup", drain_background_touch_tasks)
+
+    async def close_database():
+        await db.close()
+        print("   ✓ Database connection closed")
+
+    await step("database cleanup", close_database)
+
+
+async def cleanup_services(resources: dict) -> None:
+    """Finish safe teardown even if the caller is cancelled again."""
+    cleanup_task = asyncio.create_task(_cleanup_services(resources), name="service_cleanup_task")
+    cancelled = False
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            cancelled = True
+    try:
+        cleanup_task.result()
+    except BaseException:
+        if cancelled:
+            raise asyncio.CancelledError from None
+        raise
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def check_configuration_only():
+    """Run checks without serving, so the public URL cannot be probed."""
+    report = preflight.Report()
+    exit_code = 1
+
+    try:
+        await StreamBot.start()
+        StreamBot.username = (await StreamBot.get_me()).username
+        await preflight.verify_configuration(report)
+        await initialize_clients(report)
+    except Unauthorized:
+        report.add("fail", preflight.token_rejected_message("BOT_TOKEN"))
+    except Exception as e:
+        logger.error(f"Configuration check aborted: {e}", exc_info=True)
+        report.add("fail", f"✖ Could not connect to Telegram ({type(e).__name__}: {e}).\n"
+                           "  Check BOT_TOKEN, API_ID and API_HASH, then try again.")
+    else:
+        exit_code = 1 if report.failures else 0
+
+    logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+    raise SystemExit(exit_code)
+
+
 async def start_services():
+    """Start services and guarantee common cleanup on every exit path."""
+    resources = {"app_runner": None, "background_tasks": []}
+    try:
+        return await _start_services(resources)
+    finally:
+        await cleanup_services(resources)
+
+
+async def _start_services(resources: dict):
     start_time = datetime.now()
+
+    if CHECK_ONLY:
+        return await check_configuration_only()
+
     print_banner()
     print("╔════════════════ INITIALIZING BOT SERVICES ════════════════╗")
 
+    report = preflight.Report()
     print("   ▶ Starting Telegram Bot initialization...")
     try:
         try:
@@ -148,11 +298,37 @@ async def start_services():
             bot_info = await StreamBot.get_me()
 
         StreamBot.username = bot_info.username
-        print(f"   ✓ Bot initialized successfully as @{StreamBot.username}")
 
+    except ConfigError:
+        raise
+    except Unauthorized:
+        report.add("fail", preflight.token_rejected_message("BOT_TOKEN"))
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+        raise SystemExit(1)
+    except Exception as e:
+        logger.error(
+            f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
+        )
+        print("   ✖ Telegram rejected the configuration or could not be reached.")
+        print(f"     {type(e).__name__}: {e}")
+        print("     Check BOT_TOKEN, API_ID and API_HASH, then start again.")
+        raise SystemExit(1)
+
+    try:
+        await preflight.verify_configuration(report)
+        await initialize_clients(report)
+    except Exception as e:
+        logger.error(f"   ✖ Failed during configuration checks: {e}", exc_info=True)
+        raise SystemExit(1)
+
+    if report.failures:
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+        raise SystemExit(1)
+
+    try:
         await set_commands()
         print("   ✓ Bot commands set successfully.")
-        schedule_index_ensure()
+        resources["background_tasks"].append(schedule_index_ensure())
 
         restart_message_data = await db.get_restart_message()
         if restart_message_data:
@@ -180,20 +356,11 @@ async def start_services():
                 logger.error(
                     f"Error processing restart message: {e}", exc_info=True
                 )
-        else:
-            pass
 
     except Exception as e:
         logger.error(
             f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
         )
-        raise SystemExit(1)
-
-    print("   ▶ Starting Client initialization...")
-    try:
-        await initialize_clients()
-    except Exception as e:
-        logger.error(f"   ✖ Failed to initialize clients: {e}", exc_info=True)
         raise SystemExit(1)
 
     await import_plugins()
@@ -203,6 +370,7 @@ async def start_services():
         request_executor_task = asyncio.create_task(
             request_executor(), name="request_executor_task"
         )
+        resources["background_tasks"].append(request_executor_task)
         print("   ✓ Request executor service started")
     except Exception as e:
         logger.error(
@@ -212,12 +380,16 @@ async def start_services():
 
     print("   ▶ Starting Web Server initialization...")
     try:
+        app = await web_server()
+        # Set before the runner starts: changing app state afterwards is deprecated.
+        app[CONFIGURATION_STATUS_KEY] = configuration_summary(report)
         # shutdown_timeout belongs on AppRunner, not TCPSite, where the kwarg is deprecated.
         app_runner = web.AppRunner(
-            await web_server(),
+            app,
             handler_cancellation=True,
             shutdown_timeout=25,
         )
+        resources["app_runner"] = app_runner
         await app_runner.setup()
         bind_address = Var.BIND_ADDRESS
         site = web.TCPSite(app_runner, bind_address, Var.PORT)
@@ -226,104 +398,55 @@ async def start_services():
         keepalive_task = asyncio.create_task(
             ping_server(), name="keepalive_task"
         )
+        resources["background_tasks"].append(keepalive_task)
         print("   ✓ Keep-alive service started")
         token_cleanup_task = asyncio.create_task(
             schedule_token_cleanup(), name="token_cleanup_task"
         )
+        resources["background_tasks"].append(token_cleanup_task)
+        channel_watch_task = None
+        if Var.CHANNEL_WATCH_INTERVAL > 0:
+            channel_watch_task = asyncio.create_task(
+                watch_channel(
+                    notify=notify_owner,
+                    probe=partial(preflight.probe_storage_channel,
+                                  StreamBot, db, Var.BIN_CHANNEL),
+                    interval_seconds=Var.CHANNEL_WATCH_INTERVAL,
+                ),
+                name="channel_watch_task",
+            )
+            resources["background_tasks"].append(channel_watch_task)
+
+        url_results = await preflight.check_public_url(Var.URL, StreamBot.username)
+        report.extend(url_results)
+        refresh_configuration_summary(app[CONFIGURATION_STATUS_KEY], report)
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+        for status, text in url_results:
+            if status != preflight.OK:
+                print(f"   {text.splitlines()[0]}")
+            else:
+                print(f"   ✓ {text}")
 
     except Exception as e:
         logger.error(f"   ✖ Failed to start Web Server: {e}", exc_info=True)
-        if 'app_runner' in locals() and app_runner is not None:
-            try:
-                await app_runner.cleanup()
-            except Exception as cleanup_error:
-                logger.error(
-                    f"Error during web server cleanup after startup failure: {cleanup_error}",
-                    exc_info=True
-                )
-        if 'request_executor_task' in locals() and not request_executor_task.done():
-            request_executor_task.cancel()
-            try:
-                await request_executor_task
-            except asyncio.CancelledError:
-                pass
-        try:
-            await StreamBot.stop()
-        except Exception:
-            pass
-        try:
-            await cleanup_clients()
-        except Exception:
-            pass
-        try:
-            await rate_limiter.shutdown()
-        except Exception:
-            pass
-        try:
-            await db.close()
-        except Exception as e:
-            logger.error(f"Error during database cleanup: {e}", exc_info=True)
-        try:
-            await drain_background_touch_tasks()
-        except Exception as e:
-            logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
         raise SystemExit(1)
 
     elapsed_time = (datetime.now() - start_time).total_seconds()
     print("╠═══════════════════════════════════════════════════════════╣")
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")
+    # Shows a wrong FQDN before the first link goes out.
+    print(f"   ▶ Links: {Var.URL}")
     print(f"   ▶ Server: {bind_address}:{Var.PORT}")
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")
     print("╚═══════════════════════════════════════════════════════════╝")
     print("   ▶ Bot is now running! Press CTRL+C to stop.")
 
-    background_tasks = [
-        request_executor_task,
-        keepalive_task,
-        token_cleanup_task
-    ]
-
     try:
         await idle()
     finally:
         print("   ▶ Shutting down services...")
-
-        # Must run before the clients and database close, so in-flight downloads can drain.
-        if 'app_runner' in locals() and app_runner is not None:
-            try:
-                await app_runner.cleanup()
-            except Exception as e:
-                logger.error(f"Error during web server cleanup: {e}")
-
-        for task in background_tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-
-        try:
-            await rate_limiter.shutdown()
-        except Exception as e:
-            logger.error(f"Error during rate limiter cleanup: {e}")
-
-        try:
-            await cleanup_clients()
-        except Exception as e:
-            logger.error(f"Error during client cleanup: {e}")
-
-        try:
-            await drain_background_touch_tasks()
-        except Exception as e:
-            logger.error(f"Error during canonical touch task cleanup: {e}", exc_info=True)
-
-        try:
-            await db.close()
-            print("   ✓ Database connection closed")
-        except Exception:
-            logger.error("Error during database cleanup", exc_info=True)
 
 
 async def schedule_token_cleanup():
@@ -337,10 +460,31 @@ async def schedule_token_cleanup():
         except Exception as e:
             logger.error(f"Token cleanup error: {e}", exc_info=True)
 
+def _cancel_and_drain(task) -> None:
+    """Cancel the main task and let its cleanup finish before loop shutdown."""
+    if task is None or task.done():
+        return
+    task.cancel()
+    while not task.done():
+        try:
+            LOOP.run_until_complete(task)
+        except KeyboardInterrupt:
+            # A second Ctrl+C must not strand the same cleanup half-finished.
+            task.cancel()
+        except (asyncio.CancelledError, SystemExit):
+            break
+        except Exception as e:
+            logger.error(f"Error while draining startup shutdown: {e}", exc_info=True)
+            break
+
+
 if __name__ == '__main__':
+    main_task = None
     try:
-        LOOP.run_until_complete(start_services())
+        main_task = LOOP.create_task(start_services())
+        LOOP.run_until_complete(main_task)
     except KeyboardInterrupt:
+        _cancel_and_drain(main_task)
         print("╔═══════════════════════════════════════════════════════════╗")
         print("║                   Bot stopped by user (CTRL+C)            ║")
         print("╚═══════════════════════════════════════════════════════════╝")
@@ -350,11 +494,12 @@ if __name__ == '__main__':
         logger.error(f"An unexpected error occurred: {e}", exc_info=True)
         raise SystemExit(1)
     finally:
+        _cancel_and_drain(main_task)
         try:
             LOOP.run_until_complete(LOOP.shutdown_asyncgens())
-        except Exception:
+        except (Exception, KeyboardInterrupt):
             pass
         try:
             LOOP.close()
-        except Exception:
+        except (Exception, KeyboardInterrupt):
             pass

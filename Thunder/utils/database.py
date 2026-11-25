@@ -1,23 +1,29 @@
-"""MongoDB access layer for users, tokens, bans and file records.
-
-Owns the collections, their unique indexes, and the duplicate-user recovery
-that runs when an existing database predates the unique index on `id`.
-"""
+"""MongoDB access, indexes, and duplicate-user recovery."""
 
 import asyncio
 import datetime
 from typing import Any, Dict, Optional
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.collection import AsyncCollection
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import ConfigurationError, DuplicateKeyError, InvalidURI
+from Thunder.utils.config_values import ConfigError
 from Thunder.vars import Var
 from Thunder.utils.logger import logger
+
+PREFLIGHT_COLLECTION = "_preflight"
 
 class Database:
     def __init__(self, uri: str, database_name: str, *args, **kwargs):
         kwargs.setdefault("serverSelectionTimeoutMS", 10000)
         kwargs.setdefault("connectTimeoutMS", 20000)
-        self._client = AsyncMongoClient(uri, *args, **kwargs)
+        try:
+            self._client = AsyncMongoClient(uri, *args, **kwargs)
+        except (ConfigurationError, InvalidURI, ValueError) as exc:
+            # Include constructor URI errors in the startup report.
+            raise ConfigError([
+                f"DATABASE_URL is malformed ({type(exc).__name__}); "
+                "use a mongodb:// or mongodb+srv:// connection string"
+            ]) from None
         self.db = self._client[database_name]
         self.col: AsyncCollection = self.db.users
         self.banned_users_col: AsyncCollection = self.db.banned_users
@@ -72,6 +78,19 @@ class Database:
             if raise_on_error:
                 raise
             return False
+
+    async def ping(self) -> dict:
+        return await self._client.admin.command("ping")
+
+    async def verify_writable(self) -> None:
+        """Write to a throwaway collection; read-only logins fail here."""
+        collection = self.db[PREFLIGHT_COLLECTION]
+        marker = {"_id": "preflight"}
+        await collection.replace_one(marker, {"_id": "preflight"}, upsert=True)
+        try:
+            await collection.drop()
+        except Exception as e:
+            logger.debug(f"Could not drop {PREFLIGHT_COLLECTION}: {e}")
 
     def new_user(self, user_id: int) -> dict:
         try:
@@ -363,30 +382,6 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"Error touching canonical file {public_hash}: {e}", exc_info=True)
-            if raise_on_error:
-                raise
-            return False
-
-    async def update_file_id(
-        self,
-        public_hash: str,
-        file_id: str,
-        *,
-        raise_on_error: bool = False
-    ) -> bool:
-        try:
-            await self.files_col.update_one(
-                {"public_hash": public_hash},
-                {
-                    "$set": {
-                        "file_id": file_id,
-                        "last_seen_at": datetime.datetime.now(datetime.timezone.utc)
-                    }
-                }
-            )
-            return True
-        except Exception as e:
-            logger.error(f"Error updating file_id for {public_hash}: {e}", exc_info=True)
             if raise_on_error:
                 raise
             return False

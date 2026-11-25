@@ -1,7 +1,4 @@
-"""Owner commands: users, broadcast, status, stats, restart, logs, shell.
-
-Every handler here is registered with ``filters.user(Var.OWNER_ID)``.
-"""
+"""Owner-only commands."""
 
 import asyncio
 import html
@@ -19,7 +16,7 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from Thunder import StartTime, __version__
-from Thunder.bot import StreamBot, multi_clients, work_loads
+from Thunder.bot import StreamBot, client_bot_ids, client_keys, multi_clients, work_loads
 from Thunder.utils.bot_utils import get_user, reply
 from Thunder.utils.broadcast import broadcast_message
 from Thunder.utils.database import db
@@ -34,7 +31,8 @@ from Thunder.utils.messages import (
     MSG_CHANNEL_BANNED_REASON_SUFFIX, MSG_CHANNEL_NOT_BANNED,
     MSG_CHANNEL_UNBANNED, MSG_DB_ERROR, MSG_DB_STATS,
     MSG_DEAUTHORIZE_FAILED, MSG_DEAUTHORIZE_SUCCESS,
-    MSG_DEAUTHORIZE_USAGE, MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
+    MSG_DEAUTHORIZE_USAGE, MSG_DOCTOR_FAILED, MSG_DOCTOR_RUNNING,
+    MSG_ERROR_GENERIC, MSG_INVALID_BROADCAST_CMD,
     MSG_INVALID_USER_ID, MSG_LOG_FILE_CAPTION, MSG_LOG_FILE_EMPTY,
     MSG_LOG_FILE_MISSING, MSG_NO_AUTH_USERS, MSG_RESTARTING, MSG_SHELL_ERROR,
     MSG_SHELL_EXECUTING, MSG_SHELL_NO_OUTPUT, MSG_SHELL_OUTPUT,
@@ -47,7 +45,6 @@ from Thunder.utils.messages import (
 )
 from Thunder.utils.time_format import get_readable_time
 from Thunder.utils.tokens import authorize, deauthorize, list_allowed
-from Thunder.utils.speedtest import run_speedtest
 from Thunder.vars import Var
 
 owner_filter = filters.private & filters.user(Var.OWNER_ID)
@@ -64,6 +61,98 @@ _MARKDOWN_ESCAPE_TRANS = str.maketrans({
 
 def _escape_markdown(text: str) -> str:
     return text.translate(_MARKDOWN_ESCAPE_TRANS)
+
+
+TELEGRAM_MESSAGE_LIMIT = 4096
+
+
+def _chunk_telegram_text(text: str) -> list[str]:
+    """Split plain text so each escaped ``<pre>`` chunk fits Telegram."""
+    capacity = TELEGRAM_MESSAGE_LIMIT - len("<pre></pre>")
+    escaped_lengths = {"&": 5, "<": 4, ">": 4, '"': 6, "'": 6}
+    chunks = []
+    current = []
+    current_length = 0
+    for char in text:
+        # Telegram's limit is measured in UTF-16 code units, not Python code points.
+        char_length = escaped_lengths.get(char, 2 if ord(char) > 0xFFFF else 1)
+        if current and current_length + char_length > capacity:
+            chunks.append("".join(current))
+            current = []
+            current_length = 0
+        current.append(char)
+        current_length += char_length
+    if current or not chunks:
+        chunks.append("".join(current))
+    return chunks
+
+
+async def _run_secondary_client_checks(report) -> None:
+    """Check independent clients concurrently while preserving report order."""
+    from Thunder.utils import preflight
+
+    entries = [
+        (client_id, client, client_keys.get(client_id, f"Client {client_id}"))
+        for client_id, client in sorted(multi_clients.items())
+        if client_id != 0
+    ]
+
+    async def check(entry):
+        client_id, client, key = entry
+        try:
+            return await preflight.check_secondary_client(
+                client, key, Var.BIN_CHANNEL, client_bot_ids.get(client_id))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Doctor: check for {key} raised: {e}", exc_info=True)
+            return [(preflight.WARN, f"⚠ {key}: could not be checked. See the log.")]
+
+    outcomes = await asyncio.gather(*(check(entry) for entry in entries), return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, asyncio.CancelledError):
+            raise outcome
+        if isinstance(outcome, BaseException):
+            logger.error("A secondary configuration check raised unexpectedly", exc_info=outcome)
+            report.add(preflight.WARN, "⚠ Some secondary clients could not be checked. See the log.")
+        else:
+            report.extend(outcome)
+
+
+async def _deliver_doctor_report(status_msg, message, rendered: str) -> None:
+    """Deliver every chunk, falling back to a reply if the status edit fails."""
+    for index, chunk in enumerate(_chunk_telegram_text(rendered)):
+        text = f"<pre>{html.escape(chunk)}</pre>"
+
+        async def send():
+            if index == 0:
+                await status_msg.edit_text(text, parse_mode=ParseMode.HTML)
+            else:
+                await message.reply_text(text, parse_mode=ParseMode.HTML)
+
+        try:
+            await send()
+        except MessageNotModified:
+            pass
+        except FloodWait as e:
+            logger.debug(f"FloodWait in doctor result delivery: sleep {e.value}s")
+            try:
+                await asyncio.sleep(e.value)
+                await send()
+            except Exception as exc:
+                logger.warning(f"Could not deliver the doctor report: {type(exc).__name__}: {exc}")
+                if index == 0:
+                    try:
+                        await message.reply_text(text, parse_mode=ParseMode.HTML)
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.warning(f"Could not edit the doctor report: {type(exc).__name__}: {exc}")
+            if index == 0:
+                try:
+                    await message.reply_text(text, parse_mode=ParseMode.HTML)
+                except Exception:
+                    pass
 
 
 @StreamBot.on_message(filters.command("users") & owner_filter)
@@ -182,9 +271,7 @@ async def restart_bot(client: Client, message: Message):
     msg = await reply(message, text=MSG_RESTARTING)
     await db.add_restart_message(msg.id, message.chat.id)
 
-    # thunder.sh runs update.py before starting, so prefer it where it can run.
-    # It is a bash script, so Windows restarts the interpreter directly and skips
-    # the update step rather than crashing on a path that does not exist.
+    # Prefer thunder.sh for updates; otherwise restart Python directly.
     bash = shutil.which("bash")
     if os.name != "nt" and bash:
         os.execv(bash, ["bash", "thunder.sh"])
@@ -204,7 +291,7 @@ async def send_logs(client: Client, message: Message):
         try:
             await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
         except FloodWait as e:
-            logger.debug(f"FloodWait in log file sending, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in log file sending: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await message.reply_document(LOG_FILE, caption=MSG_LOG_FILE_CAPTION)
     except Exception as e:
@@ -308,7 +395,7 @@ async def ban_command(client: Client, message: Message):
                 try:
                     await client.leave_chat(target_id)
                 except FloodWait as e:
-                    logger.debug(f"FloodWait in leave_chat, sleeping for {e.value}s")
+                    logger.debug(f"FloodWait in leave_chat: sleep {e.value}s")
                     await asyncio.sleep(e.value)
                     await client.leave_chat(target_id)
             except Exception as e:
@@ -327,7 +414,7 @@ async def ban_command(client: Client, message: Message):
                 try:
                     await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
                 except FloodWait as e:
-                    logger.debug(f"FloodWait in ban notification, sleeping for {e.value}s")
+                    logger.debug(f"FloodWait in ban notification: sleep {e.value}s")
                     await asyncio.sleep(e.value)
                     await client.send_message(target_id, MSG_USER_BANNED_NOTIFICATION)
             except Exception as e:
@@ -360,7 +447,7 @@ async def unban_command(client: Client, message: Message):
                     try:
                         await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
                     except FloodWait as e:
-                        logger.debug(f"FloodWait in unban notification, sleeping for {e.value}s")
+                        logger.debug(f"FloodWait in unban notification: sleep {e.value}s")
                         await asyncio.sleep(e.value)
                         await client.send_message(target_id, MSG_USER_UNBANNED_NOTIFICATION)
                 except Exception as e:
@@ -408,7 +495,7 @@ async def run_shell_command(client: Client, message: Message):
         try:
             await status_msg.delete()
         except FloodWait as e:
-            logger.debug(f"FloodWait in shell status message delete, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in shell status message delete: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.delete()
         
@@ -421,7 +508,7 @@ async def run_shell_command(client: Client, message: Message):
                     caption=MSG_SHELL_OUTPUT.format(
                         command=html.escape(command)))
             except FloodWait as e:
-                logger.debug(f"FloodWait in shell output document, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in shell output document: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await message.reply_document(
                     file,
@@ -437,7 +524,7 @@ async def run_shell_command(client: Client, message: Message):
                     MSG_SHELL_ERROR.format(error=html.escape(str(e))),
                     parse_mode=ParseMode.HTML)
             except FloodWait as e:
-                logger.debug(f"FloodWait in shell error message edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in shell error message edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(
                     MSG_SHELL_ERROR.format(error=html.escape(str(e))),
@@ -451,16 +538,49 @@ async def run_shell_command(client: Client, message: Message):
                 parse_mode=ParseMode.HTML)
 
 
+@StreamBot.on_message(filters.command("doctor") & owner_filter)
+async def doctor_command(client: Client, message: Message):
+    """Re-run startup checks; the boot report may only exist in logs."""
+    status_msg = await reply(message, text=MSG_DOCTOR_RUNNING)
+    from Thunder.utils import preflight
+
+    report = preflight.Report()
+    try:
+        await preflight.verify_configuration(report)
+    except Exception as e:
+        logger.error(f"Doctor: configuration checks raised: {e}", exc_info=True)
+        report.add(preflight.WARN, "⚠ Some configuration checks could not run. See the log.")
+
+    try:
+        report.extend(await preflight.check_public_url(Var.URL, getattr(StreamBot, "username", None)))
+    except Exception as e:
+        logger.error(f"Doctor: public URL check raised: {e}", exc_info=True)
+        report.add(preflight.WARN, "⚠ The public URL could not be checked. See the log.")
+
+    # Drift is caught against the keys recorded at boot, never re-derived here.
+    await _run_secondary_client_checks(report)
+
+    try:
+        rendered = report.render(verbose=True, diagnostic=True)
+    except Exception as e:
+        logger.error(f"Error in doctor_command: {e}", exc_info=True)
+        rendered = MSG_DOCTOR_FAILED
+
+    await _deliver_doctor_report(status_msg, message, rendered)
+
+
 @StreamBot.on_message(filters.command("speedtest") & owner_filter)
 async def speedtest_command(client: Client, message: Message):
     status_msg = await reply(message, text=MSG_SPEEDTEST_INIT)
     try:
+        from Thunder.utils.speedtest import run_speedtest
+
         result_dict, image_url = await run_speedtest()
         if result_dict is None:
             try:
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest error edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in speedtest error edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except MessageNotModified:
@@ -475,7 +595,7 @@ async def speedtest_command(client: Client, message: Message):
             try:
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except FloodWait as e:
-                logger.debug(f"FloodWait in speedtest exception error edit, sleeping for {e.value}s")
+                logger.debug(f"FloodWait in speedtest exception error edit: sleep {e.value}s")
                 await asyncio.sleep(e.value)
                 await status_msg.edit_text(MSG_SPEEDTEST_ERROR)
             except MessageNotModified:
@@ -515,20 +635,20 @@ async def _send_result(message: Message, status_msg: Message, result_text: str, 
         try:
             await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest photo reply, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest photo reply: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await message.reply_photo(image_url, caption=result_text, parse_mode=ParseMode.MARKDOWN)
         try:
             await status_msg.delete()
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest status delete, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest status delete: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.delete()
     else:
         try:
             await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
         except FloodWait as e:
-            logger.debug(f"FloodWait in speedtest result edit, sleeping for {e.value}s")
+            logger.debug(f"FloodWait in speedtest result edit: sleep {e.value}s")
             await asyncio.sleep(e.value)
             await status_msg.edit_text(result_text, parse_mode=ParseMode.MARKDOWN)
         except MessageNotModified:

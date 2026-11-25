@@ -1,8 +1,4 @@
-"""HTTP surface: direct downloads, streaming, and the player page.
-
-Serves /f/<hash>/<name> and the short-hash form, honouring Range requests so
-large files seek, plus the /watch pages that wrap a file in a player.
-"""
+"""HTTP downloads, Range streaming, and player pages."""
 
 import gzip
 import re
@@ -20,10 +16,8 @@ from Thunder.utils.bot_utils import quote_media_name
 from Thunder.utils.canonical_files import (
     PUBLIC_HASH_LENGTH,
     get_file_by_hash,
-    update_cached_file_id,
 )
 from Thunder.utils.custom_dl import ByteStreamer
-from Thunder.utils.file_properties import get_media
 from Thunder.utils.logger import logger
 from Thunder.utils.render_template import render_media_page, render_page
 from Thunder.utils.time_format import get_readable_time
@@ -86,10 +80,15 @@ def validate_public_hash(public_hash: str) -> str:
 
 def select_optimal_client() -> tuple[int, ByteStreamer]:
     if not work_loads:
-        raise web.HTTPInternalServerError(
+        # Transient, like the saturated case below: a 500 implies a broken
+        # origin when the right answer is to retry.
+        raise web.HTTPServiceUnavailable(
             text=("No available clients to handle the request. "
                   "Please try again later."),
-            headers=CORS_HEADERS,
+            headers={
+                **CORS_HEADERS,
+                "Retry-After": str(OVERLOAD_RETRY_AFTER_SECONDS),
+            },
         )
 
     available_clients = [
@@ -174,8 +173,6 @@ async def _serve_media_response(
     file_info: dict,
     streamer: ByteStreamer,
     media_ref: int | str,
-    fallback_message_id: int | None = None,
-    on_fallback_message=None
 ):
     file_size = int(file_info.get('file_size', 0) or 0)
     if file_size == 0:
@@ -215,7 +212,7 @@ async def _serve_media_response(
         headers=headers,
     )
     await response.prepare(request)
-    # Once the response is prepared, an HTTPException wedges the connection rather than aborting it.
+    # After prepare(), an HTTPException wedges the connection instead of aborting it.
     request[HEADERS_SENT_KEY] = True
 
     if request.method == 'HEAD':
@@ -229,8 +226,6 @@ async def _serve_media_response(
         media_ref,
         offset=start,
         limit=content_length,
-        fallback_message_id=fallback_message_id,
-        on_fallback_message=on_fallback_message
     ):
         if bytes_to_skip > 0:
             if len(chunk) <= bytes_to_skip:
@@ -263,8 +258,8 @@ async def _serve_media_response(
     return response
 
 
-# Explicit allowlist: this route must not become a directory walk. Each entry
-# names its own file, so the path is built from this table, not from the request.
+# Explicit allowlist so this route cannot become a directory walk: paths are
+# built from this table, not the request.
 PLAYER_ASSET_DIR = Path(__file__).resolve().parent.parent / "template"
 PLAYER_ASSETS = {
     "player.css": ("player.css", "text/css; charset=utf-8"),
@@ -272,7 +267,6 @@ PLAYER_ASSETS = {
 }
 # Safe to cache hard: the page links these with a ?v= content fingerprint.
 ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
-# name -> (etag, raw bytes, gzipped bytes).
 _asset_cache: dict[str, tuple[str, bytes, bytes]] = {}
 
 
@@ -295,9 +289,7 @@ async def player_asset(request: web.Request):
     if etag in request.headers.get("If-None-Match", ""):
         return web.Response(status=304, headers={"ETag": etag, "Cache-Control": ASSET_CACHE_CONTROL})
 
-    # The ETag covers mtime and size, so a cached body cannot go stale without
-    # the key changing. Both assets are small and bounded, so the read and the
-    # gzip happen once rather than per request.
+    # Cache raw/gzipped bytes per ETag; assets are small and bounded.
     cached = _asset_cache.get(file_name)
     if cached is None or cached[0] != etag:
         try:
@@ -346,27 +338,49 @@ async def status_endpoint(request):
 
     workload_distribution = {str(k): v for k, v in sorted(work_loads.items())}
 
-    return web.json_response(
-        {
-            "server": {
-                "status": "operational",
-                "version": __version__,
-                "uptime": get_readable_time(uptime)
-            },
-            "telegram_bot": {
-                "username": (
-                    f"@{StreamBot.username}"
-                    if getattr(StreamBot, "username", None) else None
-                ),
-                "active_clients": len(multi_clients)
-            },
-            "resources": {
-                "total_workload": total_load,
-                "workload_distribution": workload_distribution
-            }
+    # Cached counts only: frequent public probes must not run checks or expose IDs/hosts.
+    configuration = request.app.get(CONFIGURATION_STATUS_KEY)
+
+    payload = {
+        "server": {
+            "status": "operational",
+            "version": __version__,
+            "uptime": get_readable_time(uptime)
         },
-        headers={"Access-Control-Allow-Origin": "*"}
-    )
+        "telegram_bot": {
+            "username": (
+                f"@{StreamBot.username}"
+                if getattr(StreamBot, "username", None) else None
+            ),
+            "active_clients": len(multi_clients)
+        },
+        "resources": {
+            "total_workload": total_load,
+            "workload_distribution": workload_distribution
+        }
+    }
+    if configuration is not None:
+        payload["configuration"] = configuration
+
+    return web.json_response(payload, headers={"Access-Control-Allow-Origin": "*"})
+
+
+CONFIGURATION_STATUS_KEY = web.AppKey("configuration_status", dict)
+
+
+def configuration_summary(report) -> dict:
+    return {
+        "startup": bool(report is not None and not report.failures),
+        "passed": len(report.passed) if report else 0,
+        "warnings": len(report.warnings) if report else 0,
+        "failures": len(report.failures) if report else 0,
+    }
+
+
+def refresh_configuration_summary(target: dict, report) -> None:
+    """Mutate in place; replacing app state after startup is deprecated."""
+    target.clear()
+    target.update(configuration_summary(report))
 
 
 @routes.options("/status")
@@ -415,12 +429,12 @@ async def canonical_media_preview(request: web.Request):
         return response
     except (InvalidHash, FileNotFound) as e:
         logger.debug(f"Canonical preview error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
+        raise web.HTTPNotFound(text="Resource not found", headers=CORS_HEADERS) from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Canonical preview error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
-            text=f"Server error occurred: {error_id}") from e
+            text=f"Server error occurred: {error_id}", headers=CORS_HEADERS) from e
 
 
 @routes.get(r"/watch/{path:.+}", allow_head=True)
@@ -447,12 +461,12 @@ async def media_preview(request: web.Request):
         logger.debug(
             f"Client error in preview: {type(e).__name__} - {e}",
             exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
+        raise web.HTTPNotFound(text="Resource not found", headers=CORS_HEADERS) from e
     except Exception as e:
         error_id = secrets.token_hex(6)
         logger.error(f"Preview error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
-            text=f"Server error occurred: {error_id}") from e
+            text=f"Server error occurred: {error_id}", headers=CORS_HEADERS) from e
 
 
 @routes.get(r"/f/{secure_hash}/{name:.+}", allow_head=True)
@@ -468,29 +482,12 @@ async def canonical_media_delivery(request: web.Request):
         try:
             _resolve_unique_id(file_record)
             media_ref = int(file_record["canonical_message_id"])
-            fallback_message_id = int(file_record["canonical_message_id"])
-
-            async def persist_refreshed_file_id(message):
-                if client_id != 0:
-                    return
-                media = get_media(message)
-                new_file_id = getattr(media, "file_id", None) if media else None
-                if new_file_id and new_file_id != file_record.get("file_id"):
-                    try:
-                        await update_cached_file_id(file_record, new_file_id)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to refresh cached file_id for canonical file {secure_hash}: {e}",
-                            exc_info=True
-                        )
 
             response = await _serve_media_response(
                 request,
                 file_info=file_record,
                 streamer=streamer,
                 media_ref=media_ref,
-                fallback_message_id=fallback_message_id,
-                on_fallback_message=persist_refreshed_file_id
             )
             return response
         except (FileNotFound, InvalidHash):
@@ -517,7 +514,7 @@ async def canonical_media_delivery(request: web.Request):
                 f"sent: {e}")
             raise
         logger.debug(f"Canonical client error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
+        raise web.HTTPNotFound(text="Resource not found", headers=CORS_HEADERS) from e
     except web.HTTPException as e:
         if request.get(HEADERS_SENT_KEY):
             raise
@@ -529,7 +526,8 @@ async def canonical_media_delivery(request: web.Request):
         error_id = secrets.token_hex(6)
         logger.error(f"Canonical server error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}") from e
+            text=f"An unexpected server error occurred: {error_id}",
+            headers=CORS_HEADERS) from e
 
 
 @routes.get(r"/{path:.+}", allow_head=True)
@@ -580,7 +578,7 @@ async def media_delivery(request: web.Request):
                 f"Stream raised {type(e).__name__} after headers sent: {e}")
             raise
         logger.debug(f"Client error: {type(e).__name__} - {e}", exc_info=True)
-        raise web.HTTPNotFound(text="Resource not found") from e
+        raise web.HTTPNotFound(text="Resource not found", headers=CORS_HEADERS) from e
     except web.HTTPException as e:
         if request.get(HEADERS_SENT_KEY):
             raise
@@ -592,4 +590,5 @@ async def media_delivery(request: web.Request):
         error_id = secrets.token_hex(6)
         logger.error(f"Server error {error_id}: {e}", exc_info=True)
         raise web.HTTPInternalServerError(
-            text=f"An unexpected server error occurred: {error_id}") from e
+            text=f"An unexpected server error occurred: {error_id}",
+            headers=CORS_HEADERS) from e
