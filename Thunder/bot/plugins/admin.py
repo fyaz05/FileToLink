@@ -119,6 +119,16 @@ async def _run_secondary_client_checks(report) -> None:
             report.extend(outcome)
 
 
+async def _send_with_flood_retry(operation) -> None:
+    while True:
+        try:
+            await operation()
+            return
+        except FloodWait as e:
+            logger.debug(f"FloodWait in doctor result delivery: sleep {e.value}s")
+            await asyncio.sleep(e.value)
+
+
 async def _deliver_doctor_report(status_msg, message, rendered: str) -> None:
     """Deliver every chunk, falling back to a reply if the status edit fails."""
     for index, chunk in enumerate(_chunk_telegram_text(rendered)):
@@ -131,26 +141,16 @@ async def _deliver_doctor_report(status_msg, message, rendered: str) -> None:
                 await message.reply_text(text, parse_mode=ParseMode.HTML)
 
         try:
-            await send()
+            await _send_with_flood_retry(send)
         except MessageNotModified:
             pass
-        except FloodWait as e:
-            logger.debug(f"FloodWait in doctor result delivery: sleep {e.value}s")
-            try:
-                await asyncio.sleep(e.value)
-                await send()
-            except Exception as exc:
-                logger.warning(f"Could not deliver the doctor report: {type(exc).__name__}: {exc}")
-                if index == 0:
-                    try:
-                        await message.reply_text(text, parse_mode=ParseMode.HTML)
-                    except Exception:
-                        pass
         except Exception as exc:
-            logger.warning(f"Could not edit the doctor report: {type(exc).__name__}: {exc}")
+            logger.warning(f"Could not deliver the doctor report: {type(exc).__name__}: {exc}")
             if index == 0:
                 try:
-                    await message.reply_text(text, parse_mode=ParseMode.HTML)
+                    await _send_with_flood_retry(
+                        lambda: message.reply_text(text, parse_mode=ParseMode.HTML)
+                    )
                 except Exception:
                     pass
 
@@ -545,20 +545,37 @@ async def doctor_command(client: Client, message: Message):
     from Thunder.utils import preflight
 
     report = preflight.Report()
-    try:
-        await preflight.verify_configuration(report)
-    except Exception as e:
-        logger.error(f"Doctor: configuration checks raised: {e}", exc_info=True)
+    configuration_report = preflight.Report()
+    secondary_report = preflight.Report()
+    outcomes = await asyncio.gather(
+        preflight.verify_configuration(configuration_report),
+        preflight.check_public_url(Var.URL, getattr(StreamBot, "username", None)),
+        # Drift is caught against the keys recorded at boot, never re-derived here.
+        _run_secondary_client_checks(secondary_report),
+        return_exceptions=True,
+    )
+
+    report.extend(configuration_report.results)
+    if isinstance(outcomes[0], BaseException):
+        if isinstance(outcomes[0], asyncio.CancelledError):
+            raise outcomes[0]
+        logger.error(f"Doctor: configuration checks raised: {outcomes[0]}", exc_info=outcomes[0])
         report.add(preflight.WARN, "⚠ Some configuration checks could not run. See the log.")
 
-    try:
-        report.extend(await preflight.check_public_url(Var.URL, getattr(StreamBot, "username", None)))
-    except Exception as e:
-        logger.error(f"Doctor: public URL check raised: {e}", exc_info=True)
+    if isinstance(outcomes[1], BaseException):
+        if isinstance(outcomes[1], asyncio.CancelledError):
+            raise outcomes[1]
+        logger.error(f"Doctor: public URL check raised: {outcomes[1]}", exc_info=outcomes[1])
         report.add(preflight.WARN, "⚠ The public URL could not be checked. See the log.")
+    else:
+        report.extend(outcomes[1])
 
-    # Drift is caught against the keys recorded at boot, never re-derived here.
-    await _run_secondary_client_checks(report)
+    report.extend(secondary_report.results)
+    if isinstance(outcomes[2], BaseException):
+        if isinstance(outcomes[2], asyncio.CancelledError):
+            raise outcomes[2]
+        logger.error(f"Doctor: secondary checks raised: {outcomes[2]}", exc_info=outcomes[2])
+        report.add(preflight.WARN, "⚠ Some secondary clients could not be checked. See the log.")
 
     try:
         rendered = report.render(verbose=True, diagnostic=True)

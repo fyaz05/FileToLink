@@ -41,7 +41,11 @@ def int_env(name: str, default: int, *, required: bool = False,
     if not re.fullmatch(r"-?[0-9]+", text):
         PROBLEMS.append(f"{name} must be a whole number, not {text!r}")
         return default
-    value = int(text)
+    try:
+        value = int(text)
+    except ValueError:
+        PROBLEMS.append(f"{name} is too large to parse as a whole number")
+        return default
     limit = None
     if minimum is not None and value < minimum:
         limit = f"at least {minimum}"

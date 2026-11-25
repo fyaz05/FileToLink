@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from Thunder.bot import multi_clients
+from Thunder.bot import cleanup_registry, multi_clients
 from Thunder.bot.clients import cleanup_clients
 
 
@@ -24,8 +24,10 @@ class FakeClient:
 @pytest.fixture(autouse=True)
 def clear_clients():
     multi_clients.clear()
+    cleanup_registry.clear()
     yield
     multi_clients.clear()
+    cleanup_registry.clear()
 
 
 async def test_skips_a_client_that_never_started():
@@ -112,3 +114,23 @@ async def test_a_failing_stop_does_not_prevent_the_rest():
     await cleanup_clients()
 
     assert good.stop_calls == 1, "a failure must not abort the loop"
+
+
+async def test_a_client_that_stays_active_is_reported(monkeypatch):
+    class Stuck(FakeClient):
+        async def stop(self, block=True):
+            self.stop_calls += 1
+            return self
+
+    client = Stuck(initialized=True, connected=True)
+    multi_clients[4] = client
+    errors = []
+    monkeypatch.setattr(
+        "Thunder.bot.clients.logger.error",
+        lambda message, *args, **kwargs: errors.append(message),
+    )
+
+    await cleanup_clients()
+
+    assert client.stop_calls == 2
+    assert any("Client 4" in message and "remained active" in message for message in errors)

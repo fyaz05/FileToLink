@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest  # noqa: E402
 
-from Thunder.bot import multi_clients, work_loads  # noqa: E402
+from Thunder.bot import cleanup_registry, multi_clients, work_loads  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,9 @@ def clean_workloads():
     """Every test starts and ends with an empty workload table."""
     work_loads.clear()
     multi_clients.clear()
+    cleanup_registry.clear()
     work_loads[0] = 0
     yield
     work_loads.clear()
     multi_clients.clear()
+    cleanup_registry.clear()

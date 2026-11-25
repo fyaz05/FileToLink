@@ -99,6 +99,38 @@ def test_failing_to_build_a_session_does_not_end_the_loop(monkeypatch):
     assert good.calls >= 1
 
 
+def test_constructor_failures_are_paced_by_the_interval(monkeypatch):
+    attempts = {"n": 0}
+    sleeps = {"n": 0}
+    good = FakeSession([])
+
+    def flaky(*args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] <= 3:
+            raise RuntimeError("cannot create session")
+        return good
+
+    async def fake_sleep(_seconds):
+        sleeps["n"] += 1
+        if sleeps["n"] > 3:
+            raise asyncio.CancelledError
+        await _REAL_SLEEP(0)
+
+    monkeypatch.setattr(keepalive.aiohttp, "ClientSession", flaky)
+    monkeypatch.setattr(keepalive.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(keepalive.Var, "PING_INTERVAL", 1, raising=False)
+    monkeypatch.setattr(keepalive.Var, "URL", "https://example.com/", raising=False)
+    monkeypatch.setattr(keepalive.logger, "warning", lambda *args, **kwargs: None)
+
+    async def main():
+        with pytest.raises(asyncio.CancelledError):
+            await keepalive.ping_server()
+
+    asyncio.run(main())
+    assert attempts["n"] == 3
+    assert sleeps["n"] == 4
+
+
 def test_cancellation_is_not_swallowed(monkeypatch):
     monkeypatch.setattr(keepalive.aiohttp, "ClientSession", lambda *a, **k: FakeSession([]))
     monkeypatch.setattr(keepalive.Var, "PING_INTERVAL", 0, raising=False)

@@ -43,6 +43,7 @@ async def test_losing_access_is_reported_once():
 async def test_a_persistent_problem_is_reported_only_once():
     watcher = ChannelWatch(Probe(["still not a member"]))
     first = await watcher.check_once()
+    watcher.message_delivered()
     second = await watcher.check_once()
     third = await watcher.check_once()
     assert first is not None
@@ -52,6 +53,7 @@ async def test_a_persistent_problem_is_reported_only_once():
 async def test_recovery_is_reported():
     watcher = ChannelWatch(Probe(["not a member", None]))
     await watcher.check_once()
+    watcher.message_delivered()
     message = await watcher.check_once()
     assert message is not None
     assert "restored" in message.lower()
@@ -77,6 +79,7 @@ async def test_an_undelivered_recovery_message_is_retried():
 async def test_a_second_recovery_does_not_alert_again():
     watcher = ChannelWatch(Probe(["broken", None, None, None]))
     await watcher.check_once()
+    watcher.message_delivered()
     message = await watcher.check_once()
     assert message is not None
     assert "restored" in message.lower()
@@ -101,6 +104,7 @@ async def test_a_failing_probe_does_not_mask_an_ongoing_outage():
 async def test_a_blip_then_a_real_recovery_still_reports():
     watcher = ChannelWatch(Probe(["broken", OSError("blip"), None]))
     await watcher.check_once()
+    watcher.message_delivered()
     assert await watcher.check_once() is None
     message = await watcher.check_once()
     assert message is not None and "restored" in message.lower()
@@ -201,6 +205,23 @@ async def test_recovery_is_not_sent_while_the_break_message_is_undelivered():
     watcher = ChannelWatch(Probe(["broken", None]))
     await watcher.check_once()
     watcher.message_undelivered()
+    assert await watcher.check_once() is None
+    assert watcher.state == HEALTHY
+
+
+async def test_a_pending_recovery_survives_a_renewed_outage():
+    watcher = ChannelWatch(Probe(["broken", None, "broken", None, None]))
+    outage = await watcher.check_once()
+    watcher.message_delivered()
+    recovery = await watcher.check_once()
+    watcher.message_undelivered()
+
+    assert outage is not None
+    assert recovery is not None
+    assert await watcher.check_once() is None
+    retry = await watcher.check_once()
+    assert retry == recovery
+    watcher.message_delivered()
     assert await watcher.check_once() is None
     assert watcher.state == HEALTHY
 

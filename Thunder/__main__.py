@@ -59,6 +59,8 @@ except ConfigError as config_error:
 
 PLUGIN_PATH = "Thunder/bot/plugins/*.py"
 VERSION = __version__
+REQUEST_DRAIN_SECONDS = 25
+REQUEST_CANCEL_SECONDS = 5
 
 
 def print_banner():
@@ -145,45 +147,92 @@ async def import_plugins():
 
 
 async def notify_owner(message: str) -> None:
-    """Send the owner a message; failures raise so the watcher can retry.
-
-    Requires ``initialize_clients`` first, which ``start_services`` does before
-    creating the watcher, so ``multi_clients`` and ``work_loads`` are populated.
-    """
+    """Send through the primary bot, which is guaranteed to know the owner."""
     if not Var.OWNER_ID:
         return
-    from Thunder.bot import multi_clients, work_loads
-    client = multi_clients[min(work_loads, key=work_loads.get)]
-    await client.send_message(Var.OWNER_ID, message)
+    while True:
+        try:
+            await StreamBot.send_message(Var.OWNER_ID, message)
+            return
+        except FloodWait as e:
+            logger.debug(f"FloodWait in owner alert, sleeping for {e.value}s")
+            await asyncio.sleep(e.value)
 
 
 async def _cleanup_services(resources: dict) -> None:
     """Release every resource created during startup, on every exit path."""
+    interrupted = False
+
+    async def wait_for_task(task, seconds: float) -> bool:
+        nonlocal interrupted
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            try:
+                done, _pending = await asyncio.wait({task}, timeout=remaining)
+                return task in done
+            except KeyboardInterrupt:
+                interrupted = True
+                task.cancel()
+
     async def step(name: str, operation):
         # One failed or cancelled cleanup step must not skip the remaining ones.
+        nonlocal interrupted
         try:
             await operation()
         except asyncio.CancelledError:
             logger.warning(f"{name} was cancelled during cleanup; continuing")
-        except (Exception, KeyboardInterrupt) as e:
+        except KeyboardInterrupt as e:
+            interrupted = True
+            logger.error(f"Error during {name}: {e}", exc_info=True)
+        except Exception as e:
             logger.error(f"Error during {name}: {e}", exc_info=True)
 
     app_runner = resources.get("app_runner")
     if app_runner is not None:
         await step("web server cleanup", app_runner.cleanup)
 
-    for task in resources.get("background_tasks", []):
-        if task.done():
+    background_tasks = resources.get("background_tasks", [])
+    await step("rate limiter shutdown", rate_limiter.shutdown)
+    for task in background_tasks:
+        if task.get_name() != "request_executor_task" or task.done():
             continue
-        task.cancel()
+        if not await wait_for_task(task, REQUEST_DRAIN_SECONDS):
+            logger.warning("Request executor did not drain within %s seconds", REQUEST_DRAIN_SECONDS)
+            task.cancel()
+            if not await wait_for_task(task, REQUEST_CANCEL_SECONDS):
+                logger.error("Request executor did not stop after cancellation; continuing cleanup")
+                continue
         try:
-            await task
+            task.result()
         except asyncio.CancelledError:
             pass
+        except KeyboardInterrupt as e:
+            interrupted = True
+            logger.error(f"Request executor was interrupted during shutdown: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Request executor failed during shutdown: {e}", exc_info=True)
+
+    for task in background_tasks:
+        if task.done() or task.get_name() == "request_executor_task":
+            continue
+        task.cancel()
+        if not await wait_for_task(task, REQUEST_CANCEL_SECONDS):
+            logger.error(f"Background task {task.get_name()} did not stop after cancellation")
+            continue
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except KeyboardInterrupt as e:
+            interrupted = True
+            logger.error(f"Background task {task.get_name()} was interrupted: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Error stopping background task {task.get_name()}: {e}", exc_info=True)
 
-    await step("rate limiter cleanup", rate_limiter.shutdown)
     await step("client cleanup", cleanup_clients)
 
     # Early failures happen before the primary is added to multi_clients.
@@ -219,24 +268,51 @@ async def _cleanup_services(resources: dict) -> None:
 
     await step("database cleanup", close_database)
 
+    if interrupted:
+        raise KeyboardInterrupt
+
 
 async def cleanup_services(resources: dict) -> None:
-    """Finish safe teardown even if the caller is cancelled again."""
+    """Finish safe teardown even if the caller is cancelled or interrupted again."""
     cleanup_task = asyncio.create_task(_cleanup_services(resources), name="service_cleanup_task")
     cancelled = False
+    interrupted = False
     while not cleanup_task.done():
         try:
             await asyncio.shield(cleanup_task)
         except asyncio.CancelledError:
             cancelled = True
+        except KeyboardInterrupt:
+            interrupted = True
     try:
         cleanup_task.result()
     except BaseException:
         if cancelled:
             raise asyncio.CancelledError from None
         raise
+    if interrupted:
+        raise KeyboardInterrupt
     if cancelled:
         raise asyncio.CancelledError
+
+
+async def _connect_primary():
+    """Connect the primary client, retrying one Telegram rate limit per call."""
+    try:
+        await StreamBot.start()
+    except FloodWait as e:
+        logger.debug(f"FloodWait in bot start, sleeping for {e.value}s")
+        await asyncio.sleep(e.value)
+        await StreamBot.start()
+
+    try:
+        bot_info = await StreamBot.get_me()
+    except FloodWait as e:
+        logger.debug(f"FloodWait in get_me, sleeping for {e.value}s")
+        await asyncio.sleep(e.value)
+        bot_info = await StreamBot.get_me()
+    StreamBot.username = bot_info.username
+    return bot_info
 
 
 async def check_configuration_only():
@@ -245,17 +321,26 @@ async def check_configuration_only():
     exit_code = 1
 
     try:
-        await StreamBot.start()
-        StreamBot.username = (await StreamBot.get_me()).username
-        await preflight.verify_configuration(report)
-        await initialize_clients(report)
+        await _connect_primary()
     except Unauthorized:
         report.add("fail", preflight.token_rejected_message("BOT_TOKEN"))
     except Exception as e:
-        logger.error(f"Configuration check aborted: {e}", exc_info=True)
+        logger.error(f"Configuration check could not connect to Telegram: {e}", exc_info=True)
         report.add("fail", f"✖ Could not connect to Telegram ({type(e).__name__}: {e}).\n"
                            "  Check BOT_TOKEN, API_ID and API_HASH, then try again.")
     else:
+        try:
+            await preflight.verify_configuration(report)
+        except Exception as e:
+            logger.error(f"Configuration preflight aborted: {e}", exc_info=True)
+            report.add("fail", "✖ Configuration preflight could not finish; see the log.")
+        else:
+            if not report.failures:
+                try:
+                    await initialize_clients(report)
+                except Exception as e:
+                    logger.error(f"Secondary client initialization aborted: {e}", exc_info=True)
+                    report.add("fail", "✖ Secondary client initialization could not finish; see the log.")
         exit_code = 1 if report.failures else 0
 
     logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
@@ -283,22 +368,7 @@ async def _start_services(resources: dict):
     report = preflight.Report()
     print("   ▶ Starting Telegram Bot initialization...")
     try:
-        try:
-            await StreamBot.start()
-        except FloodWait as e:
-            logger.debug(f"FloodWait in bot start, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            await StreamBot.start()
-
-        try:
-            bot_info = await StreamBot.get_me()
-        except FloodWait as e:
-            logger.debug(f"FloodWait in get_me, sleeping for {e.value}s")
-            await asyncio.sleep(e.value)
-            bot_info = await StreamBot.get_me()
-
-        StreamBot.username = bot_info.username
-
+        bot_info = await _connect_primary()
     except ConfigError:
         raise
     except Unauthorized:
@@ -316,9 +386,22 @@ async def _start_services(resources: dict):
 
     try:
         await preflight.verify_configuration(report)
+    except Exception as e:
+        logger.error(f"   ✖ Configuration preflight failed: {e}", exc_info=True)
+        report.add("fail", "✖ Configuration preflight could not finish; see the log.")
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+        raise SystemExit(1)
+
+    if report.failures:
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
+        raise SystemExit(1)
+
+    try:
         await initialize_clients(report)
     except Exception as e:
-        logger.error(f"   ✖ Failed during configuration checks: {e}", exc_info=True)
+        logger.error(f"   ✖ Secondary client initialization failed: {e}", exc_info=True)
+        report.add("fail", "✖ Secondary client initialization could not finish; see the log.")
+        logger.info(report.render(verbose=VERBOSE, corrections=CORRECTIONS))
         raise SystemExit(1)
 
     if report.failures:

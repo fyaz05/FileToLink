@@ -73,6 +73,7 @@ def install(monkeypatch, client_cls, tokens):
     report = preflight.Report()
     monkeypatch.setattr(clients_module, "Client", client_cls)
     monkeypatch.setattr(clients_module, "TokenParser", lambda: FakeParser(tokens))
+    monkeypatch.setattr(clients_module.Var, "MULTI_CLIENT", False)
     monkeypatch.setattr(asyncio, "sleep", instant_sleep)
     return report
 
@@ -99,6 +100,7 @@ async def test_a_started_secondary_is_kept(monkeypatch):
     await clients_module.initialize_clients(report)
     assert not report.failures
     assert clients_module.multi_clients.get(1) is not None
+    assert clients_module.Var.MULTI_CLIENT is True
 
 
 async def test_a_cancelled_secondary_check_remains_visible_to_common_cleanup(monkeypatch):
@@ -123,15 +125,33 @@ async def test_a_cancelled_secondary_check_remains_visible_to_common_cleanup(mon
     monkeypatch.setattr(clients_module, "check_secondary_client", blocking_check)
     install(monkeypatch, BlockingHealthyClient, {1: ("MULTI_TOKEN1", "123456:ok")})
     task = asyncio.create_task(clients_module.initialize_clients(preflight.Report()))
-    await check_started.wait()
+    check_task = asyncio.create_task(check_started.wait())
+    done, _pending = await asyncio.wait(
+        {task, check_task}, timeout=1, return_when=asyncio.FIRST_COMPLETED
+    )
+    if task in done:
+        check_task.cancel()
+        await asyncio.gather(check_task, return_exceptions=True)
+        await task
+        raise AssertionError("initialize_clients finished before the secondary check started")
+    if check_task not in done:
+        task.cancel()
+        check_task.cancel()
+        await asyncio.gather(task, check_task, return_exceptions=True)
+        raise AssertionError("secondary check did not start within one second")
+    check_task.cancel()
+    await asyncio.gather(check_task, return_exceptions=True)
+
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    assert clients_module.multi_clients.get(1) is BlockingHealthyClient.instances[0]
+    client = BlockingHealthyClient.instances[0]
+    assert clients_module.cleanup_registry.get(1) is client
+    assert 1 not in clients_module.multi_clients
     await clients_module.cleanup_clients()
-    assert BlockingHealthyClient.instances[0].stopped
-    assert 1 not in clients_module.multi_clients or clients_module.multi_clients[1].is_initialized is False
+    assert client.stopped
+    assert 1 not in clients_module.cleanup_registry
 
 
 async def test_a_failed_start_that_cannot_stop_aborts_and_remains_cleanable(monkeypatch):
@@ -158,10 +178,12 @@ async def test_a_failed_start_that_cannot_stop_aborts_and_remains_cleanable(monk
         await clients_module.initialize_clients(preflight.Report())
 
     client = FailedStartStopClient.instances[0]
-    assert clients_module.multi_clients.get(1) is client
+    assert 1 not in clients_module.multi_clients
+    assert clients_module.cleanup_registry.get(1) is client
     await clients_module.cleanup_clients()
     assert client.stop_calls == 2
     assert not client.is_connected
+    assert 1 not in clients_module.cleanup_registry
 
 
 async def test_a_cancelled_failed_client_stop_keeps_it_available_for_cleanup(monkeypatch):
@@ -190,7 +212,75 @@ async def test_a_cancelled_failed_client_stop_keeps_it_available_for_cleanup(mon
         await clients_module.initialize_clients(preflight.Report())
 
     client = CancelStopClient.instances[0]
-    assert clients_module.multi_clients.get(1) is client
+    assert 1 not in clients_module.multi_clients
+    assert clients_module.cleanup_registry.get(1) is client
     await clients_module.cleanup_clients()
     assert client.stop_calls == 2
     assert not client.is_initialized and not client.is_connected
+    assert 1 not in clients_module.cleanup_registry
+
+
+async def test_a_rejected_client_is_removed_from_routing_when_stop_raises(monkeypatch):
+    class Rejected:
+        is_initialized = True
+        is_connected = True
+        instances = []
+
+        def __init__(self, **kwargs):
+            self.instances.append(self)
+
+        async def start(self):
+            return None
+
+        async def stop(self, block=True):
+            raise RuntimeError("stop failed")
+
+    async def failed_check(*args, **kwargs):
+        return [(preflight.FAIL, "unusable")]
+
+    monkeypatch.setattr(clients_module, "check_secondary_client", failed_check)
+    install(monkeypatch, Rejected, {1: ("MULTI_TOKEN1", "123456:ok")})
+    with pytest.raises(RuntimeError, match="remained connected"):
+        await clients_module.initialize_clients(preflight.Report())
+
+    client = Rejected.instances[0]
+    assert 1 not in clients_module.multi_clients
+    assert 1 not in clients_module.work_loads
+    assert clients_module.cleanup_registry.get(1) is client
+    assert 1 not in clients_module.client_keys
+    assert 1 not in clients_module.client_bot_ids
+
+
+async def test_no_secondary_tokens_reset_the_multi_client_flag(monkeypatch):
+    install(monkeypatch, HealthyClient, {})
+    clients_module.Var.MULTI_CLIENT = True
+    await clients_module.initialize_clients(preflight.Report())
+    assert clients_module.Var.MULTI_CLIENT is False
+
+
+async def test_keyboard_interrupt_during_rejected_client_stop_keeps_cleanup_visibility(monkeypatch):
+    class Interrupted:
+        is_initialized = True
+        is_connected = True
+        instances = []
+
+        def __init__(self, **kwargs):
+            self.instances.append(self)
+
+        async def start(self):
+            return None
+
+        async def stop(self, block=True):
+            raise KeyboardInterrupt
+
+    async def failed_check(*args, **kwargs):
+        return [(preflight.FAIL, "unusable")]
+
+    monkeypatch.setattr(clients_module, "check_secondary_client", failed_check)
+    install(monkeypatch, Interrupted, {1: ("MULTI_TOKEN1", "123456:ok")})
+    with pytest.raises(KeyboardInterrupt):
+        await clients_module.initialize_clients(preflight.Report())
+
+    client = Interrupted.instances[0]
+    assert 1 not in clients_module.multi_clients
+    assert clients_module.cleanup_registry.get(1) is client

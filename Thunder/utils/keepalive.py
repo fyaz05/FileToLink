@@ -12,11 +12,11 @@ async def ping_server():
     try:
         while True:
             try:
+                await asyncio.sleep(Var.PING_INTERVAL)
                 if session is None:
                     session = aiohttp.ClientSession(
                         timeout=aiohttp.ClientTimeout(total=10)
                     )
-                await asyncio.sleep(Var.PING_INTERVAL)
                 async with session.get(Var.URL) as resp:
                     if resp.status != 200:
                         logger.warning(f"Ping to {Var.URL} returned status {resp.status}.")

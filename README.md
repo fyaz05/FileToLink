@@ -318,19 +318,30 @@ docker run -d --name thunder -p 8080:8080 \
 
 (PowerShell: `-v "${PWD}\config.env:/app/config.env:ro"`.)
 
-The container runs as uid `10001`, so `config.env` must be world-readable. A
-normal umask (`cp` gives `644`) already is; if yours is `600`, widen permissions
-without changing ownership:
+The container runs as uid `10001`, so `config.env` must be readable by that UID
+without exposing the bot token and database credentials to every local account.
+On a Linux host, prefer an ACL:
 
 ```bash
-chmod 644 config.env
+chmod 600 config.env
+sudo setfacl -m u:10001:r config.env
 ```
 
-`--stop-timeout 30` is optional: it lets the 25s shutdown drain finish
-(`docker stop` defaults to 10s):
+If ACLs are unavailable, set the file's group to the container's GID and use
+mode `640`:
 
 ```bash
-docker run -d --stop-timeout 30 --name thunder -p 8080:8080 \
+sudo chgrp 10001 config.env
+chmod 640 config.env
+```
+
+Avoid `chmod 644` on shared hosts.
+
+`--stop-timeout 60` is optional: it lets the web server and in-flight request
+executor each drain for up to 25 seconds (`docker stop` defaults to 10s):
+
+```bash
+docker run -d --stop-timeout 60 --name thunder -p 8080:8080 \
   -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
 
@@ -345,13 +356,14 @@ env files, so `config.env` is not baked in and must be supplied at runtime.
 with `python-dotenv`:
 
 ```bash
-python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > /tmp/thunder-docker.env
+(umask 077; python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > /tmp/thunder-docker.env)
 docker run -d --name thunder -p 8080:8080 --env-file /tmp/thunder-docker.env thunder
+rm -f /tmp/thunder-docker.env
 ```
 
 Needs `python-dotenv` locally (`pip install python-dotenv`); mounting `config.env`
 avoids this. Keep the generated file outside the repo so it cannot enter the build
-context.
+context, and remove it after Docker has read it.
 
 </details>
 

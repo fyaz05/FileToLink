@@ -4,10 +4,11 @@ The limiter is disabled by default in production, so these tests drive it
 directly with an enabled instance rather than through the bot.
 """
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
-from Thunder.utils.rate_limiter import QueueFullError, RateLimiter
+from Thunder.utils.rate_limiter import QueueFullError, RateLimiter, handle_rate_limited_request
 from Thunder.vars import Var
 
 
@@ -180,8 +181,112 @@ class TestQueueing:
         assert len(limiter.priority_queue) == 0
         assert limiter.user_queue_counts == {}
 
+    async def test_shutdown_during_priority_lookup_does_not_enqueue(self, limiter, monkeypatch):
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def priority(user_id):
+            started.set()
+            await release.wait()
+            return "regular"
+
+        async def work():
+            pass
+
+        monkeypatch.setattr(limiter, "get_user_priority", priority)
+        task = asyncio.create_task(limiter.add_to_queue(work, 999))
+        await started.wait()
+        await limiter.shutdown()
+        release.set()
+        with pytest.raises(RuntimeError, match="shut down"):
+            await task
+        assert not limiter.request_queue
+        assert not limiter.priority_queue
+        assert limiter.user_queue_counts == {}
+
+    async def test_direct_handlers_do_not_run_after_shutdown(self, limiter, monkeypatch):
+        import Thunder.utils.rate_limiter as module
+
+        called = []
+
+        async def work(*args, **kwargs):
+            called.append(True)
+
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=Var.OWNER_ID),
+            document=None,
+        )
+        monkeypatch.setattr(module, "rate_limiter", limiter)
+        await limiter.shutdown()
+        await handle_rate_limited_request(object(), message, work)
+        assert called == []
+
+    async def test_shutdown_during_queue_notification_does_not_send_queue_full(
+        self, limiter, monkeypatch
+    ):
+        import Thunder.utils.rate_limiter as module
+
+        notification_started = asyncio.Event()
+        release_notification = asyncio.Event()
+        queue_full_calls = []
+
+        async def no_limit(user_id, record=True):
+            return False
+
+        async def priority(user_id):
+            return "regular"
+
+        async def notify(*args, **kwargs):
+            notification_started.set()
+            await release_notification.wait()
+            return object()
+
+        async def queue_full(*args, **kwargs):
+            queue_full_calls.append(True)
+
+        async def work(*args, **kwargs):
+            pass
+
+        message = SimpleNamespace(
+            from_user=SimpleNamespace(id=999),
+            document=None,
+        )
+        monkeypatch.setattr(module, "rate_limiter", limiter)
+        monkeypatch.setattr(limiter, "check_limits", no_limit)
+        monkeypatch.setattr(limiter, "get_user_priority", priority)
+        monkeypatch.setattr(module, "send_queue_notification", notify)
+        monkeypatch.setattr(module, "send_queue_full_message", queue_full)
+        task = asyncio.create_task(handle_rate_limited_request(object(), message, work))
+        await notification_started.wait()
+        await limiter.shutdown()
+        release_notification.set()
+        await task
+        assert queue_full_calls == []
+        assert not limiter.request_queue
+        assert not limiter.priority_queue
+
 
 class TestExecutor:
+    async def test_shutdown_lets_in_flight_work_finish(self, limiter):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        completed = []
+
+        async def work():
+            started.set()
+            await release.wait()
+            completed.append(True)
+
+        await limiter.add_to_queue(work, Var.OWNER_ID)
+        task = asyncio.create_task(limiter.request_executor())
+        await started.wait()
+        await limiter.shutdown()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert completed == [True]
+
     async def test_priority_queue_drains_before_regular(self, limiter, monkeypatch):
         order = []
 

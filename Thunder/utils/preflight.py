@@ -11,9 +11,9 @@ from pyrogram.errors import (
     Flood,
     FloodWait,
     Forbidden,
+    InternalServerError,
     MessageIdInvalid,
     PeerIdInvalid,
-    RpcCallFail,
     Unauthorized,
     UserNotParticipant,
 )
@@ -78,6 +78,10 @@ CHECK_TIMEOUT_SECONDS = 12
 Result = Tuple[str, str]
 
 
+class InconclusiveProbe(Exception):
+    """The check neither confirmed access nor found a definite access problem."""
+
+
 class Report:
     """Ordered results plus the rendering the operator sees."""
 
@@ -128,8 +132,11 @@ class Report:
 
         problems = self.warnings + self.failures
         for _status, text in problems:
+            problem_lines = text.splitlines()
+            if len(problem_lines) > 5:
+                problem_lines = problem_lines[:4] + ["…"]
             lines.append("")
-            for line in text.splitlines():
+            for line in problem_lines:
                 lines.append(f"   {line}")
 
         if verbose:
@@ -188,7 +195,7 @@ def _describe(exc: BaseException, subject: str = "the database") -> str:
 def is_transient(exc: BaseException) -> bool:
     """Whether a failed live check should warn instead of stopping startup."""
     # asyncio.TimeoutError is TimeoutError, a subclass of OSError.
-    return isinstance(exc, (Flood, AutoReconnect, ConnectionFailure,
+    return isinstance(exc, (Flood, AutoReconnect, ConnectionFailure, InternalServerError,
                             aiohttp.ClientError, OSError)) or isinstance(exc, ServerSelectionTimeoutError)
 
 
@@ -209,7 +216,7 @@ async def check_bot_token(client) -> List[Result]:
         return [(WARN, MSG_PREFLIGHT_TOKEN_THROTTLED.format(reason=_describe(e)))]
     except Unauthorized:
         return [(FAIL, token_rejected_message("BOT_TOKEN"))]
-    except (BadRequest, RpcCallFail) as e:
+    except BadRequest as e:
         text = str(e)
         if "API_ID" in text or "api_id" in text.lower():
             return [(FAIL, MSG_PREFLIGHT_API_REJECTED)]
@@ -277,9 +284,8 @@ async def check_storage_channel(client, channel_id: int, sample_message_id: Opti
     can_delete = getattr(privileges, "can_delete_messages", None)
     if can_delete is False:
         results.append((WARN, MSG_PREFLIGHT_CHANNEL_DELETE_DISABLED.format(channel_id=channel_id)))
-    else:
-        role = "owner" if status == ChatMemberStatus.OWNER else "administrator"
-        results.append((OK, f"BIN_CHANNEL {channel_id}: {role}, can post, can read"))
+    role = "owner" if status == ChatMemberStatus.OWNER else "administrator"
+    results.append((OK, f"BIN_CHANNEL {channel_id}: {role}, can post, can read"))
     return results
 
 
@@ -319,15 +325,17 @@ async def check_force_channel(client, channel_id: int) -> List[Result]:
 
 async def storage_channel_problem(client, channel_id: int,
                                  sample_message_id: Optional[int] = None) -> Optional[str]:
-    """Return a definite access problem; transient errors are ignored."""
+    """Return a definite result; raise when the probe is inconclusive."""
     results = await check_storage_channel(client, channel_id, sample_message_id)
     if any(status == FAIL for status, _text in results):
-        return results[0][1]
-    return None
+        return next(text for status, text in results if status == FAIL)
+    if any(status == OK for status, _text in results):
+        return None
+    raise InconclusiveProbe
 
 
 async def probe_storage_channel(client, database, channel_id: int) -> Optional[str]:
-    """Live storage-channel problem for the watcher, or None if fine."""
+    """Return a definite watcher result; raise when access is inconclusive."""
     message_id = await sample_message_id(database)
     return await storage_channel_problem(client, channel_id, message_id)
 
@@ -347,13 +355,16 @@ def add_host_drift_warnings(report) -> None:
 
 
 async def verify_configuration(report) -> None:
-    """Run independent checks concurrently, then the channel read check."""
+    """Run checks concurrently; only the channel check waits for a sample ID."""
     from Thunder.bot import StreamBot
     from Thunder.utils.database import db
     from Thunder.vars import Var
 
     sample_task = asyncio.create_task(sample_message_id(db))
     try:
+        async def check_channel():
+            return await check_storage_channel(StreamBot, Var.BIN_CHANNEL, await sample_task)
+
         independent = [
             check_bot_token(StreamBot),
             check_owner(StreamBot, Var.OWNER_ID),
@@ -366,6 +377,7 @@ async def verify_configuration(report) -> None:
         ]
         if Var.FORCE_CHANNEL_ID:
             independent.append(check_force_channel(StreamBot, Var.FORCE_CHANNEL_ID))
+        independent.append(check_channel())
 
         results = await asyncio.gather(*independent, return_exceptions=True)
         for outcome in results:
@@ -376,7 +388,6 @@ async def verify_configuration(report) -> None:
                 continue
             report.extend(outcome)
 
-        report.extend(await check_storage_channel(StreamBot, Var.BIN_CHANNEL, await sample_task))
         add_host_drift_warnings(report)
     finally:
         if not sample_task.done():

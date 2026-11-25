@@ -48,6 +48,47 @@ async def test_secondary_doctor_checks_run_concurrently_in_stable_order(monkeypa
     assert [text for _status, text in report.results] == ["MULTI_TOKEN1", "MULTI_TOKEN2"]
 
 
+async def test_doctor_check_groups_run_concurrently(monkeypatch):
+    started = []
+    release = asyncio.Event()
+
+    async def check(name, result=None):
+        started.append(name)
+        await release.wait()
+        return result
+
+    async def verify(report):
+        await check("configuration")
+
+    async def public(*args, **kwargs):
+        return await check("public", [])
+
+    async def secondary(report):
+        await check("secondary")
+
+    async def reply(*args, **kwargs):
+        return object()
+
+    async def deliver(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(admin, "reply", reply)
+    monkeypatch.setattr(preflight, "verify_configuration", verify)
+    monkeypatch.setattr(preflight, "check_public_url", public)
+    monkeypatch.setattr(admin, "_run_secondary_client_checks", secondary)
+    monkeypatch.setattr(admin, "_deliver_doctor_report", deliver)
+    task = asyncio.create_task(admin.doctor_command(object(), object()))
+
+    async def wait_for_all():
+        while len(started) < 3:
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait_for_all(), timeout=1)
+    assert started == ["configuration", "public", "secondary"]
+    release.set()
+    await task
+
+
 class FakeStatus:
     def __init__(self, errors=()):
         self.errors = list(errors)
@@ -95,3 +136,29 @@ async def test_doctor_report_falls_back_to_a_reply_after_a_failed_floodwait_retr
     await admin._deliver_doctor_report(status, message, "configuration report")
     assert len(status.calls) == 2
     assert message.calls == ["<pre>configuration report</pre>"]
+
+
+async def test_later_doctor_chunks_retry_repeated_floodwaits(monkeypatch):
+    class FlakyMessage:
+        def __init__(self):
+            self.attempts = 0
+            self.delivered = []
+
+        async def reply_text(self, text, parse_mode=None):
+            self.attempts += 1
+            if self.attempts <= 2:
+                raise FloodWait(value=0)
+            self.delivered.append(text)
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(admin.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(admin.logger, "warning", lambda *args, **kwargs: None)
+    status = FakeStatus()
+    message = FlakyMessage()
+    rendered = "abcdefghij" * 1000
+    await admin._deliver_doctor_report(status, message, rendered)
+    assert len(status.calls) == 1
+    assert message.attempts == 4
+    assert len(message.delivered) == 2

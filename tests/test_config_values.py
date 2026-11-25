@@ -5,6 +5,7 @@ Cases run in a subprocess because a bad value kills the import.
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -22,17 +23,33 @@ GOOD = {
     "HAS_SSL": "True",
 }
 
+PLATFORM_VARIABLES = {
+    "KOYEB_PUBLIC_DOMAIN", "RENDER_EXTERNAL_URL", "RAILWAY_PUBLIC_DOMAIN",
+    "HEROKU_APP_NAME", "FLY_APP_NAME", "WEBSITE_HOSTNAME",
+}
+CONFIG_VARIABLES = set(GOOD) | PLATFORM_VARIABLES | {
+    line.partition("=")[0].strip()
+    for line in (REPO / "config_sample.env").read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.lstrip().startswith("#") and "=" in line
+}
 
-def run(overrides, probe="import Thunder.vars; print('OK')"):
-    env = {**os.environ, **GOOD, **overrides}
+
+def run(overrides, probe="import Thunder.vars; print('OK')", *, config_text=None):
+    env = {key: value for key, value in os.environ.items() if key not in CONFIG_VARIABLES}
+    env.update(GOOD)
     for key, value in overrides.items():
         if value is None:
             env.pop(key, None)
-    env.pop("PYTHONPATH", None)
-    return subprocess.run(
-        [sys.executable, "-c", probe], cwd=REPO, env=env,
-        capture_output=True, text=True, timeout=120,
-    )
+        else:
+            env[key] = value
+    env["PYTHONPATH"] = str(REPO)
+    with tempfile.TemporaryDirectory() as cwd:
+        if config_text is not None:
+            Path(cwd, "config.env").write_text(config_text, encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, "-c", probe], cwd=cwd, env=env,
+            capture_output=True, text=True, timeout=120,
+        )
 
 
 def problems(overrides):
@@ -49,6 +66,18 @@ def test_a_good_configuration_parses():
     result = run({})
     assert result.returncode == 0, result.stderr[-800:]
     assert "OK" in result.stdout
+
+
+def test_parent_platform_variables_do_not_change_invalid_fqdn_results(monkeypatch):
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://real.onrender.com")
+    text = problems({"FQDN": "::1"})
+    assert "FQDN" in text
+
+
+def test_an_extremely_large_integer_is_aggregated_with_other_problems():
+    text = problems({"API_ID": "9" * 5000, "API_HASH": ""})
+    assert "API_ID" in text
+    assert "API_HASH" in text
 
 
 def test_every_problem_is_reported_in_one_run():

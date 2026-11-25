@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 from typing import Any, Dict, Optional
-from pymongo import AsyncMongoClient
+from pymongo import AsyncMongoClient, WriteConcern
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import ConfigurationError, DuplicateKeyError, InvalidURI
 from Thunder.utils.config_values import ConfigError
@@ -84,7 +84,9 @@ class Database:
 
     async def verify_writable(self) -> None:
         """Write to a throwaway collection; read-only logins fail here."""
-        collection = self.db[PREFLIGHT_COLLECTION]
+        collection = self.db[PREFLIGHT_COLLECTION].with_options(
+            write_concern=WriteConcern(w=1)
+        )
         marker = {"_id": "preflight"}
         await collection.replace_one(marker, {"_id": "preflight"}, upsert=True)
         try:

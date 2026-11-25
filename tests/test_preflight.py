@@ -38,6 +38,7 @@ class FakeClient:
         self._me_error = me_error
         self._member_error = member_error
         self._chat_result = chat_result
+        self.message_calls = []
 
     async def get_me(self):
         if self._me_error:
@@ -52,6 +53,7 @@ class FakeClient:
         return self._member_result
 
     async def get_messages(self, chat_id, message_ids=None):
+        self.message_calls.append((chat_id, message_ids))
         # Match the real message_ids signature so misuse is not misreported as permissions.
         if message_ids is None:
             raise TypeError("message_ids is required")
@@ -101,6 +103,14 @@ async def test_a_connection_error_only_warns():
     assert results[0][0] == preflight.WARN
 
 
+async def test_a_telegram_server_error_only_warns():
+    from pyrogram.errors import InternalServerError, RpcCallFail
+
+    for error in (RpcCallFail(), InternalServerError()):
+        results = await preflight.check_bot_token(FakeClient(me_error=error))
+        assert results[0][0] == preflight.WARN
+
+
 async def test_admin_that_can_post_passes():
     client = FakeClient(member_result=chat_member(ChatMemberStatus.ADMINISTRATOR))
     results = await preflight.check_storage_channel(client, CHANNEL)
@@ -147,7 +157,8 @@ async def test_a_bot_cannot_use_get_history_so_the_probe_reads_an_id():
 
     client = BotLike(member_result=chat_member(ChatMemberStatus.ADMINISTRATOR))
     results = await preflight.check_storage_channel(client, CHANNEL, sample_message_id=123015)
-    assert not [r for r in results if r[0] == preflight.FAIL]
+    assert client.message_calls == [(CHANNEL, 123015)]
+    assert any(status == preflight.OK for status, _text in results)
 
 
 async def test_unreadable_history_fails():
@@ -156,6 +167,30 @@ async def test_unreadable_history_fails():
     results = await preflight.check_storage_channel(client, CHANNEL)
     assert results[0][0] == preflight.FAIL
     assert "404" in results[0][1], "say what the user would see"
+
+
+async def test_a_delete_permission_warning_still_confirms_link_access():
+    client = FakeClient(member_result=chat_member(
+        ChatMemberStatus.ADMINISTRATOR, can_delete=False
+    ))
+    results = await preflight.check_storage_channel(client, CHANNEL)
+    assert any(status == preflight.WARN for status, _text in results)
+    assert any(status == preflight.OK for status, _text in results)
+    assert await preflight.storage_channel_problem(client, CHANNEL) is None
+
+
+async def test_definite_storage_problem_uses_the_failure_text(monkeypatch):
+    async def results(*args, **kwargs):
+        return [(preflight.WARN, "warning"), (preflight.FAIL, "definite failure")]
+
+    monkeypatch.setattr(preflight, "check_storage_channel", results)
+    assert await preflight.storage_channel_problem(object(), CHANNEL) == "definite failure"
+
+
+async def test_an_inconclusive_storage_probe_is_not_reported_as_healthy():
+    client = FakeClient(member_error=OSError("timeout"))
+    with pytest.raises(preflight.InconclusiveProbe):
+        await preflight.storage_channel_problem(client, CHANNEL)
 
 
 async def test_a_missing_channel_is_named_as_such():
@@ -170,7 +205,7 @@ async def test_a_supergroup_storage_channel_is_not_failed_for_can_post_messages(
         ChatMemberStatus.ADMINISTRATOR, type_name="SUPERGROUP", can_post=False)
     client = FakeClient(member_result=supergroup_admin)
     results = await preflight.check_storage_channel(client, CHANNEL)
-    assert not [r for r in results if r[0] == preflight.FAIL], (
+    assert any(status == preflight.OK for status, _text in results), (
         "a supergroup admin must not be told to enable a non-existent setting"
     )
     assert not any("Post messages" in text for _s, text in results), (
@@ -184,7 +219,7 @@ async def test_a_parser_shaped_supergroup_admin_is_accepted():
     assert member.chat is None
     client = FakeClient(member_result=member, chat_result=FakeChat("SUPERGROUP"))
     results = await preflight.check_storage_channel(client, CHANNEL)
-    assert not [r for r in results if r[0] == preflight.FAIL]
+    assert any(status == preflight.OK for status, _text in results)
 
 
 async def test_a_parser_shaped_broadcast_admin_without_post_right_fails():
@@ -198,7 +233,7 @@ async def test_a_parser_shaped_supergroup_secondary_is_accepted():
     member = chat_member(ChatMemberStatus.ADMINISTRATOR, can_post=False)
     client = FakeClient(member_result=member, chat_result=FakeChat("SUPERGROUP"))
     results = await preflight.check_secondary_client(client, "MULTI_TOKEN1", CHANNEL)
-    assert not [r for r in results if r[0] == preflight.FAIL]
+    assert any(status == preflight.OK for status, _text in results)
 
 
 async def test_a_broadcast_channel_without_post_right_still_fails():
@@ -333,6 +368,37 @@ async def test_database_ok():
     assert results[0][0] == preflight.OK
 
 
+async def test_writability_probe_overrides_unacknowledged_write_concern():
+    from Thunder.utils.database import Database
+
+    class Collection:
+        def __init__(self):
+            self.write_concern = None
+
+        def with_options(self, *, write_concern):
+            self.write_concern = write_concern
+            return self
+
+        async def replace_one(self, *args, **kwargs):
+            return None
+
+        async def drop(self):
+            return None
+
+    class FakeDB:
+        def __init__(self, collection):
+            self.collection = collection
+
+        def __getitem__(self, name):
+            return self.collection
+
+    database = Database.__new__(Database)
+    collection = Collection()
+    database.db = FakeDB(collection)
+    await database.verify_writable()
+    assert collection.write_concern.acknowledged
+
+
 async def test_unreachable_database_warns_because_it_may_be_a_blip():
     results = await preflight.check_database(FakeDatabase(ping_error=ServerSelectionTimeoutError()))
     assert results[0][0] == preflight.WARN
@@ -376,6 +442,40 @@ async def test_a_read_only_user_fails_even_though_ping_worked():
     status, text = results[0]
     assert status == preflight.FAIL
     assert "cannot write" in text
+
+
+async def test_channel_check_runs_alongside_independent_checks(monkeypatch):
+    from Thunder.vars import Var
+
+    shortener_started = asyncio.Event()
+    release_shortener = asyncio.Event()
+    channel_started = asyncio.Event()
+
+    async def slow_shortener(*args, **kwargs):
+        shortener_started.set()
+        await release_shortener.wait()
+        return []
+
+    async def channel(*args, **kwargs):
+        channel_started.set()
+        return []
+
+    async def quick(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(Var, "FORCE_CHANNEL_ID", 0)
+    monkeypatch.setattr(preflight, "sample_message_id", quick)
+    monkeypatch.setattr(preflight, "check_bot_token", quick)
+    monkeypatch.setattr(preflight, "check_owner", quick)
+    monkeypatch.setattr(preflight, "check_database", quick)
+    monkeypatch.setattr(preflight, "check_shortener", slow_shortener)
+    monkeypatch.setattr(preflight, "check_storage_channel", channel)
+    task = asyncio.create_task(preflight.verify_configuration(preflight.Report()))
+    await shortener_started.wait()
+    await asyncio.sleep(0)
+    assert channel_started.is_set()
+    release_shortener.set()
+    await task
 
 
 async def test_cancelling_verification_also_cancels_the_sample_message_lookup(monkeypatch):
@@ -427,6 +527,8 @@ def test_a_failure_block_never_exceeds_five_lines():
     report.add(preflight.OK, "fine")
     rendered = report.render()
     assert rendered.count("✖") >= 1
+    failure_block = rendered.split(preflight.HEADER, 1)[1].split("   ✖ The bot did not start", 1)[0]
+    assert len([line for line in failure_block.splitlines() if line.strip()]) <= 5
 
 
 def test_failures_are_not_hidden_by_passing_checks():
@@ -447,9 +549,11 @@ def test_verbose_shows_the_passing_checks():
 
 def test_a_secret_is_never_rendered():
     report = preflight.Report()
-    report.add(preflight.FAIL, f"✖ something about {preflight._describe(OperationFailure('x'))}")
+    uri = "mongodb://user:secret@host/db"
+    report.add(preflight.FAIL, f"✖ something about {preflight._describe(OperationFailure(uri, code=8000))}")
     rendered = report.render()
-    assert "mongodb://" not in rendered
+    assert "secret" not in rendered
+    assert uri not in rendered
 
 
 def test_a_password_in_a_driver_error_is_not_repeated():
