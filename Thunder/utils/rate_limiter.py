@@ -46,7 +46,12 @@ class RateLimiter:
         self.auth_cache_ttl_seconds: int = 300
 
         self._initialization_error = False
+        self._shutdown = False
         self._load_configuration()
+
+    @property
+    def is_shutdown(self) -> bool:
+        return self._shutdown
 
     def _load_configuration(self):
         try:
@@ -145,6 +150,8 @@ class RateLimiter:
 
     async def _requeue_request(self, request_data: dict, queue_type: str):
         async with self.request_lock:
+            if self._shutdown:
+                return
             if queue_type == "priority":
                 self.priority_queue.appendleft(request_data)
             else:
@@ -153,6 +160,8 @@ class RateLimiter:
         logger.debug(f"Re-queued request for user {request_data['user_id']} to {queue_type} queue.")
 
     async def add_to_queue(self, func: Callable, user_id: int, file_identifier: Optional[str] = None, *args, **kwargs):
+        if self.is_shutdown:
+            raise RuntimeError("rate limiter is shut down")
         if not self.enabled:
             await func(*args, **kwargs)
             return
@@ -164,6 +173,8 @@ class RateLimiter:
         }
 
         async with self.request_lock:
+            if self.is_shutdown:
+                raise RuntimeError("rate limiter is shut down")
             total_queued = len(self.request_queue) + len(self.priority_queue)
             if total_queued >= self.max_queue_size:
                 raise QueueFullError("Queue is full")
@@ -181,7 +192,7 @@ class RateLimiter:
 
     async def request_executor(self):
         logger.debug("Request executor started.")
-        while True:
+        while not self._shutdown:
             try:
                 await self.request_event.wait()
 
@@ -196,8 +207,9 @@ class RateLimiter:
                 processed = False
                 if not self.is_owner(user_id):
                     if not await self.check_limits(user_id, record=True):
-                        await self._requeue_request(request_data, queue_type)
-                        await asyncio.sleep(0.5)
+                        if not self._shutdown:
+                            await self._requeue_request(request_data, queue_type)
+                            await asyncio.sleep(0.5)
                         continue
 
                 logger.debug(f"Processing request for user {user_id} from {queue_type} queue.")
@@ -217,9 +229,11 @@ class RateLimiter:
                     processed = True
 
                 except FloodWait as e:
-                    logger.warning(f"FloodWait for user {user_id}, waiting {e.value}s before re-queuing.")
-                    await asyncio.sleep(e.value)
-                    await self._requeue_request(request_data, queue_type)
+                    if not self._shutdown:
+                        logger.warning(f"FloodWait for user {user_id}, waiting {e.value}s before re-queuing.")
+                        await asyncio.sleep(e.value)
+                        if not self._shutdown:
+                            await self._requeue_request(request_data, queue_type)
                 except Exception as e:
                     logger.error(f"Error processing queued request for user {user_id}: {e}", exc_info=True)
                     processed = True
@@ -235,16 +249,19 @@ class RateLimiter:
                 break
             except Exception as e:
                 logger.critical(f"Critical error in request executor: {e}", exc_info=True)
+                if self.is_shutdown:
+                    break
                 await asyncio.sleep(5)
 
     async def shutdown(self):
         logger.debug("Shutting down rate limiter and clearing queues...")
+        self._shutdown = True
         async with self.request_lock:
             self.request_queue.clear()
             self.priority_queue.clear()
             self.user_queue_counts.clear()
-            self.request_event.clear()
-        logger.debug("Rate limiter queues cleared.")
+            self.request_event.set()
+        logger.debug("Rate limiter shutdown requested; in-flight work may finish.")
 
     def get_queue_status(self) -> dict:
         return {
@@ -346,6 +363,9 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler: Ca
     if not isinstance(user_id, int):
         logger.error(f"Invalid user_id provided for rate limiting: {user_id}")
         return
+    if rate_limiter.is_shutdown:
+        logger.debug("Ignoring request received during rate limiter shutdown.")
+        return
 
     file_identifier = message.document.file_unique_id if message and message.document else None
 
@@ -355,6 +375,8 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler: Ca
         return
 
     if await rate_limiter.check_limits(user_id, record=True):
+        if rate_limiter.is_shutdown:
+            return
         logger.debug(f"User {user_id} within rate limits, executing immediately.")
         await handler(bot, message, *args, **kwargs)
         return
@@ -364,6 +386,8 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler: Ca
     if not is_channel:
         try:
             user_priority = await rate_limiter.get_user_priority(user_id)
+            if rate_limiter.is_shutdown:
+                return
             notification_msg = await send_queue_notification(
                 bot, message, is_priority=(user_priority == 'authorized'), file_identifier=file_identifier
             )
@@ -378,6 +402,11 @@ async def handle_rate_limited_request(bot: Client, message: Message, handler: Ca
         logger.warning(f"Queue full, request for user {user_id} rejected.")
         if not is_channel:
             await send_queue_full_message(bot, message, file_identifier)
+    except RuntimeError:
+        if rate_limiter.is_shutdown:
+            logger.debug("Ignoring request queued during rate limiter shutdown.")
+            return
+        raise
     except Exception as e:
         logger.error(f"Error adding request to queue for user {user_id}: {e}", exc_info=True)
         if not is_channel:

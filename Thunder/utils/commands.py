@@ -23,6 +23,7 @@ def get_commands():
         "restart": "(Admin) Update and restart the bot",
         "shell": "(Admin) Execute a shell command",
         "speedtest": "(Admin) Run network speed test",
+        "doctor": "(Admin) Re-check the configuration without restarting",
         "users": "(Admin) Show the total number of users",
         "authorize": "(Admin) Grant permanent access to a user",
         "deauthorize": "(Admin) Remove permanent access from a user",

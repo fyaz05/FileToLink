@@ -14,6 +14,9 @@ from Thunder.vars import Var
 from Thunder.utils.logger import logger
 
 
+REQUEST_TIMEOUT_SECONDS = 10
+
+
 class ShortenerPlugin(ABC):
     @classmethod
     @abstractmethod
@@ -51,6 +54,7 @@ class BitlyPlugin(ShortenerPlugin):
             "https://api-ssl.bit.ly/v4/shorten",
             json={"long_url": url},
             headers={"Authorization": f"Bearer {api_key}"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:
             return response.json()["link"]
@@ -64,7 +68,8 @@ class OuoIoPlugin(ShortenerPlugin):
 
     async def shorten(self, url: str, api_key: str) -> str:
         response = await asyncio.to_thread(
-            self.session.get, f"http://ouo.io/api/{api_key}?s={url}"
+            self.session.get, f"http://ouo.io/api/{api_key}?s={url}",
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         if response.status_code == 200 and response.text:
             return response.text
@@ -78,7 +83,8 @@ class CuttLyPlugin(ShortenerPlugin):
 
     async def shorten(self, url: str, api_key: str) -> str:
         response = await asyncio.to_thread(
-            self.session.get, f"http://cutt.ly/api/api.php?key={api_key}&short={url}"
+            self.session.get, f"http://cutt.ly/api/api.php?key={api_key}&short={url}",
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:
             return response.json()["url"]["shortLink"]
@@ -94,7 +100,8 @@ class GenericShortenerPlugin(ShortenerPlugin):
         # Accept a configured value with or without a scheme.
         host = self.domain.split("://", 1)[-1].rstrip("/")
         response = await asyncio.to_thread(
-            self.session.get, f"https://{host}/api?api={api_key}&url={quote(url)}"
+            self.session.get, f"https://{host}/api?api={api_key}&url={quote(url)}",
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:
             return response.json().get("shortenedUrl", url)

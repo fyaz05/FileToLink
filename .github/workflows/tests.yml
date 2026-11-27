@@ -96,14 +96,14 @@ jobs:
         # import, so placeholders stand in for a deployment's own values. That
         # also means this proves the dependencies and the code, not the config.
         run: |
-          docker run --rm \
+          docker run --rm --entrypoint python \
             -e API_ID=123456 \
             -e API_HASH=00000000000000000000000000000000 \
             -e BOT_TOKEN=123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA \
             -e BIN_CHANNEL=-1001234567890 \
             -e OWNER_ID=1 \
             -e DATABASE_URL=mongodb://localhost:27017/smoke \
-            fyaz05/thunder:test python -c \
+            fyaz05/thunder:test -c \
             "import Thunder, Thunder.__main__, uvloop, warpcrypto, aiohttp; print('ok', Thunder.__version__)"
       - name: Publish
         # Only reached once the smoke test passed, and only for a push event: a

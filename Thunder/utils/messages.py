@@ -1,7 +1,6 @@
-"""Every user-facing string, grouped by where it appears.
+"""User-facing strings, grouped by where they appear.
 
-Kept in one module so wording and formatting can be changed without touching
-the handlers that send them.
+Kept in one module so wording and formatting can change without touching handlers.
 """
 
 # ERROR MESSAGES
@@ -333,6 +332,8 @@ MSG_SYSTEM_STATUS = (
 # Speedtest Messages
 MSG_SPEEDTEST_INIT = "🚀 **Running Speed Test...**"
 MSG_SPEEDTEST_ERROR = "❌ **Speed Test Failed!**\n\n> Unable to complete the speed test. Please try again later."
+MSG_DOCTOR_RUNNING = "🩺 Running configuration checks..."
+MSG_DOCTOR_FAILED = "🩺 The configuration check could not run. See the log."
 MSG_SPEEDTEST_RESULT = (
     "⚡ **Speed Test Results**\n\n"
     "**SPEEDTEST INFO:**\n"
@@ -378,3 +379,118 @@ MSG_SYSTEM_STATS = (
 )
 
 MSG_DB_STATS = "📊 **Database Statistics**\n\n> 👥 **Total Users:** `{total_users}`"
+
+
+# Startup and /doctor report text.
+
+# Primary token
+MSG_PREFLIGHT_TOKEN_REJECTED = (
+    "✖ {key}: Telegram rejected this token. Get a new one from @BotFather."
+)
+MSG_PREFLIGHT_TOKEN_THROTTLED = (
+    "⚠ BOT_TOKEN: {reason}. Wait before restarting if this repeats."
+)
+MSG_PREFLIGHT_API_REJECTED = (
+    "✖ API_ID/API_HASH rejected. Check both at my.telegram.org/apps; use the same app."
+)
+
+# Storage channel
+MSG_PREFLIGHT_CHANNEL_NOT_MEMBER = (
+    "✖ BIN_CHANNEL {channel_id}: not a member. Add the bot as an administrator."
+)
+MSG_PREFLIGHT_CHANNEL_NO_MEMBER_LIST = (
+    "✖ BIN_CHANNEL {channel_id}: cannot see members. Add the bot as an administrator."
+)
+MSG_PREFLIGHT_CHANNEL_INACCESSIBLE = (
+    "✖ BIN_CHANNEL {channel_id}: inaccessible. Check the ID and add the bot."
+)
+MSG_PREFLIGHT_CHANNEL_NOT_FOUND = (
+    "✖ BIN_CHANNEL {channel_id}: no such channel. Check the -100 ID."
+)
+MSG_PREFLIGHT_CHANNEL_BANNED = (
+    "✖ BIN_CHANNEL {channel_id}: bot banned. Remove the ban or change the ID."
+)
+MSG_PREFLIGHT_CHANNEL_CANNOT_POST = (
+    "✖ BIN_CHANNEL {channel_id}: not an administrator. Make it an admin with \"Post messages\" enabled."
+)
+MSG_PREFLIGHT_CHANNEL_POST_DISABLED = (
+    "✖ BIN_CHANNEL {channel_id}: \"Post messages\" is off. Enable it for the bot."
+)
+MSG_PREFLIGHT_CHANNEL_UNREADABLE = (
+    "✖ BIN_CHANNEL {channel_id}: cannot read messages; links would return 404. Make the bot an administrator."
+)
+MSG_PREFLIGHT_CHANNEL_DELETE_DISABLED = (
+    "⚠ BIN_CHANNEL {channel_id}: \"Delete messages\" is off; replaced files cannot be removed."
+)
+
+# Owner
+MSG_PREFLIGHT_OWNER_UNSET = (
+    "⚠ OWNER_ID is unset; owner commands are unavailable. Get the ID from @userinfobot."
+)
+MSG_PREFLIGHT_OWNER_UNRESOLVED = (
+    "⚠ OWNER_ID {owner_id}: unresolved until they message the bot once. Verify it with @userinfobot."
+)
+
+# Force channel (optional)
+MSG_PREFLIGHT_FORCE_INACCESSIBLE = (
+    "⚠ FORCE_CHANNEL_ID {channel_id}: inaccessible. Users cannot read the required channel."
+)
+MSG_PREFLIGHT_FORCE_NOT_MEMBER = (
+    "⚠ FORCE_CHANNEL_ID {channel_id}: bot not a member. Add it to the channel."
+)
+
+MSG_PREFLIGHT_CHECK_CRASHED = "⚠ A configuration check failed. See the log."
+
+# Secondary clients
+MSG_PREFLIGHT_SECONDARY_THROTTLED = (
+    "⚠ {key}: {reason}. Wait before restarting; remove {key} from config.env if this repeats."
+)
+MSG_PREFLIGHT_SECONDARY_START_FAILED = (
+    "⚠ {key}: could not start ({reason}). Remove {key} from config.env."
+)
+MSG_PREFLIGHT_SECONDARY_WRONG_BOT = (
+    "✖ {key}: wrong bot. Token ID {expected_bot_id}; Telegram returned {actual_id}. Use the token from @BotFather."
+)
+MSG_PREFLIGHT_SECONDARY_NOT_IN_CHANNEL = (
+    "✖ {key} {name}: not in BIN_CHANNEL {channel_id}. Add it as an administrator or remove {key} from config.env."
+)
+MSG_PREFLIGHT_SECONDARY_CHANNEL_DENIED = (
+    "✖ {key} {name}: cannot access BIN_CHANNEL {channel_id}. Add it as an administrator or remove {key}."
+)
+MSG_PREFLIGHT_SECONDARY_NOT_ADMIN = (
+    "✖ {key} {name}: not an administrator in BIN_CHANNEL. Add it or remove {key} from config.env."
+)
+MSG_PREFLIGHT_SECONDARY_POST_DISABLED = (
+    "✖ {key} {name}: \"Post messages\" is off. Enable it or remove {key} from config.env."
+)
+MSG_PREFLIGHT_SECONDARY_UNREADABLE = (
+    "✖ {key} {name}: cannot read BIN_CHANNEL; its links would return 404."
+)
+
+# Database
+MSG_PREFLIGHT_DB_TIMEOUT = "⚠ DATABASE_URL: {reason}. Check the host and credentials."
+MSG_PREFLIGHT_DB_LOGIN_REJECTED = (
+    "✖ DATABASE_URL: {reason}. Check credentials; escape @ : / % as %40 %3A %2F %25."
+)
+MSG_PREFLIGHT_DB_MALFORMED_URL = "✖ DATABASE_URL: {reason}. Use mongodb:// or mongodb+srv://."
+MSG_PREFLIGHT_DB_READ_ONLY = "✖ DATABASE_URL: connected but cannot write. Grant read/write access."
+
+# Optional features
+MSG_PREFLIGHT_SHORTENER_MISSING_CREDS = (
+    "⚠ URL shortening is on but URL_SHORTENER_SITE or URL_SHORTENER_API_KEY is empty."
+)
+MSG_PREFLIGHT_SHORTENER_UNCHANGED = (
+    "⚠ URL_SHORTENER_SITE returned the link unchanged. Check URL_SHORTENER_API_KEY."
+)
+
+# Public URL
+MSG_PREFLIGHT_URL_BAD_STATUS = "⚠ {url}/status returned {status}. Check FQDN, PORT, and the proxy."
+MSG_PREFLIGHT_URL_NON_JSON = (
+    "⚠ {url}/status returned non-JSON. Check FQDN and the proxy."
+)
+MSG_PREFLIGHT_URL_UNREACHABLE = (
+    "⚠ {url}/status could not be reached ({reason}). Check FQDN, PORT, and the proxy."
+)
+MSG_PREFLIGHT_URL_FOREIGN_REPLY = (
+    "⚠ {url}/status is not this bot. Another service is probably bound there; check FQDN and the proxy."
+)

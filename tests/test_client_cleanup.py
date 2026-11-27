@@ -1,16 +1,13 @@
-"""Client cleanup must stop live clients and skip the rest.
+"""Client cleanup stops live clients and skips inactive ones."""
+import asyncio
 
-Pyrogram's terminate() raises ConnectionError when is_initialized is falsy,
-which used to surface as a traceback on every shutdown.
-"""
 import pytest
 
-from Thunder.bot import multi_clients
+from Thunder.bot import cleanup_registry, multi_clients
 from Thunder.bot.clients import cleanup_clients
 
 
 class FakeClient:
-    """Mirrors the two Pyrogram flags the guard depends on."""
 
     def __init__(self, initialized, connected=None):
         self.is_initialized = initialized
@@ -20,14 +17,17 @@ class FakeClient:
     async def stop(self, block=True):
         self.stop_calls += 1
         self.is_initialized = False
+        self.is_connected = False
         return self
 
 
 @pytest.fixture(autouse=True)
 def clear_clients():
     multi_clients.clear()
+    cleanup_registry.clear()
     yield
     multi_clients.clear()
+    cleanup_registry.clear()
 
 
 async def test_skips_a_client_that_never_started():
@@ -42,6 +42,13 @@ async def test_skips_an_already_terminated_client():
     multi_clients[0] = client
     await cleanup_clients()
     assert client.stop_calls == 0
+
+
+async def test_stops_a_connected_client_whose_start_did_not_finish():
+    client = FakeClient(initialized=False, connected=True)
+    multi_clients[0] = client
+    await cleanup_clients()
+    assert client.stop_calls == 1
 
 
 async def test_stops_an_initialized_client():
@@ -66,6 +73,34 @@ async def test_stops_only_the_initialized_clients():
     assert fresh.stop_calls == 0
 
 
+async def test_a_cancelled_stop_does_not_prevent_the_rest():
+    class Cancelled(FakeClient):
+        async def stop(self, block=True):
+            raise asyncio.CancelledError
+
+    cancelled = Cancelled(initialized=True)
+    good = FakeClient(initialized=True)
+    multi_clients[0] = cancelled
+    multi_clients[1] = good
+    await cleanup_clients()
+    assert good.stop_calls == 1
+
+
+async def test_a_transient_stop_failure_is_retried():
+    class Flaky(FakeClient):
+        async def stop(self, block=True):
+            if self.stop_calls == 0:
+                self.stop_calls += 1
+                raise RuntimeError("transient stop failure")
+            await super().stop(block=block)
+
+    client = Flaky(initialized=True)
+    multi_clients[0] = client
+    await cleanup_clients()
+    assert client.stop_calls == 2
+    assert not client.is_initialized and not client.is_connected
+
+
 async def test_a_failing_stop_does_not_prevent_the_rest():
     class Exploding(FakeClient):
         async def stop(self, block=True):
@@ -79,3 +114,23 @@ async def test_a_failing_stop_does_not_prevent_the_rest():
     await cleanup_clients()
 
     assert good.stop_calls == 1, "a failure must not abort the loop"
+
+
+async def test_a_client_that_stays_active_is_reported(monkeypatch):
+    class Stuck(FakeClient):
+        async def stop(self, block=True):
+            self.stop_calls += 1
+            return self
+
+    client = Stuck(initialized=True, connected=True)
+    multi_clients[4] = client
+    errors = []
+    monkeypatch.setattr(
+        "Thunder.bot.clients.logger.error",
+        lambda message, *args, **kwargs: errors.append(message),
+    )
+
+    await cleanup_clients()
+
+    assert client.stop_calls == 2
+    assert any("Client 4" in message and "remained active" in message for message in errors)

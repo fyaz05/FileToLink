@@ -51,7 +51,7 @@
 
 ## About The Project
 
-**Thunder** is a powerful Telegram bot that transforms Telegram files into high-speed direct links, perfect for both streaming and rapid downloading. Share files via HTTP(S) links without needing to download them from the Telegram client first.
+**Thunder** is a Telegram bot that turns files into high-speed direct links for streaming and downloading. Share files via HTTP(S) links without downloading them through Telegram first.
 
 ### 💡 Perfect For
 
@@ -139,6 +139,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `NAME` | Bot name; also the MongoDB database name (unsafe chars become `_`) | `ThunderF2L` |
 | `BIND_ADDRESS` | Bind address | `0.0.0.0` |
 | `PING_INTERVAL` | Ping interval (seconds) | `840` |
+| `CHANNEL_WATCH_INTERVAL` | Recheck storage-channel access this often, in seconds; `0` disables | `3600` |
 | `TOKEN_ENABLED` | Enable tokens | `False` |
 | `SHORTEN_ENABLED` | URL shortening for tokens | `False` |
 | `SHORTEN_MEDIA_LINKS` | URL shortening for media | `False` |
@@ -150,8 +151,10 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `MAX_FILES_PER_PERIOD` | Files per window | `2` |
 | `RATE_LIMIT_PERIOD_MINUTES` | Time window | `1` |
 | `MAX_QUEUE_SIZE` | Queue size | `100` |
-| `GLOBAL_RATE_LIMIT` | Global limiting | `True` |
+| `GLOBAL_RATE_LIMIT` | Global limiting | `False` |
 | `MAX_GLOBAL_REQUESTS_PER_MINUTE` | Global limit | `4` |
+| `UPSTREAM_REPO` | Git repo to self-update from; ignored without `.git` | `https://github.com/fyaz05/FileToLink` |
+| `UPSTREAM_BRANCH` | Branch `UPSTREAM_REPO` updates from | `main` |
 
 </details>
 
@@ -191,6 +194,7 @@ Copy `config_sample.env` to `config.env` and fill in your values.
 | `/restart` | Restart the bot. |
 | `/shell` | Execute a shell command. |
 | `/speedtest` | Run network speed test and display comprehensive results. |
+| `/doctor` | Re-check the whole configuration without restarting. |
 | `/users` | Show total number of users. |
 | `/authorize` | Permanently authorize a user to use the bot (bypasses token system). |
 | `/deauthorize` | Remove permanent authorization from a user. |
@@ -219,6 +223,7 @@ log - [Admin] Send bot logs
 restart - [Admin] Restart the bot
 shell - [Admin] Execute shell command
 speedtest - [Admin] Run network speed test
+doctor - [Admin] Re-check the configuration without restarting
 ```
 
 </details>
@@ -247,25 +252,25 @@ URL_SHORTENER_SITE=shortener.example.com
 
 ### Rate Limiting System
 
-Thunder implements a sophisticated multi-tier rate limiting system designed for high-performance file sharing:
+Thunder uses a multi-tier rate limiting system:
 
 #### **Priority Queue Architecture**
 
-- **Owner Priority**: Complete bypass of all rate limits.
-- **Authorized Users**: Dedicated priority queue with faster processing.
+- **Owner Priority**: Bypasses all rate limits.
+- **Authorized Users**: Dedicated priority queue, faster processing.
 - **Regular Users**: Standard queue with fair scheduling.
 
 #### **Multi-Level Rate Limiting**
 
 - **Per-User Limits**: Configurable files per time window.
 - **Global Limits**: System-wide request throttling.
-- **Sliding Window**: Time-based rate limiting with automatic cleanup.
+- **Sliding Window**: Time-based limiting with automatic cleanup.
 
 #### **Smart Queue Management**
 
-- **Automatic Re-queuing**: Failed requests due to rate limits are intelligently re-queued.
-- **Queue Size Limits**: Configurable maximum queue size.
-- **Flood Protection**: Built-in protection against Telegram flood waits.
+- **Automatic Re-queuing**: Rate-limited requests are re-queued.
+- **Queue Size Limits**: Configurable max queue size.
+- **Flood Protection**: Guards against Telegram flood waits.
 
 ### Network Speed Testing
 
@@ -275,11 +280,11 @@ Monitor server performance with built-in speed testing:
 /speedtest
 ```
 
-Features include download/upload speeds, latency measurements, and shareable result images for performance monitoring.
+Shows download/upload speeds, latency, and shareable result images.
 
 ## Deployment Guide
 
-This section covers the complete setup process for deploying Thunder, from prerequisites to production deployment.
+Covers setup from prerequisites to production.
 
 ### Prerequisites
 
@@ -301,53 +306,52 @@ This section covers the complete setup process for deploying Thunder, from prere
 git clone https://github.com/fyaz05/FileToLink.git
 cd FileToLink
 
-# 2. Configure
+# 2. Configure privately before editing credentials
 cp config_sample.env config.env
+chmod 600 config.env
 nano config.env  # Edit your settings
+
+# Linux: only when host uid/gid 10001 is dedicated (no rootless/userns-remap).
+# Otherwise use the environment-file alternative below.
+sudo setfacl -m u:10001:r config.env
+# If ACLs are unavailable, use the container's dedicated gid instead:
+# sudo chgrp 10001 config.env
+# chmod 640 config.env
 
 # 3. Build and run (the config is mounted — it is not baked into the image)
 docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 \
+docker run -d --stop-timeout 60 --name thunder -p 8080:8080 \
   -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
 
 (PowerShell: `-v "${PWD}\config.env:/app/config.env:ro"`.)
 
-The container runs as uid `10001`, which is not you, so `config.env` must be
-readable by others. A file created with a normal umask (`cp` gives `644`) already
-is; if yours is `600`, widen it without changing ownership:
+Keep `config.env` private from other local accounts; avoid `chmod 644` on shared
+hosts. The `--stop-timeout 60` flag lets the web server and in-flight request
+executor each drain for up to 25 seconds (`docker stop` defaults to 10s).
 
-```bash
-chmod 644 config.env
-```
-
-`--stop-timeout 30` is optional — it lets the server's 25s shutdown drain
-finish, since `docker stop` defaults to 10s:
-
-```bash
-docker run -d --stop-timeout 30 --name thunder -p 8080:8080 \
-  -v "$PWD/config.env:/app/config.env:ro" thunder
-```
-
-The image runs as unprivileged user `10001` without a build toolchain. Env files are
-excluded from the build context (`.dockerignore`), so `config.env` is not baked in and
-must be supplied at runtime.
+Runs as unprivileged uid `10001` with no build toolchain. `.dockerignore` excludes
+env files, so `config.env` is not baked in and must be supplied at runtime.
 
 <details>
 <summary>Alternative: pass configuration as environment variables</summary>
 
-Docker's `--env-file` passes values verbatim, so inline comments and quotes in
+`--env-file` passes values verbatim, so inline comments/quotes in
 `config_sample.env` (`HAS_SSL="True" # ...`) corrupt variables. Generate a clean file
-using `python-dotenv`:
+with `python-dotenv`:
 
 ```bash
-python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > /tmp/thunder-docker.env
-docker run -d --name thunder -p 8080:8080 --env-file /tmp/thunder-docker.env thunder
+env_file=$(mktemp /tmp/thunder-docker.XXXXXX)
+trap 'rm -f "$env_file"' EXIT
+python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > "$env_file"
+docker run -d --stop-timeout 60 --name thunder -p 8080:8080 --env-file "$env_file" thunder
+rm -f "$env_file"
+trap - EXIT
 ```
 
-Requires `python-dotenv` locally (`pip install python-dotenv`); mounting `config.env`
-avoids this step. Keep the generated file outside the repository so it cannot enter the
-build context.
+Needs `python-dotenv` locally (`pip install python-dotenv`); mounting `config.env`
+avoids this. Keep the generated file outside the repo so it cannot enter the build
+context, and remove it after Docker has read it.
 
 </details>
 
@@ -374,7 +378,7 @@ nano config.env
 python -m Thunder
 ```
 
-> **Tip:** Start with the essential configuration to get Thunder running, then add optional features as needed.
+> **Tip:** Start with the essential config to get running, then add optional features.
 
 </details>
 
@@ -384,7 +388,7 @@ python -m Thunder
 
 [![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=docker&image=docker.io/fyaz05/thunder:latest&name=thunder&ports=8080;http;/&env[API_ID]=&env[API_HASH]=&env[BOT_TOKEN]=&env[BIN_CHANNEL]=&env[OWNER_ID]=&env[DATABASE_URL]=&env[FQDN]=)
 
-After deployment, to add any additional environment variables, use the Koyeb dashboard under **Settings** → **Environment Variables**.
+To add more environment variables after deployment, use the Koyeb dashboard under **Settings** → **Environment Variables**.
 
 ### Deploy to Render
 
@@ -425,7 +429,7 @@ After deployment, to add any additional environment variables, use the Koyeb das
    ```bash
    heroku ps:scale web=1
    ```
-7. Restarts update from `UPSTREAM_REPO` only when the deployment has a git checkout. A Heroku slug is built from a tarball (step 5) and carries no `.git`, so the update is skipped and the dyno starts on the code in the slug. Durable changes need a new slug:
+7. Restarts update from `UPSTREAM_REPO` only when a git checkout exists. A Heroku slug is built from a tarball (step 5) with no `.git`, so updates are skipped and the dyno runs the slug's code. Durable changes need a new slug:
    ```bash
    # Only takes effect on a deployment that has a .git directory (e.g. a VM checkout).
    heroku config:set UPSTREAM_REPO="https://github.com/fyaz05/FileToLink" UPSTREAM_BRANCH="main"
@@ -434,9 +438,8 @@ After deployment, to add any additional environment variables, use the Koyeb das
 > **Note:** Heroku provides HTTPS automatically. Set `FQDN` to `your-app-name.herokuapp.com` and `HAS_SSL` to `True`.
 
 > **Note:** `heroku.yml` builds this repo's `Dockerfile`, so the dyno runs as uid `10001`
-> and cannot read a root-only `config.env`. Config vars avoid the file entirely, which is
-> why this path uses them; the container's own `Thunder/logs` is already writable from the
-> image, so no `chmod` step is needed here.
+> and cannot read a root-only `config.env`. Config vars avoid the file, hence this path.
+> The image's `Thunder/logs` is already writable, so no `chmod` is needed here.
 
 > **Note:** See the [Configuration](#configuration) section for required environment variables.
 
@@ -445,7 +448,7 @@ After deployment, to add any additional environment variables, use the Koyeb das
 <details>
 <summary>Reverse Proxy Guide</summary>
 
-This guide will help you set up a secure reverse proxy using **NGINX** for your file streaming bot with **Cloudflare SSL protection**.
+Sets up a secure **NGINX** reverse proxy for the streaming bot with **Cloudflare SSL**.
 
 ---
 
@@ -467,7 +470,7 @@ This guide will help you set up a secure reverse proxy using **NGINX** for your 
 
 #### 🛡️ Step 2: Set Up SSL Certificates on Server
 
-Create a folder for your certificates and place `cert.pem` and `key.key` inside. Secure the private key.
+Create a folder, place `cert.pem` and `key.key` inside, and secure the private key.
 
 ```bash
 sudo mkdir -p /etc/ssl/cloudflare/f2l.thunder.com
@@ -480,7 +483,7 @@ sudo chmod 644 /etc/ssl/cloudflare/f2l.thunder.com/cert.pem
 
 #### 🛠️ Step 3: Create NGINX Configuration
 
-Create a new file at `/etc/nginx/sites-available/f2l.thunder.conf` and paste the following, replacing `f2l.thunder.com` and `8080` with your values.
+Create `/etc/nginx/sites-available/f2l.thunder.conf` with the following, replacing `f2l.thunder.com` and `8080`:
 
 ```nginx
 server {
@@ -532,7 +535,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Your reverse proxy is now securely streaming files behind Cloudflare!
+Your reverse proxy now streams files securely behind Cloudflare!
 
 </details>
 
@@ -543,11 +546,20 @@ Your reverse proxy is now securely streaming files behind Cloudflare!
 #### **Initial Setup**
 
 **Q: Why isn't my bot responding after setup?**
-A: This is usually a configuration issue. Please check the following:
+A: Usually a configuration issue. Check:
 
-1. **Verify `config.env`**: Make sure all essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) are filled in correctly.
-2. **Use `config.env` Only**: Do not edit `vars.py` or `config_sample.env`. The bot is designed to only read your settings from `config.env`.
-3. **Check Logs**: Review the console logs on your server or hosting platform (Koyeb, Render, Heroku) for any startup errors.
+1. **Verify `config.env`**: All essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) must be filled in.
+2. **Use environment settings**: Do not edit `vars.py` or `config_sample.env`. The bot reads environment variables and `config.env`; existing environment values win.
+3. **Check Logs**: Review console logs on your server or host (Koyeb, Render, Heroku) for startup errors.
+
+**Q: The bot reports a configuration problem and does not start. What now?**
+A: Fix all listed problems at once. On a running bot, `/doctor` reruns the checks.
+Run `python -m Thunder --check` to validate without serving; it excludes the public-URL probe.
+Normal starts show problems unless `--verbose` is set.
+
+Startup checks Telegram credentials, channel rights, database writes, owner ID,
+secondary tokens, shortener, and the public `/status` reply after the server binds.
+Unambiguous values are corrected and reported.
 
 **Q: What do I use for the `FQDN` variable?**
 A: It's the public URL or IP address of your bot.
@@ -557,52 +569,51 @@ A: It's the public URL or IP address of your bot.
 - **On a VPS**: Use your server's public IP address.
 
 **Q: Why are my links not working on a VPS?**
-A: For links to work on a VPS, the URL must include the port number (e.g., `http://YOUR_VPS_IP:8080`). Ensure that `NO_PORT` is set to `False` in `config.env` and that your server is configured to allow traffic through that port.
+A: The URL must include the port (e.g., `http://YOUR_VPS_IP:8080`). Set `NO_PORT=False` in `config.env` and allow traffic through that port on your server.
 
 #### **Common Errors**
 
 **Q: Why are my links showing a "Resource Not Found" error or not working?**
-A: This error means the bot can't access the file. Check these three things:
+A: The bot can't access the file. Check:
 
-1. **Invalid Token**: Your `BOT_TOKEN` or one of the `MULTI_TOKEN`s might be wrong. Double-check them with @BotFather.
+1. **Invalid Token**: Your `BOT_TOKEN` or one of the `MULTI_TOKEN`s might be wrong; verify with @BotFather.
 2. **Missing Admin Rights**: The bot and **all** your client accounts must be **administrators** in the `BIN_CHANNEL`.
-3. **File Deleted**: The link will break if the file was deleted from your `BIN_CHANNEL`.
+3. **File Deleted**: The link breaks if the file was deleted from `BIN_CHANNEL`.
 
 **Q: Why isn't video or audio playing correctly in my browser?**
 A: Your browser likely doesn't support the file's audio or video format (codec). This is a browser limitation, not a bot issue.
 
-- **Solution**: For perfect playback, copy the link and play it in a dedicated media player. Recommended players include **VLC Media Player**, **MX Player**, **PotPlayer**, **IINA**, and **MPV**.
+- **Solution**: Copy the link and play it in a dedicated media player: **VLC Media Player**, **MX Player**, **PotPlayer**, **IINA**, or **MPV**.
 
 **Q: Why does the bot sometimes become unresponsive?**
-A: This is likely a **Telegram Flood Wait**. To prevent spam, Telegram temporarily limits accounts that make too many requests. The bot is designed to handle this automatically by pausing and will resume on its own once the limit is lifted.
+A: Likely a **Telegram Flood Wait**: Telegram temporarily limits accounts making too many requests. The bot pauses automatically and resumes once the limit lifts.
 
 **Q: On shutdown I see `Task was destroyed but it is pending!` — is something broken?**
-A: No, if `✓ Database connection closed` was printed first. The library leaves its media
-sessions open on teardown; the bot still exits cleanly. Expect six after a download, none if
-nothing was streamed.
+A: Not if `✓ Database connection closed` printed first. The warning comes from
+library session workers closing during teardown.
 
 #### **Performance**
 
 **Q: How can I fix slow download and streaming speeds?**
-A: If your speeds are slow, here’s how to fix it:
+A: Try:
 
-- **Add More Clients**: This is the best solution. Add `MULTI_TOKEN`s to your `config.env` to distribute the workload and increase throughput.
-- **Use DC4 Accounts**: For top performance, use Telegram accounts from **Data Center 4 (DC4)**, as they often have the fastest connection. Use `/dc` to check an account's data center.
-- **Upgrade Your Server**: A server with a slow network will bottleneck your speeds. Consider upgrading your VPS plan.
+- **Add More Clients**: Best fix. Add `MULTI_TOKEN`s to distribute load and raise throughput.
+- **Use DC4 Accounts**: Accounts from **Data Center 4 (DC4)** often have the fastest connection; check with `/dc`.
+- **Upgrade Your Server**: A slow network bottlenecks speeds; consider a better VPS plan.
 
 #### **Bot Usage**
 
 **Q: How do I generate links for multiple files at once?**
-A: The `/link` command can process multiple files sent in sequence. To use it, **reply to the first file** of the series with the command and the total count.
+A: `/link` processes files sent in sequence. **Reply to the first file** with the command and total count.
 
-- **Example**: For a series of 5 files, reply to the very first file with `/link 5`.
+- **Example**: For 5 files, reply to the first with `/link 5`.
 
 **Q: Can I mix tokens from different accounts and data centers?**
-A: Yes. Mixing clients from different accounts and data centers (like DC1, DC4, and DC5) is a great way to improve bot performance and reliability.
+A: Yes. Mixing clients across accounts and data centers (DC1, DC4, DC5) improves performance and reliability.
 
 ### Contributing
 
-Contributions are welcome! Please follow these steps:
+Contributions welcome. To contribute:
 
 1. Fork the repository.
 2. Create a new feature branch (`git checkout -b feature/amazing-feature`).
@@ -612,8 +623,7 @@ Contributions are welcome! Please follow these steps:
    python -m pytest -q
    python -m ruff check .
    ```
-   The env var is needed on Python 3.15 (no `cp315` wheel). On Windows, where that
-   assignment is not valid, set it first:
+   Needed on Python 3.15 (no `cp315` wheel). On Windows, set it first:
    ```powershell
    $env:PYYAML_FORCE_LIBYAML = "0"; pip install -r requirements-dev.txt
    ```
@@ -621,12 +631,11 @@ Contributions are welcome! Please follow these steps:
 5. Push to the branch (`git push origin feature/amazing-feature`).
 6. Open a Pull Request.
 
-CI runs the suite on Linux and Windows, then builds the image only once those
-pass.
+CI runs the suite on Linux and Windows, then builds the image once both pass.
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for details.
+Licensed under [Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
@@ -637,7 +646,7 @@ Licensed under the [Apache License 2.0](LICENSE). See the `LICENSE` file for det
 
 ## ⚠️ Disclaimer
 
-This project is not affiliated with Telegram. Use it responsibly and in compliance with Telegram's Terms of Service and all applicable local regulations.
+Not affiliated with Telegram. Use responsibly and in compliance with Telegram's Terms of Service and applicable local regulations.
 
 ---
 

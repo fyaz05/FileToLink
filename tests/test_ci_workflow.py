@@ -1,17 +1,4 @@
-"""The CI workflow must keep the properties its gate depends on.
-
-Each check below stands for a failure this project has had or could have had:
-
-* a build job without ``needs: [test]`` publishes an image from a red main --
-  which is exactly what dockerize.yml did before the two files were merged;
-* a login step reachable from a pull request asks for ``secrets.DOCKER_TOKEN``
-  on fork PRs, which never receive secrets, so every fork PR fails;
-* an action referenced by a tag can be repointed at new code by whoever owns it;
-* with a floating requirements.txt and no weekly run, a bad upstream release is
-  found by a user rather than by CI.
-
-None of this is visible to a code test, so it is pinned here instead.
-"""
+"""CI publishing, smoke-test, and dependency invariants."""
 import re
 from pathlib import Path
 
@@ -22,8 +9,7 @@ WORKFLOWS = REPO / ".github" / "workflows"
 PINNED_ACTION = re.compile(r"^[^@\s]+@[0-9a-f]{40}$")
 PUSH_EVENT = "github.event_name == 'push'"
 
-# The interpreter the project ships, read from .python-version rather than written
-# twice, so a version bump has one place to change.
+# Read from .python-version so a version bump has one place to change.
 PRIMARY_PYTHON = (REPO / ".python-version").read_text(encoding="utf-8").strip()
 
 
@@ -46,11 +32,6 @@ def uses_of(doc, job, prefix):
 
 
 def test_no_other_workflow_can_publish_an_image():
-    """A second publisher is how main went red and shipped anyway.
-
-    Any workflow other than the gated one that builds or pushes an image is a
-    regression, whether it is dockerize.yml returning or a new one appearing.
-    """
     others = [entry for entry in WORKFLOWS.iterdir() if entry.name != "tests.yml"]
     publishers = [
         entry.name for entry in others
@@ -77,18 +58,11 @@ def test_nothing_publishes_before_the_tests_pass():
         push = step.get("with", {}).get("push")
         if push in (None, "false", False):
             continue
-        # A publish is either gated on the event directly, or the whole step is.
         gated = PUSH_EVENT in str(push) or PUSH_EVENT in str(step.get("if", ""))
         assert gated, f"a publish is not gated on a push event: {step.get('name')}"
 
 
 def test_a_publish_is_reached_only_after_the_image_has_been_run():
-    """Test, then publish -- the other order ships a broken image.
-
-    The step that publishes used to come before the smoke test, so a failure
-    would already have pushed the image tagged latest to Docker Hub. Docker's own
-    "test before push" pattern is build-and-load, test, then push.
-    """
     steps = workflow()["jobs"]["build"]["steps"]
 
     smoke = [i for i, step in enumerate(steps)
@@ -131,10 +105,6 @@ def test_the_suite_runs_on_both_operating_systems():
 
 
 def test_the_tested_python_is_the_one_the_project_ships():
-    """`.python-version`, the Dockerfile and CI must name one version.
-
-    Three files describe the interpreter and can drift apart silently.
-    """
     matrix = workflow()["jobs"]["test"]["strategy"]["matrix"]
     tested = {str(value) for value in matrix["python-version"]}
     tested |= {str(entry["python-version"]) for entry in matrix.get("include", [])}
@@ -144,8 +114,7 @@ def test_the_tested_python_is_the_one_the_project_ships():
     assert stated in tested, \
         f".python-version says {stated!r} but CI tests {sorted(tested)}"
 
-    # Parse FROM rather than reading line 0: a `# syntax=` directive would break
-    # that, and a substring test would accept a version named only in a comment.
+    # Parse FROM so directives/comments cannot satisfy the version check.
     base_images = re.findall(r"^FROM\s+(\S+)", (REPO / "Dockerfile").read_text(encoding="utf-8"),
                              flags=re.MULTILINE | re.IGNORECASE)
     assert base_images, "the Dockerfile has no FROM line"
@@ -158,8 +127,8 @@ def test_the_tested_python_is_the_one_the_project_ships():
 def test_a_weekly_run_guards_the_floating_dependencies():
     schedule = triggers(workflow()).get("schedule")
     assert schedule and schedule[0].get("cron"), (
-        "requirements.txt floats on purpose, so a weekly run against fresh "
-        "dependencies is the only thing that catches a bad release"
+        "requirements.txt floats, so a weekly run on fresh dependencies is the "
+        "only guard against a bad release"
     )
 
 
@@ -171,13 +140,7 @@ def test_duplicate_pull_request_runs_are_cancelled():
 
 
 def test_attestations_are_built_with_a_driver_that_supports_them():
-    """`provenance: mode=max` needs the containerd store on the docker driver.
-
-    The action passes --attest whenever the input is set, and the default docker
-    driver cannot write an image index to the classic image store, so the build
-    fails outright on a stock ubuntu runner. A container-driver builder supports
-    attestations regardless of the daemon's store.
-    """
+    """provenance: mode=max requires the containerd driver."""
     doc = workflow()
     steps = doc["jobs"]["build"]["steps"]
     names = [str(step.get("uses", "")) for step in steps]
@@ -193,11 +156,6 @@ def test_attestations_are_built_with_a_driver_that_supports_them():
 
 
 def test_the_built_image_is_actually_run():
-    """A build that succeeds is not proof the image starts.
-
-    A missing dependency or a broken import still produces a valid image, so the
-    published artifact is executed once before it is trusted.
-    """
     steps = workflow()["jobs"]["build"]["steps"]
     smoke = [step for step in steps if "docker run" in str(step.get("run", ""))]
     assert smoke, "the image is built and pushed without ever being started"
@@ -207,9 +165,7 @@ def test_the_built_image_is_actually_run():
     assert build, "the smoke test needs an image to run"
     with_ = build[0].get("with", {})
 
-    # Thunder.vars validates its configuration at import and raises without it,
-    # and the image ships no config.env (deliberately). The smoke test must
-    # therefore supply placeholders, or it fails on a perfectly good image.
+    # The image has no config.env; supply required placeholders.
     smoke_run = " ".join(str(step.get("run", "")) for step in smoke)
     smoke_env = {}
     for step in smoke:
@@ -217,13 +173,11 @@ def test_the_built_image_is_actually_run():
     supplied = " ".join(smoke_env.values()) + smoke_run
     for required in ("API_ID", "API_HASH", "BOT_TOKEN", "BIN_CHANNEL", "DATABASE_URL"):
         assert required in supplied, (
-            f"the smoke test imports the entry point but never sets {required}; "
-            "Thunder.vars raises without it and the step would fail on a good image"
+            f"smoke test never sets {required}; Thunder.vars raises without it, "
+            "failing a good image"
         )
 
-    # The image under test is the one the build step loaded, not one pulled back
-    # from a registry: the tested build and the publishing build are separate
-    # steps, and only the second one pushes.
+    # Test the locally loaded image, not a registry pull.
     assert with_.get("load") in (True, "true"), (
         "the image under test must be loaded into the daemon, or `docker run` "
         "finds nothing before any pull"
@@ -231,8 +185,7 @@ def test_the_built_image_is_actually_run():
     assert with_.get("push") in (None, "false", False), \
         "the build that gets tested must not also be the one that publishes"
 
-    # Any step output the smoke test interpolates must come from a step that
-    # declares the matching id, or it silently expands to nothing.
+    # Interpolated step outputs must declare matching IDs.
     id_values = {step.get("id") for step in steps}
     referenced = set()
     for step in smoke:
@@ -244,10 +197,6 @@ def test_the_built_image_is_actually_run():
 
 
 def test_every_advertised_command_has_a_handler():
-    """Guards the invariant test_plugin_registration.py checks end to end.
-
-    Cheap and structural: it fails at review time rather than after a boot.
-    """
     import ast
 
     commands_src = (REPO / "Thunder" / "utils" / "commands.py").read_text(encoding="utf-8")
@@ -277,14 +226,8 @@ def test_dependabot_only_tracks_actions():
 
 
 def test_the_archived_library_stays_out_of_the_requirements():
-    """The retired distributions must not return, and wzgram must stay named.
-
-    Nothing else in the tree mentions the old names, so a revert of this file
-    would be silent until a deployment broke.
-    """
     def package_name(entry: str) -> str:
-        # PEP 503: case-insensitive, and -/_/. are interchangeable, so `Pyrofork`
-        # must not slip past a check for `pyrofork`.
+        # PEP 503 normalizes case and -/_/. separators.
         raw = re.split(r"[<>=!~;\[ (]", entry.strip(), maxsplit=1)[0]
         return re.sub(r"[-_.]+", "-", raw).lower()
 
@@ -302,17 +245,11 @@ def test_the_archived_library_stays_out_of_the_requirements():
 
 
 def test_the_crypto_backend_is_checked_in_the_image():
-    """The smoke test must prove the crypto backend shipped.
-
-    The import list is the only place asserting the backend is present in the
-    built image, so a stale name there surfaces only when the image fails to start.
-    """
     steps = workflow()["jobs"]["build"]["steps"]
     runs = [step for step in steps if "docker run" in str(step.get("run", ""))]
     assert runs, "the image is never run, so nothing proves it starts"
 
-    # Read the parsed `run` values: a commented-out smoke test still matches a
-    # text search while executing nothing.
+    # Inspect executed run values, not commented-out text.
     commands = " ".join(str(step["run"]) for step in runs)
     imports = [line for line in commands.splitlines() if "import Thunder" in line]
     assert imports, "the smoke test no longer imports the app"
@@ -324,33 +261,72 @@ def test_the_crypto_backend_is_checked_in_the_image():
 
 
 def test_the_dev_install_is_documented_the_way_ci_does_it():
-    """The documented dev installs must match what CI does.
-
-    PyYAML has no cp315 wheel, so the documented install needs the env var or it
-    fails locally while CI passes. Either spelling counts: `VAR=0 cmd` on POSIX,
-    `$env:VAR = "0"; cmd` in PowerShell.
-    """
-    # Matches both `PYYAML_FORCE_LIBYAML=0` and `$env:PYYAML_FORCE_LIBYAML = "0"`.
+    """PyYAML has no cp315 wheel; dev installs need PYYAML_FORCE_LIBYAML=0."""
     sets_the_var = re.compile(r"PYYAML_FORCE_LIBYAML\s*=\s*[\"']?0")
 
     for relative in ("requirements-dev.txt", "AGENTS.md", "README.md"):
         text = (REPO / relative).read_text(encoding="utf-8")
         assert sets_the_var.search(text), (
-            f"{relative} no longer tells the reader to set PYYAML_FORCE_LIBYAML=0, "
-            "so a dev install on 3.15 fails where CI succeeds"
+            f"{relative} no longer documents PYYAML_FORCE_LIBYAML=0, so a 3.15 "
+            "dev install fails where CI succeeds"
         )
         commands = [line.strip() for line in text.splitlines()
                     if "install" in line and "requirements-dev" in line
                     and not line.lstrip().startswith("#")]
         for command in commands:
             assert sets_the_var.search(command), (
-                f"{relative} documents `{command}` without setting the env var, "
-                "which fails on 3.15; both the pip and uv forms need it"
+                f"{relative} documents `{command}` without the env var, which "
+                "fails on 3.15; pip and uv forms both need it"
             )
 
     install = next(step for step in workflow()["jobs"]["test"]["steps"]
                    if step.get("name") == "Install")
     assert (install.get("env") or {}).get("PYYAML_FORCE_LIBYAML") == "0", (
-        "the CI install step dropped the env var, so the job would fail on the "
-        "sdist build it is documented to avoid"
+        "the CI install step dropped the env var, so the job fails on the "
+        "sdist build it avoids"
+    )
+
+
+def test_the_image_can_be_told_to_check_without_starting():
+    """Only ENTRYPOINT lets `docker run image --check` reach thunder.sh."""
+    dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    assert re.search(r"^ENTRYPOINT\s+\[\s*\"bash\"\s*,\s*\"thunder\.sh\"\s*\]",
+                     dockerfile, re.MULTILINE), (
+        "no ENTRYPOINT, so `docker run image --check` cannot reach thunder.sh"
+    )
+    assert "CMD [\"bash\", \"thunder.sh\"]" not in dockerfile, (
+        "a CMD-only start discards command-line arguments; use ENTRYPOINT"
+    )
+
+
+def test_smoke_step_overrides_the_entrypoint_for_the_import_probe():
+    dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    if not re.search(r"^ENTRYPOINT\s+", dockerfile, re.MULTILINE | re.IGNORECASE):
+        return  # no entrypoint: trailing args already reach the probe
+
+    steps = workflow()["jobs"]["build"]["steps"]
+    runs = [str(step["run"]) for step in steps if "docker run" in str(step.get("run", ""))]
+    assert runs, "the image is never run, so there is no smoke test to check"
+    command = " ".join(" ".join(run.split()) for run in runs)
+
+    assert re.search(r"--entrypoint(?:=|\s+\S)", command), (
+        "the smoke step must override the ENTRYPOINT (e.g. --entrypoint python); "
+        "otherwise the import probe is never executed"
+    )
+
+    build = [step for step in steps
+             if str(step.get("uses", "")).startswith("docker/build-push-action")]
+    tags = str(build[0].get("with", {}).get("tags", "")).split()
+    assert tags, "the build step declares no tag; cannot locate the trailing args"
+    trailing = re.split(re.escape(tags[0]), command, maxsplit=1)[-1].strip()
+    assert not re.match(r"python[\d.]*\s+-c\b", trailing), (
+        "`python -c ...` after the image is appended to thunder.sh, not run by Python"
+    )
+
+
+def test_thunder_sh_forwards_its_arguments():
+    script = (REPO / "thunder.sh").read_text(encoding="utf-8")
+    assert '-m Thunder "$@"' in script, (
+        "thunder.sh must forward args, or --check is dropped and the bot starts "
+        "instead of validating"
     )
