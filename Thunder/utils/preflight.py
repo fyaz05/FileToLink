@@ -154,7 +154,7 @@ class Report:
         elif problems:
             lines.append("   ▶ Started with warnings. No action needed now.")
         else:
-            lines.append(f"   ✓ Configuration OK, {len(self.results)} checks passed.")
+            lines.append("   ✓ Configuration OK.")
 
         # Last, so a tail-follow log still shows it.
         parts = [f"{len(self.passed)} passed"]
@@ -335,7 +335,7 @@ async def storage_channel_problem(client, channel_id: int,
 
 
 async def probe_storage_channel(client, database, channel_id: int) -> Optional[str]:
-    """Return a definite watcher result; raise when access is inconclusive."""
+    """Probe channel access with a stored sample message."""
     message_id = await sample_message_id(database)
     return await storage_channel_problem(client, channel_id, message_id)
 

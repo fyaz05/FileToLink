@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Resolve Python relative to this script.
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
-# Check both venv layouts; verify PATH python actually runs.
 for candidate in "$HERE/.venv/bin/python" "$HERE/.venv/Scripts/python.exe" \
                  "$HERE/venv/bin/python" "$HERE/venv/Scripts/python.exe"; do
     if [ -x "$candidate" ]; then
@@ -25,5 +23,4 @@ cd "$HERE" || exit 1
 export PYTHONUNBUFFERED=1
 
 "$PYTHON" update.py || echo "update skipped or failed; starting with current code"
-# Forward --check.
 exec "$PYTHON" -m Thunder "$@"

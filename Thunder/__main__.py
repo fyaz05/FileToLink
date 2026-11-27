@@ -316,7 +316,6 @@ async def _connect_primary():
 
 
 async def check_configuration_only():
-    """Run checks without serving, so the public URL cannot be probed."""
     report = preflight.Report()
     exit_code = 1
 
@@ -379,8 +378,7 @@ async def _start_services(resources: dict):
         logger.error(
             f"   ✖ Failed to initialize Telegram Bot: {e}", exc_info=True
         )
-        print("   ✖ Telegram rejected the configuration or could not be reached.")
-        print(f"     {type(e).__name__}: {e}")
+        print(f"   ✖ Telegram initialization failed ({type(e).__name__}: {e}).")
         print("     Check BOT_TOKEN, API_ID and API_HASH, then start again.")
         raise SystemExit(1)
 
@@ -519,7 +517,6 @@ async def _start_services(resources: dict):
     print("╠═══════════════════════════════════════════════════════════╣")
     print(f"   ▶ Bot Name: {bot_info.first_name}")
     print(f"   ▶ Username: @{bot_info.username}")
-    # Shows a wrong FQDN before the first link goes out.
     print(f"   ▶ Links: {Var.URL}")
     print(f"   ▶ Server: {bind_address}:{Var.PORT}")
     print(f"   ▶ Startup Time: {elapsed_time:.2f} seconds")

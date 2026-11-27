@@ -73,9 +73,8 @@ def _is_bind_address(host: str) -> bool:
 def describe_missing_host(host: str) -> str:
     if _is_bind_address(host):
         return (
-            f"FQDN is unset or is the bind address ({host}), so links would "
-            "point at the machine itself. Set FQDN to the address users reach "
-            "this bot at, for example bot.example.com"
+            f"FQDN is unset or is a bind address ({host}); links would point at this "
+            "machine. Set it to the public address, e.g. bot.example.com"
         )
     return ""
 
@@ -84,8 +83,6 @@ def describe_ignored_port(fqdn_port: Optional[int], port: int, no_port: bool) ->
     if fqdn_port is None or fqdn_port == port:
         return ""
     if no_port:
-        return (f"FQDN has port {fqdn_port} and links use it; PORT is {port}. "
-                f"That is fine behind a proxy, but remove the port from FQDN if "
-                f"links should use no port.")
-    return (f"FQDN has port {fqdn_port} and links use it; PORT is {port}. "
-            f"Check that {fqdn_port} is the port users reach this bot on.")
+        return (f"FQDN port {fqdn_port} overrides PORT {port}; valid behind a proxy. "
+                "Remove it from FQDN to omit the port.")
+    return (f"FQDN port {fqdn_port} overrides PORT {port}; verify it is the public port.")

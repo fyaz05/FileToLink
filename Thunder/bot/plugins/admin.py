@@ -540,7 +540,7 @@ async def run_shell_command(client: Client, message: Message):
 
 @StreamBot.on_message(filters.command("doctor") & owner_filter)
 async def doctor_command(client: Client, message: Message):
-    """Re-run startup checks; the boot report may only exist in logs."""
+    """Re-run startup checks."""
     status_msg = await reply(message, text=MSG_DOCTOR_RUNNING)
     from Thunder.utils import preflight
 

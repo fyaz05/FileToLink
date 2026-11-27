@@ -39,12 +39,11 @@ class ChannelWatch:
             self._last_message = (
                 "⚠ I can no longer create links.\n\n"
                 f"{self.problem}\n\n"
-                "Links will fail until this is fixed. I will message you again "
-                "when access is restored."
+                "I will message you when access is restored."
             )
         else:
             self._last_message = (
-                "✅ Access restored. I can create links again.\n\n"
+                "✅ Access restored; I can create links again.\n\n"
                 f"(Was: {self.problem})"
             )
         return self._last_message

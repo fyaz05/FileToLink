@@ -311,9 +311,10 @@ cp config_sample.env config.env
 chmod 600 config.env
 nano config.env  # Edit your settings
 
-# Linux: grant the container's uid read access without making the file public
+# Linux: only when host uid/gid 10001 is dedicated (no rootless/userns-remap).
+# Otherwise use the environment-file alternative below.
 sudo setfacl -m u:10001:r config.env
-# If ACLs are unavailable, use the container's gid instead:
+# If ACLs are unavailable, use the container's dedicated gid instead:
 # sudo chgrp 10001 config.env
 # chmod 640 config.env
 
@@ -325,10 +326,9 @@ docker run -d --stop-timeout 60 --name thunder -p 8080:8080 \
 
 (PowerShell: `-v "${PWD}\config.env:/app/config.env:ro"`.)
 
-The container runs as uid/gid `10001`. Keep `config.env` private from other local
-accounts; avoid `chmod 644` on shared hosts. The `--stop-timeout 60` flag lets the
-web server and in-flight request executor each drain for up to 25 seconds
-(`docker stop` defaults to 10s).
+Keep `config.env` private from other local accounts; avoid `chmod 644` on shared
+hosts. The `--stop-timeout 60` flag lets the web server and in-flight request
+executor each drain for up to 25 seconds (`docker stop` defaults to 10s).
 
 Runs as unprivileged uid `10001` with no build toolchain. `.dockerignore` excludes
 env files, so `config.env` is not baked in and must be supplied at runtime.
@@ -344,7 +344,7 @@ with `python-dotenv`:
 env_file=$(mktemp /tmp/thunder-docker.XXXXXX)
 trap 'rm -f "$env_file"' EXIT
 python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > "$env_file"
-docker run -d --name thunder -p 8080:8080 --env-file "$env_file" thunder
+docker run -d --stop-timeout 60 --name thunder -p 8080:8080 --env-file "$env_file" thunder
 rm -f "$env_file"
 trap - EXIT
 ```
@@ -549,7 +549,7 @@ Your reverse proxy now streams files securely behind Cloudflare!
 A: Usually a configuration issue. Check:
 
 1. **Verify `config.env`**: All essential variables (`API_ID`, `API_HASH`, `BOT_TOKEN`, `BIN_CHANNEL`, `DATABASE_URL`) must be filled in.
-2. **Use environment settings**: Do not edit `vars.py` or `config_sample.env`. The bot reads environment variables directly and can also load them from `config.env`; existing environment values take precedence.
+2. **Use environment settings**: Do not edit `vars.py` or `config_sample.env`. The bot reads environment variables and `config.env`; existing environment values win.
 3. **Check Logs**: Review console logs on your server or host (Koyeb, Render, Heroku) for startup errors.
 
 **Q: The bot reports a configuration problem and does not start. What now?**
@@ -589,10 +589,8 @@ A: Your browser likely doesn't support the file's audio or video format (codec).
 A: Likely a **Telegram Flood Wait**: Telegram temporarily limits accounts making too many requests. The bot pauses automatically and resumes once the limit lifts.
 
 **Q: On shutdown I see `Task was destroyed but it is pending!` — is something broken?**
-A: Not if `✓ Database connection closed` printed first. Each session has a
-`recv_worker` and a `ping_worker`, which the library closes on stop. While
-running, expect one of each per connected session — twelve with eight clients
-where six had connected.
+A: Not if `✓ Database connection closed` printed first. The warning comes from
+library session workers closing during teardown.
 
 #### **Performance**
 

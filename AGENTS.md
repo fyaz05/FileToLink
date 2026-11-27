@@ -52,7 +52,7 @@ Independent checks must stay concurrent. Only the channel check waits for a stor
 
 Runs as uid `10001` without a toolchain. `.dockerignore` excludes env files and tests.
 
-- Mounted `config.env` must be readable by uid/gid `10001` without being world-readable. Prefer `chmod 600 config.env` followed by `setfacl -m u:10001:r config.env`, or `chgrp 10001 config.env` with `chmod 640`.
+- Mounted `config.env` must be readable by dedicated uid/gid `10001`, never world-readable. Use `chmod 600` plus `setfacl -m u:10001:r`, or `chgrp 10001` plus `chmod 640`. With shared IDs or rootless/`userns-remap`, use the environment-file alternative or mapped host identity.
 - Do not use `--env-file` with inline comments; mount `config.env`.
 - Self-update is skipped because the image has no `git`.
 

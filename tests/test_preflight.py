@@ -517,7 +517,7 @@ def test_success_is_one_line():
         report.add(preflight.OK, "checked")
     rendered = report.render()
     assert rendered.count("✓") == 1, "a wall of ticks hides the one failure"
-    assert "14 checks passed" in rendered
+    assert "14 checks: 14 passed" in rendered
 
 
 def test_a_failure_block_never_exceeds_five_lines():
