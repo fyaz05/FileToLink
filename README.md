@@ -306,44 +306,29 @@ Covers setup from prerequisites to production.
 git clone https://github.com/fyaz05/FileToLink.git
 cd FileToLink
 
-# 2. Configure
+# 2. Configure privately before editing credentials
 cp config_sample.env config.env
+chmod 600 config.env
 nano config.env  # Edit your settings
+
+# Linux: grant the container's uid read access without making the file public
+sudo setfacl -m u:10001:r config.env
+# If ACLs are unavailable, use the container's gid instead:
+# sudo chgrp 10001 config.env
+# chmod 640 config.env
 
 # 3. Build and run (the config is mounted — it is not baked into the image)
 docker build -t thunder .
-docker run -d --name thunder -p 8080:8080 \
+docker run -d --stop-timeout 60 --name thunder -p 8080:8080 \
   -v "$PWD/config.env:/app/config.env:ro" thunder
 ```
 
 (PowerShell: `-v "${PWD}\config.env:/app/config.env:ro"`.)
 
-The container runs as uid `10001`, so `config.env` must be readable by that UID
-without exposing the bot token and database credentials to every local account.
-On a Linux host, prefer an ACL:
-
-```bash
-chmod 600 config.env
-sudo setfacl -m u:10001:r config.env
-```
-
-If ACLs are unavailable, set the file's group to the container's GID and use
-mode `640`:
-
-```bash
-sudo chgrp 10001 config.env
-chmod 640 config.env
-```
-
-Avoid `chmod 644` on shared hosts.
-
-`--stop-timeout 60` is optional: it lets the web server and in-flight request
-executor each drain for up to 25 seconds (`docker stop` defaults to 10s):
-
-```bash
-docker run -d --stop-timeout 60 --name thunder -p 8080:8080 \
-  -v "$PWD/config.env:/app/config.env:ro" thunder
-```
+The container runs as uid/gid `10001`. Keep `config.env` private from other local
+accounts; avoid `chmod 644` on shared hosts. The `--stop-timeout 60` flag lets the
+web server and in-flight request executor each drain for up to 25 seconds
+(`docker stop` defaults to 10s).
 
 Runs as unprivileged uid `10001` with no build toolchain. `.dockerignore` excludes
 env files, so `config.env` is not baked in and must be supplied at runtime.
@@ -356,9 +341,12 @@ env files, so `config.env` is not baked in and must be supplied at runtime.
 with `python-dotenv`:
 
 ```bash
-(umask 077; python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > /tmp/thunder-docker.env)
-docker run -d --name thunder -p 8080:8080 --env-file /tmp/thunder-docker.env thunder
-rm -f /tmp/thunder-docker.env
+env_file=$(mktemp /tmp/thunder-docker.XXXXXX)
+trap 'rm -f "$env_file"' EXIT
+python3 -c "from dotenv import dotenv_values as d; [print(f'{k}={v}') for k, v in d('config.env').items()]" > "$env_file"
+docker run -d --name thunder -p 8080:8080 --env-file "$env_file" thunder
+rm -f "$env_file"
+trap - EXIT
 ```
 
 Needs `python-dotenv` locally (`pip install python-dotenv`); mounting `config.env`

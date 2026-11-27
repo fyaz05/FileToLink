@@ -11,6 +11,9 @@ import pytest
 from Thunder.utils.rate_limiter import QueueFullError, RateLimiter, handle_rate_limited_request
 from Thunder.vars import Var
 
+NON_OWNER_ID = Var.OWNER_ID + 1
+OTHER_NON_OWNER_ID = Var.OWNER_ID + 2
+
 
 @pytest.fixture
 def limiter(monkeypatch):
@@ -47,7 +50,7 @@ class TestOwnershipAndPriority:
         monkeypatch.setattr(
             "Thunder.utils.rate_limiter.db.authorized_users_col.find_one",
             fake_find_one)
-        assert await limiter.get_user_priority(999) == "authorized"
+        assert await limiter.get_user_priority(NON_OWNER_ID) == "authorized"
 
     async def test_regular_user_priority(self, limiter, monkeypatch):
         async def fake_find_one(query):
@@ -56,7 +59,7 @@ class TestOwnershipAndPriority:
         monkeypatch.setattr(
             "Thunder.utils.rate_limiter.db.authorized_users_col.find_one",
             fake_find_one)
-        assert await limiter.get_user_priority(999) == "regular"
+        assert await limiter.get_user_priority(NON_OWNER_ID) == "regular"
 
 
 class TestCheckLimits:
@@ -67,30 +70,30 @@ class TestCheckLimits:
     async def test_disabled_limiter_always_allows(self, limiter):
         limiter.enabled = False
         for _ in range(10):
-            assert await limiter.check_limits(999) is True
+            assert await limiter.check_limits(NON_OWNER_ID) is True
 
     async def test_allows_up_to_the_period_limit(self, limiter):
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is False
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is False
 
     async def test_window_expiry_frees_capacity(self, limiter, monkeypatch):
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is False
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is False
 
         import Thunder.utils.rate_limiter as rl
         real_time = rl.time.time
         monkeypatch.setattr(rl.time, "time", lambda: real_time() + 61)
-        assert await limiter.check_limits(999) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is True
 
     async def test_record_false_does_not_consume_quota(self, limiter):
         for _ in range(5):
-            assert await limiter.check_limits(999, record=False) is True
+            assert await limiter.check_limits(NON_OWNER_ID, record=False) is True
         # Nothing was recorded, so a full allowance is still available.
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is True
-        assert await limiter.check_limits(999) is False
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is True
+        assert await limiter.check_limits(NON_OWNER_ID) is False
 
     async def test_global_limit_applies_across_users(self, limiter):
         limiter.global_rate_limit_enabled = True
@@ -114,7 +117,7 @@ class TestQueueing:
         async def work():
             called.append(True)
 
-        await limiter.add_to_queue(work, 999)
+        await limiter.add_to_queue(work, NON_OWNER_ID)
         assert called == [True]
 
     async def test_owner_and_regular_land_in_separate_queues(self, limiter, monkeypatch):
@@ -129,7 +132,7 @@ class TestQueueing:
             pass
 
         await limiter.add_to_queue(work, Var.OWNER_ID)
-        await limiter.add_to_queue(work, 999)
+        await limiter.add_to_queue(work, NON_OWNER_ID)
         assert len(limiter.request_queue) == 2
         assert len(limiter.priority_queue) == 0
 
@@ -144,7 +147,7 @@ class TestQueueing:
         async def work():
             pass
 
-        await limiter.add_to_queue(work, 999)
+        await limiter.add_to_queue(work, NON_OWNER_ID)
         assert len(limiter.priority_queue) == 1
         assert len(limiter.request_queue) == 0
 
@@ -160,9 +163,9 @@ class TestQueueing:
             pass
 
         for _ in range(limiter.max_queue_size):
-            await limiter.add_to_queue(work, 999)
+            await limiter.add_to_queue(work, NON_OWNER_ID)
         with pytest.raises(QueueFullError):
-            await limiter.add_to_queue(work, 999)
+            await limiter.add_to_queue(work, NON_OWNER_ID)
 
     async def test_shutdown_clears_queues(self, limiter, monkeypatch):
         async def fake_find_one(query):
@@ -175,7 +178,7 @@ class TestQueueing:
         async def work():
             pass
 
-        await limiter.add_to_queue(work, 999)
+        await limiter.add_to_queue(work, NON_OWNER_ID)
         await limiter.shutdown()
         assert len(limiter.request_queue) == 0
         assert len(limiter.priority_queue) == 0
@@ -194,7 +197,7 @@ class TestQueueing:
             pass
 
         monkeypatch.setattr(limiter, "get_user_priority", priority)
-        task = asyncio.create_task(limiter.add_to_queue(work, 999))
+        task = asyncio.create_task(limiter.add_to_queue(work, NON_OWNER_ID))
         await started.wait()
         await limiter.shutdown()
         release.set()
@@ -248,7 +251,7 @@ class TestQueueing:
             pass
 
         message = SimpleNamespace(
-            from_user=SimpleNamespace(id=999),
+            from_user=SimpleNamespace(id=NON_OWNER_ID),
             document=None,
         )
         monkeypatch.setattr(module, "rate_limiter", limiter)
@@ -310,12 +313,12 @@ class TestExecutor:
         monkeypatch.setattr(
             "Thunder.utils.rate_limiter.db.authorized_users_col.find_one",
             no_auth)
-        await limiter.add_to_queue(regular, 1001)
+        await limiter.add_to_queue(regular, NON_OWNER_ID)
 
         monkeypatch.setattr(
             "Thunder.utils.rate_limiter.db.authorized_users_col.find_one",
             fake_find_one)
-        await limiter.add_to_queue(priority, 1002)
+        await limiter.add_to_queue(priority, OTHER_NON_OWNER_ID)
 
         task = asyncio.create_task(limiter.request_executor())
         for _ in range(80):
